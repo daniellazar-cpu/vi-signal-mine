@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from vsm.errors import NoSuchRun
-from vsm.runs.model import Run
+from vsm.runs.model import RUN_MODES, RUN_STATUSES, Run
 
 __all__ = ["RunStore"]
 
@@ -77,6 +77,8 @@ class RunStore:
         return Run(**data)
 
     def start(self, topic_id: str, mode: str, parent_run_id: str | None = None) -> Run:
+        if mode not in RUN_MODES:
+            raise KeyError(f"unknown run mode: {mode!r}")
         run = Run(
             run_id=f"{mode[:3]}-{uuid.uuid4().hex[:10]}",
             topic_id=topic_id,
@@ -98,6 +100,8 @@ class RunStore:
         return run
 
     def finish(self, run_id: str, status: str, cost_usd: float, note: str = "") -> Run:
+        if status not in RUN_STATUSES:
+            raise KeyError(f"unknown run status: {status!r}")
         with self._conn() as c:
             c.execute(
                 "UPDATE runs SET status=?, finished_at=?, cost_usd=?, note=? "

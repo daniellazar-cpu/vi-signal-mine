@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from vsm.runs.model import RUN_MODES, Run, RunMode, RunStatus
+from vsm.runs.model import RUN_MODES, RUN_STATUSES, Run, RunMode, RunStatus
 from vsm.runs.store import RunStore
 
-__all__ = ["Run", "RunMode", "RunStatus", "RUN_MODES", "RunStore"]
+__all__ = ["Run", "RunMode", "RunStatus", "RUN_MODES", "RUN_STATUSES", "RunStore"]

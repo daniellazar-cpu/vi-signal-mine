@@ -11,12 +11,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-__all__ = ["Run", "RunMode", "RunStatus", "RUN_MODES"]
+__all__ = ["Run", "RunMode", "RunStatus", "RUN_MODES", "RUN_STATUSES"]
 
 RunMode = Literal["mine", "insight", "report"]
 RunStatus = Literal["pending", "running", "complete", "failed", "stopped_on_budget"]
 
 RUN_MODES: tuple[str, ...] = ("mine", "insight", "report")
+RUN_STATUSES: tuple[str, ...] = (
+    "pending",
+    "running",
+    "complete",
+    "failed",
+    "stopped_on_budget",
+)
 
 
 @dataclass(frozen=True)

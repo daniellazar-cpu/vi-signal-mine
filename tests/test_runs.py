@@ -64,6 +64,45 @@ def test_artifact_name_cannot_escape_the_run_directory(store):
         store.write_artifact(r.run_id, "../../etc/passwd", {})
 
 
+def test_artifact_write_rejects_a_symlink_escaping_the_run_directory(store, tmp_path):
+    """``_artifact_path`` calls ``.resolve()`` on both the run directory and
+    the candidate path before comparing parents, so a symlink placed inside
+    the run directory that points outside it cannot be used to escape
+    either — the resolved parent simply stops matching. Pinned here rather
+    than left as an inferred property of ``.resolve()``."""
+    r = store.start("top-1", "mine")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    target = outside / "passwd.json"
+    target.write_text("secret", encoding="utf-8")
+
+    link = store.artifacts_dir(r.run_id) / "escape.json"
+    link.symlink_to(target)
+
+    with pytest.raises(ValueError):
+        store.write_artifact(r.run_id, "escape.json", {"pwned": True})
+
+    # The symlink's target must be untouched.
+    assert target.read_text(encoding="utf-8") == "secret"
+
+
+def test_start_rejects_an_unknown_mode(store):
+    """A typo'd mode must raise, not persist — ``for_topic(mode=...)`` and
+    ``snapshots()`` both filter on this column, so a bad value would not
+    error, it would just make the run invisible to every downstream reader."""
+    with pytest.raises(KeyError, match="unknown run mode"):
+        store.start("top-1", "miner")
+
+
+def test_finish_rejects_an_unknown_status(store):
+    """``snapshots()`` filters on ``status == 'complete'``: a misspelled
+    status does not fail loudly, it silently drops the run from every future
+    delta pass. Reject it at the write instead."""
+    r = store.start("top-1", "mine")
+    with pytest.raises(KeyError, match="unknown run status"):
+        store.finish(r.run_id, "complet", cost_usd=0.0)
+
+
 def test_snapshot_order_survives_identical_timestamps(store):
     """Ordering is by the monotonic ``seq`` column, not by wall-clock time.
 

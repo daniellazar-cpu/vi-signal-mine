@@ -2,40 +2,71 @@
 
 This suite is the actual deliverable of spec D16, not ``vsm/storage.py``'s
 ``Protocol`` declarations. It is parametrised over a *store factory* — a
-callable ``(tmp_path) -> (TopicStoreLike, RunStoreLike)`` — rather than over
-concrete store instances, for one reason: a factory can be called twice
-against the same ``tmp_path`` to build two independent store objects backed
-by the same underlying storage, which is what the cross-instance-persistence
-case needs. A fixture built from an already-constructed pair could not do
-that.
+callable ``(tmp_path) -> (TopicStoreLike, RunStoreLike, scramble_started_at)``
+— rather than over concrete store instances, for two reasons:
+
+1. A factory can be called twice against the same ``tmp_path`` to build two
+   independent store objects backed by the same underlying storage, which is
+   what the cross-instance-persistence cases need. A fixture built from an
+   already-constructed pair could not do that.
+2. The ``snapshots()`` ordering guarantee — completed MINE runs, oldest
+   first, by a monotonic sequence and never by comparing timestamps — has to
+   be provable against *any* backend, not just SQLite's ``seq`` column. To
+   prove it, a test needs to force wall-clock order to disagree with
+   creation order after the fact. Reaching for ``sqlite3`` directly to do
+   that would make the case SQLite-only and defeat the point of a shared
+   suite, so the factory instead hands back a third element: a callable
+   ``scramble_started_at(run_id, started_at_iso)`` that rewrites that one
+   field through whatever means the backend has (a raw ``UPDATE`` for
+   SQLite, the equivalent for Postgres) without going through the public
+   store API — there is deliberately no public "rewrite a run" method.
 
 Task 24 registers its Postgres-plus-blob backend by appending a
 ``pytest.param(its_factory, id="postgres")`` to ``STORE_FACTORIES`` below.
 Every case in this file — round trips, unknown-id errors, ``snapshots()``
-ordering, the artifact traversal guard, cross-instance persistence — then
-runs against that backend unchanged. A factory registered this way must
-satisfy one contract of its own: called twice with the *same* ``tmp_path``,
-it must return two independent store objects that see each other's writes
-(e.g. by deriving a connection string or blob root deterministically from
-``tmp_path`), not two objects backed by fresh, isolated storage.
+ordering, the mode/status guards, the artifact traversal guard,
+cross-instance persistence — then runs against that backend unchanged. A
+factory registered this way must satisfy one contract of its own: called
+twice with the *same* ``tmp_path``, it must return two independent store
+objects that see each other's writes (e.g. by deriving a connection string
+or blob root deterministically from ``tmp_path``), not two objects backed by
+fresh, isolated storage.
 """
 
 from __future__ import annotations
 
+import sqlite3
+from contextlib import closing
 from pathlib import Path
+from typing import Callable
 
 import pytest
 
+from vsm.config import Settings
 from vsm.errors import NoSuchRun, NoSuchTopic
 from vsm.runs.store import RunStore
-from vsm.storage import RunStoreLike, TopicStoreLike
+from vsm.storage import RunStoreLike, TopicStoreLike, open_stores
 from vsm.topics.store import TopicStore
 
+ScrambleStartedAt = Callable[[str, str], None]
 
-def _sqlite_stores(tmp_path: Path) -> tuple[TopicStoreLike, RunStoreLike]:
+
+def _sqlite_stores(
+    tmp_path: Path,
+) -> tuple[TopicStoreLike, RunStoreLike, ScrambleStartedAt]:
     db_path = tmp_path / "vsm.db"
     var_dir = tmp_path / "var"
-    return TopicStore(db_path), RunStore(db_path, var_dir)
+    topic_store = TopicStore(db_path)
+    run_store = RunStore(db_path, var_dir)
+
+    def _scramble_started_at(run_id: str, started_at: str) -> None:
+        with closing(sqlite3.connect(db_path)) as conn:
+            conn.execute(
+                "UPDATE runs SET started_at=? WHERE run_id=?", (started_at, run_id)
+            )
+            conn.commit()
+
+    return topic_store, run_store, _scramble_started_at
 
 
 # Task 24 appends its Postgres+blob factory here, e.g.:
@@ -61,6 +92,11 @@ def topic_store(stores) -> TopicStoreLike:
 @pytest.fixture
 def run_store(stores) -> RunStoreLike:
     return stores[1]
+
+
+@pytest.fixture
+def scramble_started_at(stores) -> ScrambleStartedAt:
+    return stores[2]
 
 
 # --- Protocol shape -----------------------------------------------------
@@ -103,6 +139,25 @@ def test_run_get_unknown_raises(run_store):
         run_store.get("nope")
 
 
+# --- Runs: mode/status are guarded, not persisted verbatim ----------------
+#
+# ``snapshots()`` filters on ``mode == "mine"`` and ``status == "complete"``.
+# A misspelled value in either column does not raise on its own — it just
+# makes the run permanently invisible to every downstream delta pass. Any
+# backend has to refuse the write instead of persisting a typo.
+
+
+def test_start_rejects_an_unknown_mode(run_store):
+    with pytest.raises(KeyError):
+        run_store.start("top-1", "miner")
+
+
+def test_finish_rejects_an_unknown_status(run_store):
+    r = run_store.start("top-1", "mine")
+    with pytest.raises(KeyError):
+        run_store.finish(r.run_id, "complet", cost_usd=0.0)
+
+
 # --- snapshots(): ordering and filtering -----------------------------------
 
 
@@ -123,6 +178,32 @@ def test_snapshots_are_completed_mine_runs_oldest_first(run_store):
     assert still_running.run_id not in ids
     assert other_mode.run_id not in ids
     assert other_topic.run_id not in ids
+
+
+def test_snapshots_order_survives_scrambled_timestamps(run_store, scramble_started_at):
+    """Ordering must come from a monotonic sequence, not wall-clock time, on
+    *any* backend — SQLite's ``seq`` column and Postgres's ``BIGSERIAL`` are
+    different mechanisms that both have to satisfy this.
+
+    Five runs created back-to-back would likely land in creation order even
+    under a broken, timestamp-based ``snapshots()``, because clocks advance —
+    that would pass this case for the wrong reason. Instead we create them,
+    then rewrite ``started_at`` through the factory's own hook so timestamp
+    order is the exact *reverse* of creation order, and assert the store
+    still returns them in creation order. Only an implementation ordering by
+    a monotonic counter survives this.
+    """
+    ids = []
+    for _ in range(5):
+        r = run_store.start("top-1", "mine")
+        run_store.finish(r.run_id, "complete", cost_usd=0.0)
+        ids.append(r.run_id)
+
+    for i, run_id in enumerate(ids):
+        reversed_ts = f"2000-01-01T00:00:{len(ids) - i:02d}+00:00"
+        scramble_started_at(run_id, reversed_ts)
+
+    assert [r.run_id for r in run_store.snapshots("top-1")] == ids
 
 
 # --- Artifacts: write/read round-trip, and the traversal guard ------------
@@ -154,28 +235,47 @@ def test_artifact_name_cannot_escape_the_run_directory(run_store):
 
 
 def test_topic_persists_across_store_instances(store_factory, tmp_path):
-    topic_store_1, _ = store_factory(tmp_path)
+    topic_store_1, _, _ = store_factory(tmp_path)
     t = topic_store_1.create(name="persistent", therapeutic_area="gi", spend_band="probe")
 
-    topic_store_2, _ = store_factory(tmp_path)
+    topic_store_2, _, _ = store_factory(tmp_path)
     assert topic_store_2.get(t.topic_id) == t
 
 
 def test_run_persists_across_store_instances(store_factory, tmp_path):
-    _, run_store_1 = store_factory(tmp_path)
+    _, run_store_1, _ = store_factory(tmp_path)
     r = run_store_1.start("top-1", "mine")
     run_store_1.finish(r.run_id, "complete", cost_usd=0.01, note="done")
 
-    _, run_store_2 = store_factory(tmp_path)
+    _, run_store_2, _ = store_factory(tmp_path)
     reloaded = run_store_2.get(r.run_id)
     assert reloaded.status == "complete"
     assert reloaded.cost_usd == pytest.approx(0.01)
 
 
 def test_artifact_persists_across_store_instances(store_factory, tmp_path):
-    _, run_store_1 = store_factory(tmp_path)
+    _, run_store_1, _ = store_factory(tmp_path)
     r = run_store_1.start("top-1", "mine")
     run_store_1.write_artifact(r.run_id, "signals.json", {"ok": True})
 
-    _, run_store_2 = store_factory(tmp_path)
+    _, run_store_2, _ = store_factory(tmp_path)
     assert run_store_2.read_artifact(r.run_id, "signals.json") == {"ok": True}
+
+
+# --- open_stores(): the seam Task 24 replaces ------------------------------
+
+
+def test_open_stores_returns_a_working_sqlite_pair(tmp_path):
+    """Two lines of production code, but the exact seam a later backend
+    swaps: this pins that ``open_stores`` wires a ``Settings`` into a pair
+    that actually works together (both pointed at the same ``var_dir``),
+    not just that each store class works in isolation."""
+    settings = Settings(var_dir=tmp_path)
+
+    topic_store, run_store = open_stores(settings)
+
+    t = topic_store.create(name="A", therapeutic_area="gi", spend_band="probe")
+    assert topic_store.get(t.topic_id) == t
+
+    r = run_store.start(t.topic_id, "mine")
+    assert run_store.get(r.run_id).status == "running"
