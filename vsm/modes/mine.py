@@ -95,6 +95,15 @@ def run_mine(
     run = store.start(topic.topic_id, "mine")
     cap = CostCap(cap_usd if cap_usd is not None else 5.0)
 
+    # Read the model's cumulative spend directly as `client.spend.usd` — never
+    # through `getattr(client, "spend", default)`. A zero produced by a
+    # renamed attribute is indistinguishable from a run that genuinely spent
+    # nothing. But `client.spend` is the client's *lifetime* ledger, not this
+    # run's — one `AnthropicClient` shared across two MINEs, or an INSIGHT
+    # run after a MINE, would otherwise bill the earlier call's cost to this
+    # run's cap and report it as this run's spend. Snapshot before the call
+    # and charge only the delta.
+    spend_before_lexicon = client.spend.usd if client is not None else 0.0
     clusters = build_clusters(topic, client)
 
     # MiningConfig is CONSTRUCTOR state on LiveSignalMining, not a run()
@@ -103,12 +112,6 @@ def run_mine(
     # `run_mine` only decides the shape, so a test can inject a fake.
     stopped, reason, outcome = False, "", None
 
-    # Read the model's cumulative spend directly as `client.spend.usd` — never
-    # through `getattr(client, "spend", default)`. A zero produced by a
-    # renamed attribute is indistinguishable from a run that genuinely spent
-    # nothing, and this is the number an operator trusts to know what they
-    # spent. `client is None` (the offline case) is the only zero to accept.
-    #
     # There is a genuine chicken-and-egg here: the estimate needs a cluster
     # count, and the cluster count comes from the lexicon call, so that call
     # has already happened — and already been billed — by the time we get
@@ -117,7 +120,9 @@ def run_mine(
     # lexicon spend to the run's cap immediately, before the estimate check,
     # so the cap governs the run's whole spend and not only the part that
     # comes after the lexicon call.
-    lexicon_usd = client.spend.usd if client is not None else 0.0
+    lexicon_usd = (
+        round(client.spend.usd - spend_before_lexicon, 6) if client is not None else 0.0
+    )
     if client is not None:
         try:
             cap.spend(lexicon_usd)
@@ -134,21 +139,41 @@ def run_mine(
         except BudgetExceeded as exc:
             stopped, reason = True, str(exc)
 
-    if not stopped and miner is not None:
-        # `campaign_id` is the vendored miner's name for what this fork calls a
-        # topic. They are the same value; both land on the row (see below).
-        outcome = miner.run(campaign_id=topic.topic_id, clusters=clusters)
-        try:
-            cap.spend(max(0.0, outcome.cost_usd - estimate.total_usd))
-        except BudgetExceeded as exc:
-            # The sweep has already run and already spent real money — a
-            # breach caught here is the cap catching up to a bill that came
-            # in higher than estimated, not a purchase we can still decline.
-            # The rows already collected are kept (below): "partial rows, a
-            # recorded deferral, no overspend, no exception thrown at the
-            # pipeline" is the vendored miner's own contract for an internal
-            # stop, and this is that same contract applied one level up.
-            stopped, reason = True, str(exc)
+    # Real, but out of scope for this guard to fix: whoever wires a live
+    # miner is responsible for actually constructing it with
+    # `config_for(band)`. All this can do is notice, from the outside, when
+    # it looks like nobody did — never silently, and never by refusing to run.
+    wiring_note: str | None = None
+    if miner is not None:
+        miner_cfg = getattr(miner, "config", None)
+        if miner_cfg is not None and miner_cfg != config_for(band):
+            wiring_note = (
+                "the injected miner's config does not match config_for(band) for "
+                f"the {band.name!r} band — it may not be wired to this topic's spend band"
+            )
+
+    if not stopped:
+        if miner is not None:
+            # `campaign_id` is the vendored miner's name for what this fork
+            # calls a topic. They are the same value; both land on the row
+            # (see below).
+            outcome = miner.run(campaign_id=topic.topic_id, clusters=clusters)
+            try:
+                cap.spend(max(0.0, outcome.cost_usd - estimate.total_usd))
+            except BudgetExceeded as exc:
+                # The sweep has already run and already spent real money — a
+                # breach caught here is the cap catching up to a bill that
+                # came in higher than estimated, not a purchase we can still
+                # decline. The rows already collected are kept (below):
+                # "partial rows, a recorded deferral, no overspend, no
+                # exception thrown at the pipeline" is the vendored miner's
+                # own contract for an internal stop, and this is that same
+                # contract applied one level up.
+                stopped, reason = True, str(exc)
+        else:
+            # Absent data, stated: zero rows and zero cost because nothing
+            # was ever asked to sweep, not because a sweep came back empty.
+            reason = "no miner supplied — nothing was swept"
 
     rows: list[dict[str, Any]] = []
     if outcome is not None:
@@ -168,7 +193,12 @@ def run_mine(
         run.run_id,
         "provenance.json",
         {
-            "provider": getattr(outcome, "provenance", {}) if outcome else {},
+            # These are two different things: `provider` is the vendor name
+            # (`outcome.provider`, e.g. "brightdata"), `provenance` is the
+            # detail dict. Collapsing them into one "provider" key holding the
+            # dict — the previous shape here — silently dropped the string.
+            "provider": outcome.provider if outcome is not None else None,
+            "provenance": outcome.provenance if outcome is not None else {},
             "queries_run": list(getattr(outcome, "queries_run", [])) if outcome else [],
             "calls": list(getattr(outcome, "calls", [])) if outcome else [],
             "denied": list(getattr(outcome, "denied", [])) if outcome else [],
@@ -177,17 +207,32 @@ def run_mine(
     )
     attempted = list(getattr(outcome, "venues_attempted", [])) if outcome else []
     collected = list(getattr(outcome, "venues_collected", [])) if outcome else []
+    restricted = list(getattr(outcome, "venues_restricted", [])) if outcome else []
+    notes = list(outcome.notes) if outcome is not None else []
+    if wiring_note is not None:
+        notes = [*notes, wiring_note]
     store.write_artifact(
         run.run_id,
         "coverage.json",
         {
             "venues_attempted": attempted,
             "venues_collected": collected,
-            # Named explicitly: a venue that answered with nothing is a finding,
-            # and a silent filter is indistinguishable from finding nothing.
-            "venues_empty": sorted(set(attempted) - set(collected)),
-            "venues_restricted": list(getattr(outcome, "venues_restricted", [])) if outcome else [],
-            "notes": list(getattr(outcome, "notes", [])) if outcome else [],
+            # Named explicitly: a venue that answered with nothing is a
+            # finding, and a silent filter is indistinguishable from finding
+            # nothing — but a Tier-C host is neither: `attempted` is seeded
+            # with the restricted set even though it was never queried at
+            # all, so it must be excluded here, not just listed separately.
+            # Leaving it in would call a host "attempted and empty" that was
+            # in fact refused before any request went out — a false
+            # statement in a coverage artifact, the same class of bug Task 2
+            # fixed for `tier_c_refused`.
+            "venues_empty": sorted(set(attempted) - set(collected) - set(restricted)),
+            "venues_restricted": restricted,
+            # The vendored miner's per-host tier + robots record — its only
+            # writer is MINE, and without this key here, spec decision D5's
+            # "recorded per host in coverage" is simply unmet.
+            "hosts": list(outcome.coverage) if outcome is not None else [],
+            "notes": notes,
         },
     )
     # Both figures are real, never invented, and neither is zeroed out just
@@ -199,7 +244,11 @@ def run_mine(
     # spent when a breach is discovered after the money already went out;
     # collapsing the two would either hide a real bill or invent a smaller
     # one, and both are the failure this guard exists to prevent.
-    actual_usd = round(getattr(outcome, "cost_usd", 0.0), 6) if outcome is not None else 0.0
+    #
+    # Direct attribute access, not `getattr(..., 0.0)`: `outcome` is already
+    # known non-`None` here, so a rename on `cost_usd` must raise rather than
+    # silently report a zero that reads exactly like "the sweep was free".
+    actual_usd = round(outcome.cost_usd, 6) if outcome is not None else 0.0
     store.write_artifact(
         run.run_id,
         "cost.json",

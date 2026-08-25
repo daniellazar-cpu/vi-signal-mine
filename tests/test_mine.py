@@ -9,7 +9,8 @@ from vsm.topics.store import TopicStore
 
 
 class _FakeMiner:
-    """Stands in for LiveSignalMining. Returns two rows on distinct domains."""
+    """Stands in for LiveSignalMining. Returns two rows on distinct domains,
+    and one venue that was queried but nothing came back from."""
 
     def __init__(self, rows=None, cost=0.0315):
         self.rows = rows if rows is not None else [
@@ -27,36 +28,52 @@ class _FakeMiner:
     def run(self, *, campaign_id, clusters, queries_per_cluster=None):
         # Matches LiveSignalMining.run exactly: keyword-only, campaign_id
         # required, and the config lives on the constructor, not here.
+        # `campaign_id` is stamped onto every row here from this same
+        # parameter — exactly what the vendored `build_row` does — rather
+        # than hardcoded, so a test can pin that `run_mine` preserves it.
+        stamped_rows = [{**row, "campaign_id": campaign_id} for row in self.rows]
+
         class _Outcome:
-            rows = self.rows
+            rows = stamped_rows
             cost_usd = self.cost
+            provider = "fake"
+            provenance = {"provider": "fake", "detail": "stands in for LiveSignalMining"}
             queries_run = ["q1", "q2"]
-            venues_attempted = ["agajournals.org", "reddit.com"]
+            # "pubmed.ncbi.nlm.nih.gov" was queried and nothing came back —
+            # a venue that answered with nothing, distinct from one that was
+            # never queried at all (venues_restricted, below).
+            venues_attempted = ["agajournals.org", "reddit.com", "pubmed.ncbi.nlm.nih.gov"]
             venues_collected = ["agajournals.org", "reddit.com"]
             venues_restricted = []
             denied = []
             deferrals = []
             notes = []
             calls = []
+            coverage = []
             plan = [{"query": "q1", "kind": "gold"}]
-            provenance = {"provider": "fake"}
 
         return _Outcome()
 
 
 class _FakeClusterClient:
-    """Stands in for AnthropicClient: answers the lexicon call and reports a
-    fixed cumulative spend through `.spend.usd`, exactly like the real
-    client's public, read-only ledger."""
+    """Stands in for AnthropicClient: answers the lexicon call and, like the
+    real client, only reflects the call's cost in `.spend.usd` *after* the
+    call completes — `spend.usd` starts at zero and accumulates on each
+    `complete_structured`, exactly like the real cumulative `LlmSpend`
+    ledger. A fake that pre-loaded the total instead would not exercise
+    `run_mine`'s before/after delta read at all: the "before" and "after"
+    snapshots would be identical and the charge would silently be zero."""
 
     def __init__(self, *, spend_usd, clusters=None):
-        self.spend = SimpleNamespace(usd=spend_usd)
+        self.spend = SimpleNamespace(usd=0.0)
+        self._spend_usd = spend_usd
         self._clusters = clusters if clusters is not None else [
             {"cluster_id": "c1", "label": "OIC", "terms": ["naldemedine"],
              "areas": ["gastroenterology"], "queries": ["naldemedine reviews"]},
         ]
 
     def complete_structured(self, *, system, user, schema, max_output_tokens, on_progress=None):
+        self.spend = SimpleNamespace(usd=round(self.spend.usd + self._spend_usd, 6))
         return SimpleNamespace(ok=True, data={"clusters": self._clusters}, reason="")
 
 
@@ -87,6 +104,11 @@ def test_mine_stamps_every_row_with_the_topic_and_snapshot(stores):
     rows = rs.read_artifact(run.run_id, "signals.json")
     assert rows and all(r["topic_id"] == topic.topic_id for r in rows)
     assert all(r["snapshot_at"] == run.started_at for r in rows)
+    # `campaign_id` is the vendored miner's own name for the same value
+    # `run_mine` calls `topic_id` — production keeps them equal only because
+    # `run_mine` copies the row dict wholesale, so pin that they still agree
+    # after enrichment.
+    assert all(r["campaign_id"] == r["topic_id"] == topic.topic_id for r in rows)
 
 
 def test_mine_completes_and_records_its_cost(stores):
@@ -96,9 +118,13 @@ def test_mine_completes_and_records_its_cost(stores):
     assert run.cost_usd == pytest.approx(0.0315)
 
 
-def test_a_cap_breach_stops_cleanly_with_partial_rows(stores):
-    """Not an exception at the pipeline: partial rows, a recorded deferral, and
-    a status that says we stopped paying rather than that it broke."""
+def test_a_pre_sweep_cap_breach_stops_cleanly_with_no_rows(stores):
+    """Not an exception at the pipeline: a status that says we stopped paying
+    rather than that it broke, and no rows — nothing was collected because
+    the estimate alone already breached the cap, so the sweep was never
+    attempted. Contrast with
+    `test_a_sweep_that_costs_more_than_estimated_stops_but_keeps_what_it_collected`,
+    where the sweep *did* run and its rows must survive."""
     ts, rs = stores
     topic = ts.create(name="OIC", therapeutic_area="gi", spend_band="deep")
     run = run_mine(topic, rs, miner=_FakeMiner(cost=99.0), cluster_count=1, cap_usd=0.05)
@@ -110,12 +136,14 @@ def test_a_cap_breach_stops_cleanly_with_partial_rows(stores):
 
 
 def test_coverage_records_venues_that_answered_and_that_did_not(stores):
-    """A silent filter is indistinguishable from finding nothing."""
+    """A silent filter is indistinguishable from finding nothing — and a set
+    difference this test doesn't force to actually differ would pass even
+    if `venues_empty` were hardcoded to `[]`."""
     ts, rs = stores
     run = run_mine(_topic(ts), rs, miner=_FakeMiner(), cluster_count=1)
     coverage = rs.read_artifact(run.run_id, "coverage.json")
     assert set(coverage["venues_attempted"]) >= set(coverage["venues_collected"])
-    assert "venues_empty" in coverage
+    assert coverage["venues_empty"] == ["pubmed.ncbi.nlm.nih.gov"]
 
 
 def test_a_lexicon_call_that_alone_breaches_the_cap_stops_before_any_sweep(stores):
@@ -149,11 +177,10 @@ def test_a_sweep_that_costs_more_than_estimated_stops_but_keeps_what_it_collecte
     """The second, more interesting breach: the estimate clears the cap
     comfortably, the sweep runs, and only afterwards does its real cost turn
     out to exceed what was budgeted. Unlike a pre-sweep breach, rows were
-    actually collected here and must not be discarded — "partial rows, a
-    recorded deferral, no overspend" is the contract, not "no rows", and this
-    is the one test in the file where the pipeline's *second*
-    ``BudgetExceeded`` catch site — the one that fires on the actual cost,
-    not the estimate — is the one that fires."""
+    actually collected here and must not be discarded — checked below, not
+    just asserted in prose. This is the one test in the file where the
+    pipeline's *second* ``BudgetExceeded`` catch site — the one that fires on
+    the actual cost, not the estimate — is the one that fires."""
     ts, rs = stores
     topic = _topic(ts)
     estimate = estimate_run_usd(topic.band(), cluster_count=1).total_usd
