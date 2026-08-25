@@ -2948,7 +2948,7 @@ from typing import Any, Literal, Mapping, Sequence
 
 from vsm.mining.signals import normalise_url
 from vsm.mining.tiers import registrable_domain
-from vsm.mining.venues import kind_of
+from vsm.mining.venues import BAND_CONVERSATION, kind_of, venue_for
 
 __all__ = [
     "Finding",
@@ -2978,8 +2978,8 @@ class Finding:
     tier: Tier
 
 
-#: Venue kinds where a distinct post is a distinct voice. Everywhere else a
-#: domain is one publisher and syndication is what we are defending against.
+#: Venue kinds that *may* sit on the post path. Necessary but not sufficient —
+#: see :func:`independence_key`, which also requires the conversation band.
 CONVERSATIONAL_KINDS = frozenset({"hcp_discussion", "patient_community"})
 
 
@@ -2995,17 +2995,32 @@ def independence_key(signal: Mapping[str, Any]) -> tuple[str, str]:
     at ``single_source`` and the report body empty. So the key depends on what a
     source *is* in that kind of venue:
 
-    * discussion and community venues → the **post**. Twenty posts are twenty
-      voices, not one venue speaking once.
-    * evidence, guidelines, regulatory, drug reference, unregistered → the
-      **publisher**. Here one release carried by many outlets is the risk.
+    * **conversation-band** discussion and community venues → the **post**.
+      Twenty posts are twenty voices, not one venue speaking once.
+    * everything else, including **opinion-band** venues → the **publisher**.
+      Here one release carried by many outlets is the risk.
+
+    **Kind alone is not enough, and getting this wrong weakened the defence.**
+    Nine of the twenty-seven venues whose *kind* is discussion or community are
+    trade press and clinician blogs — ``statnews.com``, ``medpagetoday.com``,
+    ``healio.com``, ``kevinmd.com`` and friends. Keyed on kind, three articles
+    from one of those counted as three independent sources and cleared the
+    corroboration bar on a single publisher's say-so. The registry already
+    separates them: true forums carry ``BAND_CONVERSATION`` and trade press
+    carries ``BAND_OPINION``, so the band is the axis to key on. No registry
+    edit is needed, which matters — it is hand-verified and not to be regenerated.
 
     The title clause in :func:`independent_source_count` applies to both, which
     is what still collapses a syndicated release across publishers *and* one
     person cross-posting the same text into several threads.
     """
     venue = str(signal.get("venue") or "")
-    if kind_of(venue) in CONVERSATIONAL_KINDS:
+    entry = venue_for(venue)
+    band = getattr(entry, "band", None) if entry else None
+    conversational = (
+        kind_of(venue) in CONVERSATIONAL_KINDS and band == BAND_CONVERSATION
+    )
+    if conversational:
         return ("post", normalise_url(str(signal.get("url") or "") or venue))
     return ("publisher", registrable_domain(venue))
 
