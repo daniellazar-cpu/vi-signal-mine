@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Vi Signal Mine{% endblock %}</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<!--
+THESIS: The one figure every clinician reads fluently, turned into an interface.
+Distance from the null line IS the finding. Refuses the analytics-dashboard
+arrangement: no left sidebar, no card grid, no widget chrome, no KPI row.
+
+OWN-WORLD: Plotter output on engineering vellum. Ground #F2F4F3, process-black
+ink #14181B, non-repro cyan #8FC4D8 for all structure (rules, grid, axes —
+the drafting blue that exists precisely so it does not assert), plotter blue
+#1B4E7E for a measured estimate, plotter red #B2372A reserved for exactly two
+things: not-estimable marks and the one control that spends money. Five inks,
+closed set; a sixth is a defect. Condensed uppercase small labels with wide
+tracking for axis and field legends, system UI sans for prose, tabular numerals
+everywhere a number can change.
+
+STORY: The analyst sees which themes carry weight, where clinicians and patients
+diverge, and what moved since last week — then hands the report to a client and
+can defend every number in it.
+
+FIRST VIEWPORT: A plotted field on vellum. Topic name and dated snapshot strip
+across the top on a fixed rail. Below, one row per theme ordered by weight: a
+box whose AREA is volume, whiskers spanning the HCP-to-patient stance interval,
+a vertical null line at zero divergence. Axis reads PATIENTS MORE NEGATIVE at
+left, CLINICIANS MORE NEGATIVE at right. Right-hand columns carry independent
+sources and tier. Rows that cannot be compared print NE on the null line.
+Primary action sits bottom-right on the plot's own baseline.
+
+FORM: The systematic-review forest plot; candidate 3 of 7 on the grounded list;
+seed key af22c4f1.
+
+FINISH: unreviewed and undocumented is unfinished; this build ends with the
+finish review, the verdict, DESIGN.md, and every shipping raster carrying its
+provenance.
+-->
+<div class="app-shell">
+  <header class="app-top">
+    <a class="app-mark" href="/">Vi Signal Mine</a>
+    <nav class="app-top-nav">
+      <a href="/">Topics</a>
+      <a href="/topics/new">New topic</a>
+    </nav>
+  </header>
+  {% block top_rail %}{% endblock %}
+  <main class="app-main">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="app-foot">
+    <span>Vi Signal Mine — every figure on this page traces to a dated row with a URL.</span>
+  </footer>
+</div>
+</body>
+</html>

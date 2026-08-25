@@ -1,0 +1,68 @@
+{% extends "_base.html" %}
+{% block title %}Topics — Vi Signal Mine{% endblock %}
+{% block content %}
+<section class="page-head">
+  <h1>Topics</h1>
+  <a class="btn btn-primary" href="/topics/new">New topic</a>
+</section>
+
+<p class="hint-text">
+  Momentum and anomaly need a topic watched more than once: the first
+  snapshot never draws a trend line, because one point is not a trend.
+</p>
+
+{% if rows %}
+<table class="data-table topics-table">
+  <thead>
+    <tr>
+      <th scope="col">Topic</th>
+      <th scope="col">Last snapshot</th>
+      <th scope="col">Snapshots</th>
+      <th scope="col">Spend to date</th>
+      <th scope="col">Volume</th>
+      <th scope="col"></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <td>
+        <div class="cell-title">{{ row.topic.name }}</div>
+        <div class="cell-sub">{{ row.topic.therapeutic_area }} — {{ row.topic.spend_band }} band</div>
+      </td>
+      <td class="num">
+        {% if row.last_snapshot_run_id is not none %}
+        <a href="/runs/{{ row.last_snapshot_run_id }}/snapshot">{{ row.last_snapshot_at|dt }}</a>
+        {% else %}
+        <span class="muted">no snapshot yet</span>
+        {% endif %}
+      </td>
+      <td class="num">{{ row.snapshot_count }}</td>
+      <td class="num">{{ row.spend_to_date|usd(2) }}</td>
+      <td class="num">
+        {% if row.sparkline %}
+        {{ row.sparkline|safe }}
+        <span class="cell-sub">{{ row.latest_volume }} signals now</span>
+        {% elif row.snapshot_count == 1 %}
+        <span class="muted">{{ row.latest_volume }} signals — single snapshot, no trend yet</span>
+        {% else %}
+        <span class="muted">no snapshots yet</span>
+        {% endif %}
+      </td>
+      <td class="num">
+        <a href="/topics/{{ row.topic.topic_id }}/edit">Edit</a>
+        <a href="/topics/{{ row.topic.topic_id }}/confirm">Run snapshot</a>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="empty-state">
+  No topics yet. A topic is what Vi Signal Mine watches — brand, molecule,
+  competitors and a spend band. Create one, then run its first snapshot.
+  Momentum and anomaly need a topic watched more than once: the first
+  snapshot never draws a trend line, because one point is not a trend.
+</p>
+{% endif %}
+{% endblock %}

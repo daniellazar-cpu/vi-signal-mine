@@ -1,0 +1,76 @@
+{% extends "_base.html" %}
+{% block title %}{% if mode == "edit" %}Edit {{ topic.name }}{% else %}New topic{% endif %} — Vi Signal Mine{% endblock %}
+{% block content %}
+<section class="page-head">
+  <h1>{% if mode == "edit" %}Edit {{ topic.name }}{% else %}New topic{% endif %}</h1>
+</section>
+
+<form class="form-stack" method="post" action="{% if mode == 'edit' %}/topics/{{ topic.topic_id }}{% else %}/topics{% endif %}">
+  <div class="field-row">
+    <label for="f-name">Name</label>
+    <input id="f-name" type="text" name="name" value="{{ values.name }}" required>
+    {% if errors.name is defined %}<p class="field-error">{{ errors.name }}</p>{% endif %}
+  </div>
+
+  <div class="field-row">
+    <label for="f-area">Therapeutic area</label>
+    <input id="f-area" type="text" name="therapeutic_area" value="{{ values.therapeutic_area }}" required>
+    <p class="field-note">Routes the venue registry — decides which gold-list venues a sweep queries first.</p>
+    {% if errors.therapeutic_area is defined %}<p class="field-error">{{ errors.therapeutic_area }}</p>{% endif %}
+  </div>
+
+  <div class="field-row field-row-pair">
+    <div>
+      <label for="f-brand">Brand</label>
+      <input id="f-brand" type="text" name="brand" value="{{ values.brand }}">
+    </div>
+    <div>
+      <label for="f-molecule">Molecule (INN)</label>
+      <input id="f-molecule" type="text" name="molecule" value="{{ values.molecule }}">
+    </div>
+  </div>
+  <p class="field-note">Brand and molecule resolve to the same entity — they name the same product.</p>
+
+  <div class="field-row">
+    <label for="f-competitors">Competitors</label>
+    <textarea id="f-competitors" name="competitors" rows="3" placeholder="one per line">{{ values.competitors }}</textarea>
+  </div>
+
+  <div class="field-row">
+    <label for="f-questions">Questions this topic should answer</label>
+    <textarea id="f-questions" name="questions" rows="3" placeholder="one per line">{{ values.questions }}</textarea>
+  </div>
+
+  <div class="field-row">
+    <label for="f-never-say">Never-say terms</label>
+    <textarea id="f-never-say" name="never_say" rows="2" placeholder="one per line">{{ values.never_say }}</textarea>
+    <p class="field-note">G4. A report may never contain these terms, checked on every generated string.</p>
+  </div>
+
+  <fieldset class="band-fieldset">
+    <legend>Spend band</legend>
+    {% if errors.spend_band is defined %}<p class="field-error">{{ errors.spend_band }}</p>{% endif %}
+    <div class="band-cards">
+      {% for card in band_cards %}
+      <label class="band-card {% if values.spend_band == card.band.name %}band-card-selected{% endif %}">
+        <input type="radio" name="spend_band" value="{{ card.band.name }}"
+               {% if values.spend_band == card.band.name %}checked{% endif %}>
+        <span class="band-card-name">{{ card.band.name }}</span>
+        <span class="band-card-estimate">{{ card.estimate.total_usd|usd(2) }} estimated</span>
+        <span class="band-card-detail">
+          {{ card.band.queries_per_cluster }} queries,
+          {{ card.band.discover_results_per_cluster }} discover results,
+          {{ card.band.page_fetches_per_cluster }} page fetches per cluster
+        </span>
+      </label>
+      {% endfor %}
+    </div>
+    <p class="field-note">Estimate assumes one cluster (the offline default) — a live lexicon pass may propose more, and the confirm screen recomputes it.</p>
+  </fieldset>
+
+  <div class="form-actions">
+    <a class="link-back" href="/">Cancel</a>
+    <button class="btn btn-primary" type="submit">{% if mode == "edit" %}Save changes{% else %}Create topic{% endif %}</button>
+  </div>
+</form>
+{% endblock %}

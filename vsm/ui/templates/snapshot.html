@@ -1,0 +1,138 @@
+{% extends "_base.html" %}
+{% block title %}Snapshot — Vi Signal Mine{% endblock %}
+{% block content %}
+<section class="page-head">
+  <h1>Snapshot</h1>
+  <span class="status-badge status-{{ run.status }}">{{ run.status|replace("_", " ") }}</span>
+</section>
+
+{% if topic is not none %}
+<p class="cell-sub">
+  <a href="/">{{ topic.name }}</a> — captured {{ run.started_at|dt }}
+  — <a href="/runs/{{ run.run_id }}">view run</a>
+</p>
+{% endif %}
+
+{% if coverage is not none %}
+<h2>Coverage</h2>
+<dl class="meta-grid">
+  <div><dt>Venues attempted</dt><dd>{% if coverage.venues_attempted is defined %}{{ coverage.venues_attempted|length }}{% else %}not recorded{% endif %}</dd></div>
+  <div><dt>Venues collected</dt><dd>{% if coverage.venues_collected is defined %}{{ coverage.venues_collected|length }}{% else %}not recorded{% endif %}</dd></div>
+  <div><dt>Venues answered empty</dt><dd>{% if coverage.venues_empty is defined %}{{ coverage.venues_empty|length }}{% else %}not recorded{% endif %}</dd></div>
+  <div><dt>Venues restricted (tier C)</dt><dd>{% if coverage.venues_restricted is defined %}{{ coverage.venues_restricted|length }}{% else %}not recorded{% endif %}</dd></div>
+</dl>
+{% if coverage.venues_empty is defined and coverage.venues_empty %}
+<p class="body-text field-note">
+  Answered with nothing, named rather than silently dropped:
+  {{ coverage.venues_empty|join(", ") }}.
+</p>
+{% endif %}
+{% if coverage.notes is defined and coverage.notes %}
+<ul class="note-list">
+  {% for note in coverage.notes %}<li>{{ note }}</li>{% endfor %}
+</ul>
+{% endif %}
+{% endif %}
+
+<h2>Signal mix{% if any_filter_active %} (filtered){% endif %}</h2>
+{% if mix %}
+<div class="bar-list">
+  {% for m in mix %}
+  <div class="bar-row">
+    <span class="bar-label">{{ m.label }}</span>
+    <div class="bar-track"><div class="bar-fill" style="width: {{ m.pct }}%"></div></div>
+    <span class="bar-count">{{ m.count }}</span>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="empty-state">No signals to plot{% if any_filter_active %} for this filter{% endif %}.</p>
+{% endif %}
+
+<h2>Signals ({{ rows|length }} of {{ total_rows }})</h2>
+<form class="filter-form" method="get" action="/runs/{{ run.run_id }}/snapshot">
+  <div class="filter-field">
+    <label for="f-venue">Venue</label>
+    <select id="f-venue" name="venue">
+      <option value="">All</option>
+      {% for v in options.venues %}
+      <option value="{{ v }}" {% if filters.venue == v %}selected{% endif %}>{{ v }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="filter-field">
+    <label for="f-kind">Venue kind</label>
+    <select id="f-kind" name="kind">
+      <option value="">All</option>
+      {% for k in options.kinds %}
+      <option value="{{ k }}" {% if filters.kind == k %}selected{% endif %}>{{ kind_label(k) }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="filter-field">
+    <label for="f-tier">Collection tier</label>
+    <select id="f-tier" name="tier">
+      <option value="">All</option>
+      {% for t in options.tiers %}
+      <option value="{{ t }}" {% if filters.tier == t %}selected{% endif %}>{{ t }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="filter-field">
+    <label for="f-date">Date</label>
+    <select id="f-date" name="date">
+      <option value="">All</option>
+      {% for d in options.dates %}
+      <option value="{{ d }}" {% if filters.date == d %}selected{% endif %}>{{ d }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button class="btn btn-primary" type="submit">Apply filters</button>
+  {% if any_filter_active %}
+  <a class="link-back" href="/runs/{{ run.run_id }}/snapshot">Clear filters</a>
+  {% endif %}
+</form>
+
+{% if rows %}
+<div class="table-scroll">
+<table class="data-table signals-table">
+  <thead>
+    <tr>
+      <th scope="col">Venue</th>
+      <th scope="col">Kind</th>
+      <th scope="col">Tier</th>
+      <th scope="col">Captured</th>
+      <th scope="col">Theme</th>
+      <th scope="col">Excerpt</th>
+      <th scope="col">Source</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <td>{{ row.venue }}</td>
+      <td>{{ kind_label(row.venue_kind) if row.venue_kind else "not on the gold-list registry" }}</td>
+      <td>{% if row.collection_tier is defined and row.collection_tier %}{{ row.collection_tier }}{% else %}not recorded{% endif %}</td>
+      <td>{{ row.captured_at|dt }}</td>
+      <td>{{ row.theme if row.theme else "—" }}</td>
+      <td>
+        {% if row.excerpt %}{{ row.excerpt }}
+        {% elif row.author_type is defined and row.author_type == "patient" %}<span class="muted">patient-generated — themes only, no excerpt kept</span>
+        {% else %}<span class="muted">no excerpt kept</span>{% endif %}
+      </td>
+      <td>{% if row.url %}<a href="{{ row.url }}">{{ row.collection_method if row.collection_method else "link" }}</a>{% else %}<span class="muted">no url</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="empty-state">
+  {% if total_rows == 0 %}
+  This snapshot collected no signals.{% if run.note %} {{ run.note }}.{% endif %}
+  {% else %}
+  No signals match these filters.
+  {% endif %}
+</p>
+{% endif %}
+{% endblock %}

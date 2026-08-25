@@ -1,0 +1,66 @@
+{% extends "_base.html" %}
+{% block title %}{{ run.mode|capitalize }} run — Vi Signal Mine{% endblock %}
+{% block content %}
+<section class="page-head">
+  <h1>{{ run.mode|capitalize }} run</h1>
+  <span class="status-badge status-{{ run.status }}">{{ run.status|replace("_", " ") }}</span>
+</section>
+
+{% if topic is not none %}
+<p class="cell-sub"><a href="/">{{ topic.name }}</a> — {{ topic.therapeutic_area }}</p>
+{% endif %}
+
+<dl class="meta-grid">
+  <div><dt>Run id</dt><dd>{{ run.run_id }}</dd></div>
+  <div><dt>Started</dt><dd>{{ run.started_at|dt }}</dd></div>
+  <div><dt>Finished</dt><dd>{% if run.finished_at %}{{ run.finished_at|dt }}{% else %}not yet{% endif %}</dd></div>
+  <div><dt>Cost</dt><dd>{{ run.cost_usd|usd(4) }}</dd></div>
+</dl>
+
+{% if run.note %}
+<p class="body-text field-note">{{ run.note }}</p>
+{% endif %}
+
+<h2>Stages</h2>
+<ol class="stage-list">
+  {% for stage in stages %}
+  <li class="stage-item {% if stage.done %}stage-done{% else %}stage-pending{% endif %}">
+    <span class="stage-mark">{% if stage.done %}done{% else %}pending{% endif %}</span>
+    <span class="stage-label">{{ stage.label }}</span>
+    {% if stage.done %}<a class="stage-download" href="/runs/{{ run.run_id }}/artifact/{{ stage.file }}">download {{ stage.file }}</a>{% endif %}
+  </li>
+  {% endfor %}
+</ol>
+
+{% if run.mode == "mine" and cost_detail is not none %}
+<h2>Cost accounting</h2>
+<dl class="meta-grid">
+  <div><dt>Estimated</dt><dd>{{ cost_detail.estimate_usd|usd(4) }}</dd></div>
+  <div><dt>Actual (sweep)</dt><dd>{{ cost_detail.actual_usd|usd(4) }}</dd></div>
+  <div><dt>Model (lexicon)</dt><dd>{{ cost_detail.model_usd|usd(4) }}</dd></div>
+  <div><dt>Cap</dt><dd>{{ cost_detail.cap_usd|usd(2) }}</dd></div>
+  <div><dt>Spent against cap</dt><dd>{{ cost_detail.spent_usd|usd(4) }}</dd></div>
+  <div><dt>Stopped on budget</dt><dd>{{ "yes" if cost_detail.stopped else "no" }}</dd></div>
+</dl>
+{% endif %}
+
+<div class="form-actions">
+  {% if run.mode == "mine" %}
+  <a class="link-back" href="/runs/{{ run.run_id }}/snapshot">View snapshot</a>
+  {% if run.status in ("complete", "stopped_on_budget") %}
+  <form method="post" action="/runs/{{ run.run_id }}/insight">
+    <button class="btn btn-primary" type="submit">Run insight on this snapshot</button>
+  </form>
+  {% endif %}
+  {% elif run.mode == "insight" %}
+  <a class="link-back" href="/runs/{{ run.run_id }}/insight">View insight</a>
+  {% if run.status == "complete" %}
+  <form method="post" action="/runs/{{ run.run_id }}/report">
+    <button class="btn btn-primary" type="submit">Generate report</button>
+  </form>
+  {% endif %}
+  {% elif run.mode == "report" %}
+  <a class="link-back" href="/runs/{{ run.run_id }}/report">View report</a>
+  {% endif %}
+</div>
+{% endblock %}

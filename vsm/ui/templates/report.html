@@ -1,0 +1,86 @@
+{% extends "_base.html" %}
+{% block title %}Report — {% if topic is not none %}{{ topic.name }} — {% endif %}Vi Signal Mine{% endblock %}
+{% block content %}
+<section class="page-head">
+  <h1>Report preview{% if topic is not none %} — {{ topic.name }}{% endif %}</h1>
+</section>
+<p class="cell-sub">
+  {% if mine_run_id %}<a href="/runs/{{ mine_run_id }}/snapshot">snapshot</a> — {% endif %}{% if insight_run_id %}<a href="/runs/{{ insight_run_id }}/insight">insight</a> — {% endif %}run {{ run.run_id }}, {{ run.started_at|dt }}
+</p>
+
+<h2>Themes at a glance</h2>
+{% if theme_vms %}
+<div class="table-scroll">
+<table class="data-table">
+  <thead><tr><th scope="col">Theme</th><th scope="col">Volume</th><th scope="col">Tier</th><th scope="col">Independent sources</th><th scope="col">Citations</th></tr></thead>
+  <tbody>
+    {% for t in theme_vms %}
+    <tr>
+      <td class="cell-title">{{ t.name }}</td>
+      <td class="num">{{ t.volume }}</td>
+      <td>{{ tier_label(t.tier) }}</td>
+      <td class="num">{{ t.sources }}</td>
+      <td class="citation-chips">
+        {% for sid in t.signal_ids %}<a href="#sig-{{ sid }}">{{ sid }}</a>{% if not loop.last %}, {% endif %}{% else %}<span class="muted">none cited</span>{% endfor %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="empty-state">No themes in this snapshot.</p>
+{% endif %}
+
+<h2>Pulse report</h2>
+{% if has_pulse %}
+<div class="md-preview">{{ pulse_html|safe }}</div>
+{% else %}
+<p class="empty-state">pulse_report.md was not found on this run.</p>
+{% endif %}
+
+<h2>Methodology</h2>
+{% if methodology_html %}
+<div class="md-preview">{{ methodology_html|safe }}</div>
+{% else %}
+<p class="empty-state">methodology.md was not found on this run.</p>
+{% endif %}
+
+<h2>Worth considering</h2>
+{% if considering_html %}
+<div class="md-preview">{{ considering_html|safe }}</div>
+{% else %}
+<p class="empty-state">worth_considering.md was not found on this run.</p>
+{% endif %}
+
+<h2>Provenance appendix — one row per cited signal</h2>
+{% if citations %}
+<div class="table-scroll">
+<table class="data-table" id="citations-table">
+  <thead><tr><th scope="col">Signal</th><th scope="col">Venue</th><th scope="col">Venue kind</th><th scope="col">Captured</th><th scope="col">Method</th><th scope="col">URL</th></tr></thead>
+  <tbody>
+    {% for c in citations %}
+    <tr id="sig-{{ c.signal_id }}">
+      <td class="cell-title">{{ c.signal_id }}</td>
+      <td>{{ c.venue }}</td>
+      <td>{{ c.venue_kind }}</td>
+      <td>{{ c.captured_at|dt }}</td>
+      <td class="cell-sub">{{ c.method }}</td>
+      <td><a href="{{ c.url }}">{{ c.url }}</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="empty-state">No citations recorded on this report.</p>
+{% endif %}
+
+<h2>Export</h2>
+<ul class="export-list">
+  <li><a href="/runs/{{ run.run_id }}/artifact/pulse_report.md">pulse_report.md</a></li>
+  <li><a href="/runs/{{ run.run_id }}/artifact/provenance_appendix.md">provenance_appendix.md</a></li>
+  <li><a href="/runs/{{ run.run_id }}/artifact/methodology.md">methodology.md</a></li>
+  <li><a href="/runs/{{ run.run_id }}/artifact/worth_considering.md">worth_considering.md</a></li>
+</ul>
+{% endblock %}

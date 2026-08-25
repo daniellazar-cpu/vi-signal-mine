@@ -1,0 +1,56 @@
+{% extends "_base.html" %}
+{% block title %}Confirm spend — {{ topic.name }} — Vi Signal Mine{% endblock %}
+{% block content %}
+<section class="page-head">
+  <h1>Confirm spend</h1>
+</section>
+
+<section class="panel confirm-panel">
+  <p class="body-text">
+    Running a <strong>{{ band.name }}</strong> snapshot of <strong>{{ topic.name }}</strong>
+    spends real money on a shared Bright Data account. Nothing is bought until
+    you commit below.
+  </p>
+  {% if changes_band %}
+  <p class="body-text field-note">
+    This changes the topic's spend band from <strong>{{ topic.spend_band }}</strong>
+    to <strong>{{ band.name }}</strong> — confirming will save that change before running.
+  </p>
+  {% endif %}
+
+  <div class="estimate-total">
+    <span class="estimate-total-label">Estimated total</span>
+    <span class="estimate-total-value">{{ estimate.total_usd|usd(2) }}</span>
+  </div>
+
+  <table class="data-table breakdown-table">
+    <thead>
+      <tr><th scope="col">Item</th><th scope="col">Cost</th><th scope="col">Basis</th></tr>
+    </thead>
+    <tbody>
+      {% for item in estimate.breakdown %}
+      <tr>
+        <td class="cell-title">{{ item.item }}</td>
+        <td class="num">{{ item.usd|usd(4) }}</td>
+        <td class="cell-sub">{{ item.note }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <p class="body-text">
+    Run cost cap: <strong>{{ cap_usd|usd(2) }}</strong>. A run that would pass
+    the cap stops cleanly at <em>stopped on budget</em> and keeps whatever
+    rows it already collected — it never overspends and never raises past
+    the mine.
+  </p>
+
+  <div class="confirm-actions">
+    <a class="link-back" href="/topics/{{ topic.topic_id }}/edit">Change band or cancel</a>
+    <form method="post" action="/topics/{{ topic.topic_id }}/mine">
+      <input type="hidden" name="band" value="{{ band.name }}">
+      <button class="btn btn-commit" type="submit">Spend {{ estimate.total_usd|usd(2) }} — run snapshot</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

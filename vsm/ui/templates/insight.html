@@ -1,0 +1,177 @@
+{% extends "_base.html" %}
+{% block title %}Insight — Vi Signal Mine{% endblock %}
+
+{% block top_rail %}
+{% if topic is not none and snapshot_rail %}
+<div class="dated-strip" role="navigation" aria-label="topic snapshots">
+  {% for frame in snapshot_rail %}
+  <a class="dated-frame {% if frame.is_current %}dated-frame-current{% endif %}"
+     href="/runs/{{ frame.run_id }}/snapshot">{{ frame.started_at|dt }}</a>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <h1>{% if topic is not none %}{{ topic.name }} — {% endif %}Insight</h1>
+</section>
+{% if mine_run_id %}
+<p class="cell-sub"><a href="/runs/{{ mine_run_id }}/snapshot">based on the snapshot captured {{ run.started_at|dt }}</a></p>
+{% endif %}
+
+<h2 id="dual-lens">Dual-lens gap — where clinicians and patients diverge</h2>
+<p class="body-text">
+  Each box is one theme. Box area is the theme's volume of signals. The
+  whisker spans the gap between the patient net stance and the clinician net
+  stance, measured from the null line at zero divergence. A theme only one
+  side discussed prints <strong>NE</strong> on the null line — not zero,
+  not comparable.
+</p>
+<div class="forest-plot-wrap">
+  {{ forest_svg|safe }}
+</div>
+<div class="forest-plot-baseline-action">
+  {% if run.status == "complete" %}
+  <form method="post" action="/runs/{{ run.run_id }}/report">
+    <button class="btn btn-primary" type="submit">Generate report</button>
+  </form>
+  {% endif %}
+</div>
+<p class="plot-legend">
+  Solid blue: measured divergence. Dashed red square on the null line:
+  not estimable — one lens has no signal for that theme, so silence is
+  never read as agreement.
+</p>
+
+<h2>Momentum</h2>
+{% if not has_baseline %}
+<p class="empty-state">No prior snapshot exists for this topic yet, so momentum has nothing to compare against.</p>
+{% elif momentum_rows %}
+<div class="table-scroll">
+<table class="data-table">
+  <thead><tr><th scope="col">Theme</th><th scope="col">Volume now</th><th scope="col">Volume prior</th><th scope="col">Delta</th><th scope="col">Delta %</th><th scope="col">Note</th></tr></thead>
+  <tbody>
+    {% for m in momentum_rows %}
+    <tr>
+      <td class="cell-title">{{ m.theme_name }}</td>
+      <td class="num">{{ m.volume_now }}</td>
+      <td class="num">{% if m.volume_prior is none %}—{% else %}{{ m.volume_prior }}{% endif %}</td>
+      <td class="num">{% if m.delta is none %}—{% else %}{{ m.delta }}{% endif %}</td>
+      <td class="num">{{ m.delta_pct|pct }}</td>
+      <td class="cell-sub">{{ m.reason if m.reason else "—" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="empty-state">No themes in this snapshot to compare.</p>
+{% endif %}
+
+<h2>Anomalies</h2>
+{% if not has_baseline %}
+<p class="empty-state">No prior snapshot exists to compare against, so no anomalies can be detected yet.</p>
+{% elif anomaly_rows %}
+<div class="table-scroll">
+<table class="data-table">
+  <thead><tr><th scope="col">Theme</th><th scope="col">Kind</th><th scope="col">Observed</th><th scope="col">Baseline</th><th scope="col">Detail</th><th scope="col">Note</th></tr></thead>
+  <tbody>
+    {% for a in anomaly_rows %}
+    <tr>
+      <td class="cell-title">{{ a.theme_name }}</td>
+      <td>{{ anomaly_label(a.kind) }}</td>
+      <td class="num">{{ a.observed }}</td>
+      <td class="num">{% if a.baseline is none %}—{% else %}{{ a.baseline }}{% endif %}</td>
+      <td class="cell-sub">{{ a.detail }}</td>
+      <td class="cell-sub">{{ a.note if a.note else "—" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="empty-state">No anomalies were detected against the prior baseline.</p>
+{% endif %}
+
+<h2>Themes</h2>
+{% if theme_rows %}
+<div class="table-scroll">
+<table class="data-table">
+  <thead><tr><th scope="col">Theme</th><th scope="col">Volume</th><th scope="col">Venue mix</th><th scope="col">Kind mix</th><th scope="col">Tier</th><th scope="col">Independent sources</th></tr></thead>
+  <tbody>
+    {% for tr in theme_rows %}
+    <tr>
+      <td class="cell-title">{{ tr.theme.name }}</td>
+      <td class="num">{{ tr.theme.volume }}</td>
+      <td class="cell-sub">{% for v, n in tr.venue_mix %}{{ v }} ({{ n }}){% if not loop.last %}, {% endif %}{% else %}—{% endfor %}</td>
+      <td class="cell-sub">{% for k, n in tr.kind_mix %}{{ kind_label(k) }} ({{ n }}){% if not loop.last %}, {% endif %}{% else %}—{% endfor %}</td>
+      <td>{{ tier_label(tr.tier) }}</td>
+      <td class="num">{{ tr.sources }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="empty-state">No themes in this snapshot.</p>
+{% endif %}
+
+<h2>Stance by author class</h2>
+<p class="body-text">
+  Split by who is speaking. There is no blended figure across HCP and
+  patient — a single number over both would be a patient-sentiment number
+  wearing a clinical label.
+</p>
+{% if stance_rows %}
+<div class="table-scroll">
+<table class="data-table">
+  <thead><tr><th scope="col">Theme</th><th scope="col">Author class</th><th scope="col">Stance counts</th><th scope="col">Basis</th></tr></thead>
+  <tbody>
+    {% for sr in stance_rows %}
+      {% if sr.by_class %}
+        {% for cls, counts in sr.by_class %}
+        <tr>
+          {% if loop.first %}<td class="cell-title" rowspan="{{ sr.by_class|length }}">{{ sr.name }}</td>{% endif %}
+          <td>{{ class_label(cls) }}</td>
+          <td class="cell-sub">{% for stance, n in counts.items() %}{{ stance_label(stance) }} {{ n }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
+          {% if loop.first %}<td class="cell-sub" rowspan="{{ sr.by_class|length }}">{{ sr.basis }}</td>{% endif %}
+        </tr>
+        {% endfor %}
+      {% else %}
+      <tr>
+        <td class="cell-title">{{ sr.name }}</td>
+        <td colspan="2" class="muted">no signals resolved to an author class</td>
+        <td class="cell-sub">{{ sr.basis }}</td>
+      </tr>
+      {% endif %}
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="empty-state">No stance data for this snapshot.</p>
+{% endif %}
+
+<h2>Entities</h2>
+{% if entity_rows %}
+<div class="table-scroll">
+<table class="data-table">
+  <thead><tr><th scope="col">Entity</th><th scope="col">Role</th><th scope="col">Aliases</th><th scope="col">Signals mentioning it</th></tr></thead>
+  <tbody>
+    {% for e in entity_rows %}
+    <tr>
+      <td class="cell-title">{{ e.canonical }}</td>
+      <td>{{ e.role }}</td>
+      <td class="cell-sub">{{ e.aliases|join(", ") }}</td>
+      <td class="num">{{ e.signal_count }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="empty-state">No entities to resolve — the topic has no brand, molecule or competitor names set.</p>
+{% endif %}
+<p class="cell-sub">{{ unmapped_count }} signal(s) matched none of these entities.</p>
+{% endblock %}
