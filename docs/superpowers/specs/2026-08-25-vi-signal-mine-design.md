@@ -72,6 +72,7 @@ a later reader would otherwise reopen.
 | D14 | **The full app deploys to Vercel, with live runs restricted to the `probe` band there.** | `standard` and `deep` refuse on Vercel with a message naming local execution. See §11 for why, and for what a probe has to fit inside. |
 | D15 | **Protection is Vercel preview gating only — no app-level auth.** Concern raised, owner's decision. | Enforced in code by a **production-refusal guard**: `VERCEL_ENV == "production"` answers 503 on every route. Preview-only becomes a property of the code rather than of a dashboard setting. |
 | D16 | **Storage goes behind a protocol now; the second backend lands at the end.** | SQLite + filesystem locally, Postgres + blob on Vercel. Local stays the default and stays hermetic. |
+| D18 | **Independence is venue-kind-aware, and G6 gates claims rather than themes.** | Found by running the seven passes end to end: a domain-collapsing rule turned 20 people in one forum into one source, so every conversational theme sat at `single_source` and the report body came out empty. See §4.2. |
 | D17 | **INSIGHT is resumable.** | A re-run skips any pass whose artifact already exists. Required by D14: a serverless timeout mid-INSIGHT must not discard the passes that finished. |
 
 ### What does not come across
@@ -285,11 +286,41 @@ copies of one press release are one source, not five.
 
 | Tier | Test | Where it may appear |
 |---|---|---|
-| `corroborated` | ≥3 independent sources | Report main body |
-| `emerging` | 2 independent sources | Report, in a separately labelled section |
-| `single-source` | 1 | Ledger only — never promoted |
+| `corroborated` | ≥3 independent sources | A **claim** may rest on it |
+| `emerging` | 2 independent sources | A claim may, in a separately labelled section |
+| `single-source` | 1 | No claim may rest on it |
 
-Enforced by G6, not by prompt.
+**What "independent" means depends on the venue kind (D18).** The rule above was
+written to defeat syndication, and a domain-collapsing test does that well. Run
+end to end, it also collapsed twenty people posting in one forum into a single
+source — so every conversational theme sat at `single-source`, and since G6
+admitted only `corroborated`, the report body came out empty. For a pulse
+instrument that is fatal: most of what people say is in forums, and a forum is
+one domain.
+
+So independence is keyed by what a source *is* in that kind of venue:
+
+| Venue kinds | A source is | Because |
+|---|---|---|
+| `hcp_discussion`, `patient_community` | a distinct post (normalised URL) | Twenty posts are twenty voices, not one venue speaking once |
+| `evidence`, `guideline_body`, `regulatory`, `drug_reference`, unregistered | a distinct publisher (registrable domain) | Here the risk is one release carried by many outlets |
+
+The **title clause applies in both cases**: signals sharing a normalised title
+are one source regardless of venue kind. That is what still defeats syndication
+across publishers, and it also collapses one person cross-posting the same text
+into several threads.
+
+An independent source is therefore a distinct post or a distinct publisher, and
+`methodology.md` defines it that way. It is not a count of verified people —
+no author identifier is retained for a patient venue, not even hashed, so people
+are not countable and were never claimed to be.
+
+**G6 gates claims, not themes (D18).** A theme is always reportable with its
+volume, its venue mix and its stance split — those are counts, and a count needs
+no corroboration. What needs three independent sources is an *assertion about* a
+theme. `findings.json` therefore records each theme's corroboration strength as
+information; the gate applies in REPORT, to the claims the report actually
+writes.
 
 **Stance is split by venue class and never aggregated.** Given that only 2–5% of
 disease-area conversation comes from clinicians

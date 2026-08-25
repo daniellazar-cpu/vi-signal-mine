@@ -2946,12 +2946,16 @@ import re
 from dataclasses import dataclass
 from typing import Any, Literal, Mapping, Sequence
 
+from vsm.mining.signals import normalise_url
 from vsm.mining.tiers import registrable_domain
+from vsm.mining.venues import kind_of
 
 __all__ = [
     "Finding",
     "Tier",
     "CORROBORATED_AT",
+    "CONVERSATIONAL_KINDS",
+    "independence_key",
     "independent_source_count",
     "tier_for_count",
     "corroborate",
@@ -2974,8 +2978,36 @@ class Finding:
     tier: Tier
 
 
+#: Venue kinds where a distinct post is a distinct voice. Everywhere else a
+#: domain is one publisher and syndication is what we are defending against.
+CONVERSATIONAL_KINDS = frozenset({"hcp_discussion", "patient_community"})
+
+
 def _norm_title(signal: Mapping[str, Any]) -> str:
     return _WS.sub(" ", str(signal.get("title") or "")).strip().lower()
+
+
+def independence_key(signal: Mapping[str, Any]) -> tuple[str, str]:
+    """What counts as *one source* for this signal, by venue kind (spec D18).
+
+    A domain-collapsing rule defeats syndication well and, applied to a forum,
+    turns twenty people into one source — which left every conversational theme
+    at ``single_source`` and the report body empty. So the key depends on what a
+    source *is* in that kind of venue:
+
+    * discussion and community venues → the **post**. Twenty posts are twenty
+      voices, not one venue speaking once.
+    * evidence, guidelines, regulatory, drug reference, unregistered → the
+      **publisher**. Here one release carried by many outlets is the risk.
+
+    The title clause in :func:`independent_source_count` applies to both, which
+    is what still collapses a syndicated release across publishers *and* one
+    person cross-posting the same text into several threads.
+    """
+    venue = str(signal.get("venue") or "")
+    if kind_of(venue) in CONVERSATIONAL_KINDS:
+        return ("post", normalise_url(str(signal.get("url") or "") or venue))
+    return ("publisher", registrable_domain(venue))
 
 
 class _Union:
@@ -3000,17 +3032,17 @@ def independent_source_count(signals: Sequence[Mapping[str, Any]]) -> int:
     if not signals:
         return 0
     uf = _Union()
-    by_domain: dict[str, str] = {}
+    by_key: dict[tuple[str, str], str] = {}
     by_title: dict[str, str] = {}
     for signal in signals:
         sid = str(signal["signal_id"])
         uf.find(sid)
-        domain = registrable_domain(str(signal.get("venue") or ""))
-        if domain:
-            if domain in by_domain:
-                uf.union(by_domain[domain], sid)
+        key = independence_key(signal)
+        if key[1]:
+            if key in by_key:
+                uf.union(by_key[key], sid)
             else:
-                by_domain[domain] = sid
+                by_key[key] = sid
         title = _norm_title(signal)
         if title:
             if title in by_title:
@@ -3051,7 +3083,16 @@ def corroborate(
 - [ ] **Step 4: Write `vsm/guards/corroboration.py`**
 
 ```python
-"""G6 — an uncorroborated finding may not reach the report's main body.
+"""G6 — an uncorroborated **claim** may not reach the report's main body.
+
+**A theme is not a claim** (spec D18). A theme's volume, venue mix and stance
+split are counts, and a count needs no corroboration — gating themes on it
+emptied the report body, because a forum is one domain and every conversational
+theme therefore sat at ``single_source``. What needs three independent sources is
+an *assertion about* a theme. ``findings.json`` records per-theme corroboration
+strength as information; this guard runs in REPORT, over the claims the report
+actually writes.
+
 
 ``emerging`` findings are publishable in a separately labelled section, because
 two independent sources is a real if provisional observation. ``single_source``
@@ -4363,8 +4404,11 @@ def run_insight(
     anomalies = narrate(detect_anomalies(themes, priors), client=client)
     store.write_artifact(run.run_id, "anomaly.json", [asdict(a) for a in anomalies])
 
-    # One claim per theme, for the report to draw on. Corroboration decides
-    # which of them is allowed into the body — this pass only counts.
+    # Per-theme corroboration strength, recorded as INFORMATION (spec D18).
+    # This is not a gate: a theme is always reportable, because its volume and
+    # stance are counts and a count needs no corroboration. G6 runs in REPORT
+    # over the claims the report writes, which is where three independent
+    # sources is the right bar.
     by_id = {str(s["signal_id"]): s for s in signals}
     findings = corroborate(
         [{"statement": t.name, "signal_ids": list(t.signal_ids)} for t in themes], by_id
