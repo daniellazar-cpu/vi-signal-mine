@@ -38,9 +38,10 @@ robots.txt at all. Nothing here was written from memory: three candidates
 rather than listed on faith.
 
 The recorded ``robots`` string is documentation, not enforcement:
-:class:`vsm.mining.robots.RobotsCache` re-fetches robots.txt at run time and
-that live answer is what decides a fetch. A venue whose robots.txt we could not
-read is therefore metadata-only in practice — absence of evidence is not
+:class:`vsm.mining.robots.RobotsCache` re-fetches robots.txt at run time, and by
+default (spec D5) that live answer is recorded rather than deciding a fetch —
+``VSM_ENFORCE_TIER_C=1`` restores it as the decision. A venue whose robots.txt we
+could not read is therefore metadata-only in practice — absence of evidence is not
 permission.
 """
 

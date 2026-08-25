@@ -8,6 +8,7 @@ against silent divergence during the fork, not a permanent dependency.
 
 import importlib.util
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -72,3 +73,43 @@ def test_gold_registry_is_byte_identical():
     assert {(v.domain, v.kind, v.collection_tier) for v in GOLD_VENUES} == {
         (v.domain, v.kind, v.collection_tier) for v in theirs.GOLD_VENUES
     }
+
+
+def test_build_row_matches_the_parent_exactly():
+    """Signals row shape is not negotiable (PRD §5.3). The two new D5 kwargs
+    (topic_id, snapshot_at) must be strictly additive: with neither passed,
+    the row must equal the parent's byte-for-byte, not merely be a superset
+    of it; with both passed, they must add exactly those two keys and change
+    no existing value."""
+    import engine.mining.signals as parent_signals  # noqa: PLC0415
+
+    from vsm.mining.signals import Hit, build_row
+
+    hit = Hit(
+        url="https://example.org/a",
+        title="Managing OIC in practice",
+        description="A clinician's discussion of laxative-refractory constipation.",
+    )
+    captured_at = datetime(2026, 8, 25, tzinfo=timezone.utc)
+
+    ours = build_row(campaign_id="camp1", cluster=CLUSTER, hit=hit, captured_at=captured_at)
+    theirs = parent_signals.build_row(
+        campaign_id="camp1", cluster=CLUSTER, hit=hit, captured_at=captured_at
+    )
+
+    assert ours == theirs
+
+    ours_with_snapshot = build_row(
+        campaign_id="camp1",
+        cluster=CLUSTER,
+        hit=hit,
+        captured_at=captured_at,
+        topic_id="t1",
+        snapshot_at="2026-08-25T00:00:00+00:00",
+    )
+
+    assert set(ours_with_snapshot) - set(ours) == {"topic_id", "snapshot_at"}
+    for key in ours:
+        assert ours_with_snapshot[key] == ours[key]
+    assert ours_with_snapshot["topic_id"] == "t1"
+    assert ours_with_snapshot["snapshot_at"] == "2026-08-25T00:00:00+00:00"

@@ -14,9 +14,11 @@ Order of operations, and why each step is where it is:
    intent built from the cluster label, with parsed content.
 4. **Open web last, and only if the gold list under-delivers** — capped, and with
    the denylist applied to every result *before* any page fetch.
-5. **Tier gate before anything else touches a URL.** A Tier-C domain is dropped
-   here *and* refused inside every client, and is recorded as
-   *restricted → human-read only*. It is never fetched, not once, not partially.
+5. **Tier gate before anything else touches a URL.** A Tier-C domain is recorded
+   as *restricted* here and at every client (spec D5): by default the tier is
+   recorded and the sweep proceeds — a row is still built, tier attached rather
+   than hidden. ``VSM_ENFORCE_TIER_C=1`` (off by default) restores the parent's
+   refusal: never fetched, never a row, not once, not partially.
 6. **The denylist** (:mod:`vsm.mining.denylist`) drops what is not worth paying
    for — brand and pharma-corporate sites, content farms, pay-to-publish
    publishers, repository duplicates. Every drop is recorded with its reason; a
@@ -157,6 +159,15 @@ class MiningOutcome:
     #: D5: per-host tier + robots answer, recorded even when (default) neither
     #: vetoed a fetch — this is what later lands in coverage.json. "recorded per
     #: host in coverage — reporting, not gating" (spec D5, design §2).
+    #:
+    #: Deliberately not exhaustive: an entry is appended only when a robots
+    #: check came back disallowed (see ``_fetch_page``), so this list alone does
+    #: not name every host whose robots.txt was fetched — only the ones that
+    #: would have been dropped under the parent's rules. Whoever writes
+    #: ``coverage.json`` from this outcome must join it with
+    #: ``provenance["robots"]`` (``RobotsCache.as_provenance()``) to also see the
+    #: allowed hosts — that is where D5's "recorded per host" is currently
+    #: satisfied for the robots-allowed case.
     coverage: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -361,7 +372,16 @@ class LiveSignalMining:
         outcome.provenance = budget.as_provenance()
         if self.robots is not None:
             outcome.provenance["robots"] = self.robots.as_provenance()
-        outcome.provenance["tier_c_refused"] = outcome.venues_restricted
+        # D5: venues_restricted now names every Tier-C host we saw, whether or
+        # not it was actually refused (VSM_ENFORCE_TIER_C). "tier_c_refused"
+        # must mean refused, or it is a false statement in an artifact a human
+        # reads — worse than the silent drop it replaces, because it is present
+        # and wrong rather than merely absent. "tier_c_hosts" carries the full
+        # record; "tier_c_refused" is only the subset actually kept out of rows.
+        outcome.provenance["tier_c_hosts"] = outcome.venues_restricted
+        outcome.provenance["tier_c_refused"] = sorted(
+            set(outcome.venues_restricted) - set(outcome.venues_collected)
+        )
         outcome.provenance["targeting"] = {
             "strategy": (
                 "gold-list site:-scoped SERP first; intent discovery; open web only when the gold "

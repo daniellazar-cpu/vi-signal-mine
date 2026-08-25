@@ -29,8 +29,10 @@ and the three modules that decide *where* a sweep spends:
 
 **Nothing here decides policy on its own.** Tier C is a blocklist in
 :mod:`vsm.mining.tiers` and it is checked before a URL is ever handed to a
-client; the clients themselves also refuse a Tier-C URL, so a future caller
-cannot route around the run layer.
+client. By default (spec D5) that check *records* the tier rather than
+refusing it — ``VSM_ENFORCE_TIER_C=1`` restores the parent's refusal, at
+which point the clients themselves also refuse a Tier-C URL, so a future
+caller cannot route around the run layer.
 
 Every client takes an injectable ``transport`` (``httpx.MockTransport``) so the
 whole package is testable with zero network — which is how it is tested, because

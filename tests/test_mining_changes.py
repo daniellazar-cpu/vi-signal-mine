@@ -366,3 +366,74 @@ def test_run_layer_end_to_end_produces_no_row_when_enforced(monkeypatch):
 
     assert outcome.rows == []
     assert "doximity.com" not in outcome.venues_collected
+
+
+# --------------------------------------------------------------------------- #
+# Round 4 (review finding, Q1 - Important): gate 5 changed what
+# venues_restricted means (now "seen as Tier C", not "refused"), but
+# provenance["tier_c_refused"] still published that set unchanged — a false
+# statement in the artifact a human actually reads: it names doximity.com as
+# refused in the same outcome where a row was built for it. Worse than the
+# silent drops removed in rounds 2-3, because it is present and wrong rather
+# than merely absent.
+# --------------------------------------------------------------------------- #
+
+
+def test_tier_c_refused_is_empty_by_default_while_hosts_still_named():
+    """With the flag off, nothing was actually refused — tier_c_refused must
+    say so — but tier_c_hosts still names doximity.com as Tier C, so the
+    record is not lost, only correctly labelled."""
+    mining, _config = _run_with_tier_c_serp_hit()
+
+    outcome = mining.run(campaign_id="camp1", clusters=[CLUSTER], queries_per_cluster=1)
+
+    assert outcome.provenance["tier_c_refused"] == []
+    assert "doximity.com" in outcome.provenance["tier_c_hosts"]
+
+
+def test_tier_c_refused_is_populated_when_enforced(monkeypatch):
+    """With the flag on, a hard-blocklisted domain like doximity.com is
+    stripped upstream by the SERP parser (gate 6) before it ever reaches the
+    run layer's own restricted-tracking, so it cannot demonstrate this case —
+    that is the parser and the run layer correctly agreeing, not a gap.
+
+    A host that is Tier C only via the campaign's own catalogue (not the hard
+    blocklist) is the case that demonstrates it: the SERP parser has no
+    catalogue to consult (it only ever sees the hard blocklist, see
+    ``serp.py``'s ``tier_for(link)`` with no ``catalogue=``), so it survives
+    the parser — but the run layer's ``is_tier_c(hit.url,
+    catalogue=self.catalogue)`` still catches it and, enforced, refuses it:
+    no row, and named in tier_c_refused, not just tier_c_hosts."""
+    monkeypatch.setenv("VSM_ENFORCE_TIER_C", "1")
+    catalogue = [{"domain": "restricted-by-catalogue.org", "collection_tier": "C"}]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "organic": [
+                    {
+                        "rank": 1,
+                        "title": "Catalogue-restricted thread",
+                        "link": "https://restricted-by-catalogue.org/t/1",
+                        "description": "clinicians discuss OIC",
+                    }
+                ]
+            },
+        )
+
+    serp = _serp(handler)
+    mining = LiveSignalMining(
+        serp=serp,
+        discover=None,
+        unlocker=None,
+        robots=None,
+        catalogue=catalogue,
+        config=MiningConfig(fetch_pages=False, discover_results_per_cluster=0),
+    )
+
+    outcome = mining.run(campaign_id="camp1", clusters=[CLUSTER], queries_per_cluster=1)
+
+    assert outcome.rows == []
+    assert outcome.provenance["tier_c_refused"] == ["restricted-by-catalogue.org"]
+    assert "restricted-by-catalogue.org" in outcome.provenance["tier_c_hosts"]
