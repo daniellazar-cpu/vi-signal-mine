@@ -1050,14 +1050,29 @@ def test_artifact_name_cannot_escape_the_run_directory(store):
         store.write_artifact(r.run_id, "../../etc/passwd", {})
 
 
-def test_snapshot_order_survives_identical_timestamps(store):
-    """Ordering is by the monotonic seq column, not by wall-clock time. Two
-    runs created in the same microsecond must still have a defined order."""
+def test_snapshot_order_follows_seq_not_the_timestamp(store):
+    """Ordering is by the monotonic `seq` column, never by wall-clock time.
+
+    Creating five runs in a loop does NOT test this: wall-clock advances on its
+    own, so `ORDER BY started_at` would pass too. The timestamps are scrambled
+    afterwards so that the two orderings genuinely disagree — that is the only
+    version of this test that can fail against the bug it is written for.
+    """
+    import sqlite3 as _sqlite3
+
     ids = []
     for _ in range(5):
         r = store.start("top-1", "mine")
         store.finish(r.run_id, "complete", cost_usd=0.0)
         ids.append(r.run_id)
+
+    # Reverse the timestamps against insertion order.
+    stamps = [f"2026-08-{25 - i:02d}T00:00:00+00:00" for i in range(5)]
+    with _sqlite3.connect(store.db_path) as conn:
+        for run_id, stamp in zip(ids, stamps):
+            conn.execute("UPDATE runs SET started_at=? WHERE run_id=?", (stamp, run_id))
+        conn.commit()
+
     assert [r.run_id for r in store.snapshots("top-1")] == ids
 
 
@@ -1168,6 +1183,7 @@ class RunStore:
         (self.var_dir / "runs").mkdir(parents=True, exist_ok=True)
         with self._conn() as c:
             c.executescript(_SCHEMA)
+            c.commit()
 
     def _conn(self) -> closing[sqlite3.Connection]:
         """A connection that is committed **and closed**.
@@ -1208,6 +1224,9 @@ class RunStore:
                 "(SELECT COALESCE(MAX(seq),0)+1 FROM runs))",
                 (run.run_id, topic_id, mode, "running", run.started_at, parent_run_id),
             )
+            # `closing` does not commit. A missed commit here loses the run
+            # silently, which is worse than the leak `closing` fixes.
+            c.commit()
         self.artifacts_dir(run.run_id).mkdir(parents=True, exist_ok=True)
         return run
 
@@ -1218,6 +1237,7 @@ class RunStore:
                 "WHERE run_id=?",
                 (status, _now(), float(cost_usd), note, run_id),
             )
+            c.commit()
         return self.get(run_id)
 
     def get(self, run_id: str) -> Run:
@@ -1276,7 +1296,7 @@ class RunStore:
 - [ ] **Step 5: Run test to verify it passes**
 
 Run: `pytest tests/test_runs.py -v`
-Expected: 7 passed
+Expected: 8 passed
 
 - [ ] **Step 6: Commit**
 
