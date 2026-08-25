@@ -1,0 +1,15 @@
+Metadata-Version: 2.4
+Name: vi-signal-mine
+Version: 0.1.0
+Summary: A pulse instrument: what is being said about a brand or product online, and what changed
+Requires-Python: >=3.14
+Requires-Dist: fastapi
+Requires-Dist: uvicorn
+Requires-Dist: pydantic
+Requires-Dist: jinja2
+Requires-Dist: httpx
+Requires-Dist: python-multipart
+Requires-Dist: pyyaml
+Requires-Dist: anthropic
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"

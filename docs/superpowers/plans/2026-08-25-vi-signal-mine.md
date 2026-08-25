@@ -77,7 +77,7 @@ Every task's requirements implicitly include this section.
 
 **Interfaces:**
 - Consumes: nothing
-- Produces: `Settings` (`.offline: bool`, `.miner_mode: str`, `.drafter_mode: str`, `.anthropic_api_key: str | None`, `.brightdata_api_key: str | None`, `.brightdata_serp_zone: str`, `.brightdata_unlocker_zone: str`, `.llm_model: str`, `.run_cost_cap_usd: float`, `.var_dir: Path`, `.db_url: Path`); `settings` module-level singleton; `get_settings() -> Settings`; errors `VsmError`, `ConfigError`, `BudgetExceeded`, `GuardViolation`, `NoSuchTopic`, `NoSuchRun`
+- Produces: `Settings` (`.offline: bool`, `.miner_mode: str`, `.drafter_mode: str`, `.anthropic_api_key: str | None`, `.brightdata_api_key: str | None`, `.brightdata_serp_zone: str`, `.brightdata_unlocker_zone: str`, `.llm_model: str`, `.run_cost_cap_usd: float`, `.var_dir: Path`, `.db_path: Path` (a property)); `get_settings(refresh=False) -> Settings`; errors `VsmError`, `ConfigError`, `BudgetExceeded`, `GuardViolation`, `NoSuchTopic`, `NoSuchRun`
 
 - [ ] **Step 1: Write the failing test**
 
