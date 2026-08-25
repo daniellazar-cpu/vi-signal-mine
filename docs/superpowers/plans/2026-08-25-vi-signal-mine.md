@@ -1640,7 +1640,7 @@ git commit -m "Vendor the model client, and give it one call instead of two"
 
 **Interfaces:**
 - Consumes: `Topic`, `SpendBand`, `RunStore`, `AnthropicClient`, `vsm.mining.*`
-- Produces: `estimate_run_usd(band, *, cluster_count) -> CostEstimate`; `CostEstimate` (`.serp_usd`, `.discover_usd`, `.unlocker_usd`, `.model_usd`, `.total_usd`, `.breakdown: list[dict]`); `CostCap(cap_usd)` with `.spend(amount) -> None` (raises `BudgetExceeded`) and `.remaining()`; `run_mine(topic, store, *, client=None, miner=None, cluster_count=None, cap_usd=None) -> Run`
+- Produces: `config_for(band) -> MiningConfig`; `estimate_run_usd(band, *, cluster_count) -> CostEstimate`; `CostEstimate` (`.serp_usd`, `.discover_usd`, `.unlocker_usd`, `.model_usd`, `.total_usd`, `.breakdown: list[dict]`); `CostCap(cap_usd)` with `.spend(amount) -> None` (raises `BudgetExceeded`) and `.remaining()`; `run_mine(topic, store, *, client=None, miner=None, cluster_count=None, cap_usd=None) -> Run`
 - MINE writes exactly these artifacts: `signals.json`, `provenance.json`, `coverage.json`, `cost.json`, `plan.json`
 
 - [ ] **Step 1: Write the cost test**
@@ -1843,7 +1843,9 @@ class _FakeMiner:
         ]
         self.cost = cost
 
-    def run(self, clusters, config):
+    def run(self, *, campaign_id, clusters, queries_per_cluster=None):
+        # Matches LiveSignalMining.run exactly: keyword-only, campaign_id
+        # required, and the config lives on the constructor, not here.
         class _Outcome:
             rows = self.rows
             cost_usd = self.cost
@@ -1957,9 +1959,25 @@ from vsm.llm.schema import LEXICON_SCHEMA
 from vsm.mining.miner import MiningConfig
 from vsm.runs.model import Run
 from vsm.runs.store import RunStore
-from vsm.topics.model import Topic
+from vsm.topics.model import SpendBand, Topic
 
-__all__ = ["run_mine", "build_clusters"]
+__all__ = ["run_mine", "build_clusters", "config_for"]
+
+
+def config_for(band: SpendBand) -> MiningConfig:
+    """A spend band → the vendored miner's config.
+
+    Handed to ``LiveSignalMining(config=...)`` at construction. It is not a
+    ``run()`` argument — the parent's ``run()`` takes only ``campaign_id``,
+    ``clusters`` and an optional per-cluster query override.
+    """
+    return MiningConfig(
+        queries_per_cluster=band.queries_per_cluster,
+        serp_results_per_query=band.serp_results_per_query,
+        discover_results_per_cluster=band.discover_results_per_cluster,
+        page_fetches_per_cluster=band.page_fetches_per_cluster,
+        fetch_pages=band.page_fetches_per_cluster > 0,
+    )
 
 
 def build_clusters(topic: Topic, client: Any | None) -> list[dict[str, Any]]:
@@ -2012,14 +2030,10 @@ def run_mine(
     estimate = estimate_run_usd(band, cluster_count=n)
     cap = CostCap(cap_usd if cap_usd is not None else 5.0)
 
-    config = MiningConfig(
-        queries_per_cluster=band.queries_per_cluster,
-        serp_results_per_query=band.serp_results_per_query,
-        discover_results_per_cluster=band.discover_results_per_cluster,
-        page_fetches_per_cluster=band.page_fetches_per_cluster,
-        fetch_pages=band.page_fetches_per_cluster > 0,
-    )
-
+    # MiningConfig is CONSTRUCTOR state on LiveSignalMining, not a run()
+    # argument. A caller that wants a configured live miner builds it with
+    # `LiveSignalMining(serp=..., config=config_for(band))` and passes it in;
+    # `run_mine` only decides the shape, so a test can inject a fake.
     stopped, reason, outcome = False, "", None
     try:
         cap.spend(estimate.total_usd)
@@ -2027,7 +2041,9 @@ def run_mine(
         stopped, reason = True, str(exc)
 
     if not stopped and miner is not None:
-        outcome = miner.run(clusters, config)
+        # `campaign_id` is the vendored miner's name for what this fork calls a
+        # topic. They are the same value; both land on the row (see below).
+        outcome = miner.run(campaign_id=topic.topic_id, clusters=clusters)
         try:
             cap.spend(max(0.0, outcome.cost_usd - estimate.total_usd))
         except BudgetExceeded as exc:
@@ -2037,6 +2053,11 @@ def run_mine(
     if outcome is not None and not stopped:
         for row in outcome.rows:
             enriched = dict(row)
+            # `campaign_id` is already on the row — the vendored `build_row`
+            # puts it there, and the parity fixtures assert on it, so it stays.
+            # `topic_id` is this fork's name for the same value and is what
+            # every analysis pass reads. Equal by construction, and the spec
+            # (§3.1) names `topic_id` as the key build_row gains.
             enriched["topic_id"] = topic.topic_id
             enriched["snapshot_at"] = run.started_at
             rows.append(enriched)
