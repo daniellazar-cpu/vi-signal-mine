@@ -369,6 +369,12 @@ def _snapshot_usage(stream: Any) -> Any:
     failure path, so it swallows everything: losing the estimate is bad,
     replacing the real exception with an ``AssertionError`` from the
     accounting code is worse.
+
+    Unused today — ``complete_structured`` calls ``messages.create``, not
+    ``messages.stream``, so there is no live stream to snapshot. Retained
+    verbatim for a future streaming path over the same schema-constrained
+    call; a mid-stream failure needs exactly this partial-usage read to avoid
+    booking a real generation as free.
     """
     try:
         return getattr(stream.current_message_snapshot, "usage", None)
@@ -510,7 +516,11 @@ class AnthropicClient:
         ``sdk`` is always handed in — either by a caller directly, or by
         :func:`get_client`, which builds one fresh Anthropic client per call
         and hands it over. Either way this instance is the sole owner of its
-        connection pool.
+        connection pool: unlike the vendored parent, there is no
+        ``_owns_client`` guard here, so ``close`` always attempts to close
+        whatever ``sdk`` was passed in. Handing this class an ``sdk`` you
+        still need open elsewhere is a caller error, not something this class
+        can detect.
         """
         closer = getattr(self._sdk, "close", None)
         if closer is None:  # pragma: no cover - every real client has one
@@ -644,17 +654,27 @@ class AnthropicClient:
         byte-identical across runs or the prefix is unique per run and the
         cache never hits — which is why run-specific content belongs in
         ``user``.
+
+        The budget is checked at the top of *every* attempt, not once before
+        the loop: a cap that only gated the first attempt let the remaining
+        ones spend past it with nothing to stop them. The first attempt still
+        raises ``BudgetExceeded`` — the existing pre-flight contract, checked
+        before anything has been spent — but a cap that binds *between*
+        attempts, after real spend has already happened, returns a failed
+        ``StructuredOutcome`` instead: a run already in flight reports why it
+        stopped rather than raising out from under whatever called it.
         """
-        reserve = worst_case_usd(
-            prompt_chars=len(system) + len(user), max_output_tokens=max_output_tokens
-        )
-        blocked = self._check_budget(reserve_usd=reserve)
-        if blocked:
-            raise BudgetExceeded(blocked, rule="G3")
+        prompt_chars = len(system) + len(user)
+        reserve = worst_case_usd(prompt_chars=prompt_chars, max_output_tokens=max_output_tokens)
 
         last_reason = ""
-        for attempt in range(self._max_attempts):
-            meter = _AttemptMeter()
+        for attempt in range(1, self._max_attempts + 1):
+            blocked = self._check_budget(reserve_usd=reserve)
+            if blocked:
+                if attempt == 1:
+                    raise BudgetExceeded(blocked, rule="G3")
+                return StructuredOutcome(False, None, self._spend, blocked)
+            meter = _AttemptMeter(prompt_chars=prompt_chars)
             try:
                 message = self._sdk.messages.create(
                     model=self._model,
@@ -673,14 +693,18 @@ class AnthropicClient:
             except Exception as exc:  # noqa: BLE001 - reported, never raised through
                 self._meter_attempt(meter, exc)
                 last_reason = _reason_for(exc)
-                if not _is_retryable(exc, meter) or attempt == self._max_attempts - 1:
+                if not _is_retryable(exc, meter) or attempt == self._max_attempts:
                     return StructuredOutcome(False, None, self._spend, last_reason)
                 self._sleep_before_retry(attempt, exc)
-                if (blocked := self._check_budget(reserve_usd=reserve)):
-                    return StructuredOutcome(False, None, self._spend, blocked)
                 continue
 
-            self._spend.record(getattr(message, "usage", None))
+            # Meter through the same fall-through as every other attempt: a
+            # response with no usage block must book a flagged estimate, not
+            # nothing. Recording ``usage`` directly with ``LlmSpend.record``
+            # would have silently booked $0.00 for a generation that may well
+            # have been billed.
+            meter.usage = getattr(message, "usage", None)
+            self._meter_attempt(meter)
             for block in getattr(message, "content", []) or []:
                 if getattr(block, "type", "") == "tool_use":
                     data = dict(getattr(block, "input", {}) or {})
