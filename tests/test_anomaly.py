@@ -20,8 +20,19 @@ def test_median_ignores_one_freak_week():
     assert median([4, 6]) == 5
 
 
-def test_baseline_uses_at_most_the_previous_three_snapshots():
-    priors = [[th("x", 100)], [th("x", 4)], [th("x", 5)], [th("x", 6)]]
+def test_baseline_uses_the_LATEST_three_snapshots_not_the_oldest():
+    """The baseline is the *previous* three snapshots — recency is the whole
+    claim. A fixture where both ends of the list agree cannot prove that."""
+    priors = [[th("x", 1)], [th("x", 2)], [th("x", 3)],
+              [th("x", 7)], [th("x", 8)], [th("x", 9)]]
+    assert baseline_for("x", priors) == 8
+
+
+def test_baseline_is_the_median_not_the_mean_so_one_freak_week_does_not_redefine_normal():
+    """A mean would let 400 drag the baseline up to ~136, which would then
+    mask the next real spike instead of reporting it — the output would just
+    look quiet. Median holds the baseline at a stable 5."""
+    priors = [[th("x", 4)], [th("x", 5)], [th("x", 400)]]
     assert baseline_for("x", priors) == 5
 
 
@@ -37,10 +48,15 @@ def test_a_theme_vanishing_is_an_anomaly():
 
 
 def test_a_spike_needs_both_a_multiple_and_a_floor():
-    """Doubling from 1 to 2 is noise, and a report full of noise teaches its
-    reader to skip the section."""
-    noise = detect_anomalies([th("x", 2)], [[th("x", 1)], [th("x", 1)]])
-    assert not [a for a in noise if a.kind == "volume_spike"]
+    """A guard sitting behind a stricter guard is never reached by a fixture
+    that trips the outer one first. observed=4 against baseline=1 clears the
+    multiplier (4 > 2*1) cleanly, so only the floor stops it — that's the
+    behaviour this test is named for."""
+    noise = detect_anomalies([th("x", 4)], [[th("x", 1)], [th("x", 1)]])
+    assert not [a for a in noise if a.kind == "volume_spike"], (
+        "a 4x rise on a baseline of 1 is still only four mentions; the floor "
+        "exists exactly so a tiny baseline cannot manufacture drama"
+    )
 
     real = detect_anomalies([th("x", 20)], [[th("x", 5)], [th("x", 5)]])
     spike = [a for a in real if a.kind == "volume_spike"]
