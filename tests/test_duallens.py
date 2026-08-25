@@ -51,6 +51,29 @@ def test_a_one_sided_theme_has_no_divergence_and_says_why():
     assert "patient" in gap.reason.lower()
 
 
+def test_a_patient_only_theme_has_no_divergence_and_names_hcp_as_missing():
+    """The mirror image of the clinical-only case: hcp is the silent side."""
+    stances = [ThemeStance("t1", {"patient": {"negative": 3}}, "venue")]
+    gap = dual_lens([theme("t1", "patient only")], stances)[0]
+    assert gap.divergence is None
+    assert "hcp" in gap.reason.lower()
+
+
+def test_a_theme_with_neither_class_present_does_not_blame_one_side():
+    """Themes built purely from institutional venues (journals, guideline
+    bodies, labels — all mapped to ``institutional`` in KIND_TO_CLASS) have
+    no hcp signal and no patient signal at all. The reason must not claim
+    only one side is silent when neither spoke — that would tell a reader
+    the wrong side had something to say."""
+    stances = [ThemeStance("t1", {"institutional": {"neutral": 2}}, "venue")]
+    gap = dual_lens([theme("t1", "institutional only")], stances)[0]
+    assert gap.hcp_net is None
+    assert gap.patient_net is None
+    assert gap.divergence is None
+    assert "hcp" in gap.reason.lower()
+    assert "patient" in gap.reason.lower()
+
+
 def test_unmeasurable_themes_sort_last():
     themes = [theme("t1", "one sided"), theme("t2", "both sides")]
     stances = [

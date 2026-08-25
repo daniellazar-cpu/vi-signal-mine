@@ -56,9 +56,14 @@ def dual_lens(
         hcp_net, patient_net = net_stance(hcp), net_stance(patient)
 
         if hcp_net is None or patient_net is None:
-            missing = "patient" if patient_net is None else "hcp"
+            if hcp_net is None and patient_net is None:
+                missing = "hcp-class or patient-class"
+            elif patient_net is None:
+                missing = "patient-class"
+            else:
+                missing = "hcp-class"
             divergence, reason = None, (
-                f"no {missing}-class signal for this theme, so the two lenses "
+                f"no {missing} signal for this theme, so the two lenses "
                 "cannot be compared; silence is not agreement"
             )
         else:
