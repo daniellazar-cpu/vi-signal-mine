@@ -39,6 +39,15 @@ def test_auto_resolves_on_key_presence():
     assert off.effective_drafter_mode() == "off"
 
 
+def test_miner_auto_resolves_on_key_presence():
+    """Mirrors test_auto_resolves_on_key_presence, but for the miner's auto mode
+    — only the drafter's key resolution was covered before this."""
+    off = Settings.from_env({"VSM_OFFLINE": "0"})
+    on = Settings.from_env({"VSM_OFFLINE": "0", "BRIGHTDATA_API_KEY": "bd-real"})
+    assert off.effective_miner_mode() == "fake"
+    assert on.effective_miner_mode() == "live"
+
+
 def test_unknown_mode_is_rejected_loudly():
     from vsm.errors import ConfigError
 
