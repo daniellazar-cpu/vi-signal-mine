@@ -1583,20 +1583,6 @@ and on `AnthropicClient`:
             self._sleep_before_retry(attempt, RuntimeError(last_reason))
 
         return StructuredOutcome(False, None, self._spend, last_reason)
-                self._sleep_before_retry(attempt, exc)
-                if (blocked := self._check_budget(reserve_usd=reserve)):
-                    return StructuredOutcome(False, None, self._spend, blocked)
-                continue
-
-            self._spend.record(getattr(message, "usage", None))
-            for block in getattr(message, "content", []) or []:
-                if getattr(block, "type", "") == "tool_use":
-                    data = dict(getattr(block, "input", {}) or {})
-                    if on_progress:
-                        on_progress({"event": "structured_done", "keys": sorted(data)})
-                    return StructuredOutcome(True, data, self._spend)
-            last_reason = "model returned no tool_use block"
-        return StructuredOutcome(False, None, self._spend, last_reason)
 ```
 
 6. **Add** `get_client`, replacing `get_drafter`:
@@ -1731,9 +1717,12 @@ def test_the_cap_binds_mid_loop_not_only_before_the_first_attempt():
     """A cap that is only pre-flighted is not a cap. Before the budget check
     moved to the top of the loop body, three attempts against a $1 cap spent
     $3.60 and raised nothing."""
+    # A generous cap on purpose. Pinned tight, this test flips to a different
+    # failure the moment a published rate or the chars-per-token estimate
+    # changes, and then it fails for a reason unrelated to the defect.
     client = AnthropicClient(
         sdk=_NoToolUseAnthropic(),
-        model="claude-opus-5", cap_usd=1.0, retry_backoff_s=0.0,
+        model="claude-opus-5", cap_usd=0.025, retry_backoff_s=0.0,
     )
     out = client.complete_structured(
         system="S" * 1000, user="U" * 1000, schema=SCHEMA, max_output_tokens=512
