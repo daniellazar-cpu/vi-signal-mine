@@ -1484,6 +1484,18 @@ def _tool_for(schema: dict[str, Any]) -> dict[str, Any]:
 and on `AnthropicClient`:
 
 ```python
+    @property
+    def spend(self) -> LlmSpend:
+        """The cumulative ledger for this client's whole life.
+
+        Public because callers need the *run* total, not the per-call figure on
+        a single :class:`StructuredOutcome` — INSIGHT makes several calls and
+        records one cost. Read it directly; never through ``getattr`` with a
+        default, because a zero from a renamed attribute reads exactly like a
+        run that spent nothing.
+        """
+        return self._spend
+
     def complete_structured(
         self,
         *,
@@ -1702,6 +1714,20 @@ def test_the_two_banned_lists_are_equal():
     from vsm.llm.prompts import BANNED_DIRECTIVES as prompt
 
     assert set(guard) == set(prompt)
+
+
+def test_cumulative_spend_is_readable_from_the_client():
+    """INSIGHT makes several calls and records one cost, so it needs the
+    running total rather than the per-call figure on one outcome."""
+    calls = []
+    client = AnthropicClient(
+        sdk=_FakeAnthropic({"themes": []}, calls), model="claude-opus-5", cap_usd=5.0
+    )
+    assert client.spend.usd == 0.0
+    client.complete_structured(system="SYS", user="USR", schema=SCHEMA, max_output_tokens=64)
+    client.complete_structured(system="SYS", user="USR2", schema=SCHEMA, max_output_tokens=64)
+    assert client.spend.usd > 0
+    assert client.spend.calls == 2
 
 
 def test_the_prompts_are_below_the_cache_floor_and_we_say_so():
@@ -4172,9 +4198,12 @@ def run_insight(
     )
     store.write_artifact(run.run_id, "findings.json", [asdict(f) for f in findings])
 
-    # `LlmSpend.usd` is a property in the vendored client, not a method.
-    spend_obj = getattr(client, "spend", None)
-    spend = float(getattr(spend_obj, "usd", 0.0) or 0.0)
+    # Read the cumulative ledger DIRECTLY — no `getattr` with a default.
+    # A cost of 0.0 produced by a renamed attribute is indistinguishable from a
+    # run that genuinely spent nothing, and this is the number an operator
+    # trusts to know what they spent. A rename must raise, not round to zero.
+    # `client is None` is the real offline case and is the only zero we accept.
+    spend = client.spend.usd if client is not None else 0.0
     return store.finish(run.run_id, "complete", cost_usd=spend)
 ```
 
