@@ -198,7 +198,9 @@ def tier_for(
     return default
 
 
-def assert_collectable(url: str) -> dict[str, str]:
+def assert_collectable(
+    url: str, *, catalogue: Sequence[Mapping[str, object]] | None = None
+) -> dict[str, str]:
     """Record the tier and let the caller proceed.
 
     The parent raises ``TierCRefused`` here. This fork does not (spec D5): the
@@ -206,12 +208,16 @@ def assert_collectable(url: str) -> dict[str, str]:
     still computed and recorded on every row, so the decision stays visible in
     the ledger rather than becoming invisible.
 
+    ``catalogue`` keeps the parent's original contract — a caller's per-campaign
+    venue catalogue can still promote a host past the bare blocklist tier — it is
+    only the *raise* behaviour that D5 changes, not the tier computation.
+
     ``VSM_ENFORCE_TIER_C=1`` restores the parent's refusal. It is off by
     default and exists so reversing D5 is a flag, not an excavation.
     """
     import os
 
-    tier = tier_for(url)
+    tier = tier_for(url, catalogue=catalogue)
     if tier == "C" and os.environ.get("VSM_ENFORCE_TIER_C", "0") == "1":
         raise TierCRefused(f"tier C domain refused: {domain_of(url)}")
     return {"domain": domain_of(url), "tier": tier}

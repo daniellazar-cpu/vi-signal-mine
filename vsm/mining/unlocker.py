@@ -13,13 +13,18 @@ Billing: per 1,000 **successful** responses; failures are not billed in standard
 mode — so a failed fetch here records ``billable=False`` upstream.
 
 What this client will not do (PRD §9.1 "explicitly not built"): no anti-detect
-browser, no proxy rotation to evade enforcement, no paywall bypass, no Tier-C
-domain, and nothing a venue's robots.txt disallows — the caller must pass
-``robots_ok=True``, which :class:`~vsm.mining.robots.RobotsCache` decides.
+browser, no proxy rotation to evade enforcement, no paywall bypass. Tier and
+robots-allowed are always recorded on the returned page (spec D5): by default
+neither vetoes the fetch, and ``VSM_ENFORCE_TIER_C=1`` restores the parent's
+refusal of a Tier-C domain or a robots.txt ``Disallow``. The caller must still
+pass ``robots_ok``, which :class:`~vsm.mining.robots.RobotsCache` decides — that
+requirement survives D5, because the answer is still wanted, it just no longer
+gates by default.
 """
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -40,6 +45,12 @@ class UnlockedPage:
     fetched_at: datetime
     status: int = 200
     data_format: str = "markdown"
+    #: D5: the tier this host classified at, and whether robots.txt allowed this
+    #: path — always recorded, even in the (default) case where neither vetoed
+    #: the fetch. ``VSM_ENFORCE_TIER_C=1`` restores the parent's refusal instead
+    #: of reaching this far.
+    tier: str = "B"
+    robots_ok: bool = True
 
     @property
     def domain(self) -> str:
@@ -71,21 +82,22 @@ class UnlockerClient:
         self._now = now or (lambda: datetime.now(timezone.utc))
 
     def fetch(self, url: str, *, robots_ok: bool, catalogue: Any = None) -> UnlockedPage:
-        """Fetch ``url``. Records tier (spec D5: no refusal by default) and refuses
-        a robots ``Disallow``.
+        """Fetch ``url``. Tier and robots are recorded, not gated, by default
+        (spec D5) — ``VSM_ENFORCE_TIER_C=1`` restores the parent's refusal of a
+        Tier-C domain or a robots.txt ``Disallow``.
 
         ``robots_ok`` is a required keyword rather than a default so that a caller
-        cannot fetch a page without having formed an opinion about robots.txt.
+        cannot fetch a page without having formed an opinion about robots.txt —
+        that requirement survives D5 unchanged: we still want the answer, we just
+        no longer let it veto by default.
 
-        ``catalogue`` is accepted for signature compatibility with the caller in
-        ``vsm.mining.miner`` (which uses it independently, before this call, to
-        compute ``hit.collection_tier``) but is no longer forwarded to
-        ``assert_collectable`` — that function's signature dropped the parameter
-        under spec D5, since this fork has no notion of a per-campaign venue
-        catalogue overriding the blocklist.
+        ``catalogue`` is forwarded to :func:`~vsm.mining.tiers.assert_collectable`
+        unchanged — D5 only changed that function's *raise* behaviour, not its
+        contract; a per-campaign venue catalogue can still promote a host's tier.
         """
-        assert_collectable(url)
-        if not robots_ok:
+        record = assert_collectable(url, catalogue=catalogue)
+        enforce = os.environ.get("VSM_ENFORCE_TIER_C", "0") == "1"
+        if not robots_ok and enforce:
             raise BrightDataError(
                 f"refused {domain_of(url)} — robots.txt disallows this path for our agent; "
                 "a Disallow moves the venue to Tier C for this campaign (PRD §9.1)"
@@ -107,4 +119,6 @@ class UnlockerClient:
             fetched_at=self._now(),
             status=response.status_code,
             data_format=self.data_format,
+            tier=record["tier"],
+            robots_ok=robots_ok,
         )

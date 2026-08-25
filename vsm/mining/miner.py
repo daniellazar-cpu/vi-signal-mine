@@ -43,6 +43,7 @@ Order of operations, and why each step is where it is:
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping, Sequence
@@ -153,6 +154,10 @@ class MiningOutcome:
     denied: list[dict[str, str]] = field(default_factory=list)
     #: the plan, as planned (both miners can rebuild this and must agree)
     plan: list[dict[str, Any]] = field(default_factory=list)
+    #: D5: per-host tier + robots answer, recorded even when (default) neither
+    #: vetoed a fetch — this is what later lands in coverage.json. "recorded per
+    #: host in coverage — reporting, not gating" (spec D5, design §2).
+    coverage: list[dict[str, Any]] = field(default_factory=list)
 
 
 class LiveSignalMining:
@@ -652,8 +657,13 @@ class LiveSignalMining:
         ]
 
     def _fetch_page(self, hit: Hit, *, budget: Budget, outcome: MiningOutcome) -> tuple[Any, str]:
-        """Web Unlocker fetch, robots-gated. Returns ``(page | None, robots summary)``."""
+        """Web Unlocker fetch. Tier and robots are recorded (spec D5), not gated,
+        unless ``VSM_ENFORCE_TIER_C=1`` restores the parent's refusal.
+
+        Returns ``(page | None, robots summary)``.
+        """
         assert self.unlocker is not None
+        enforce = os.environ.get("VSM_ENFORCE_TIER_C", "0") == "1"
         robots_ok = True
         summary = "robots.txt not consulted (no cache injected)"
         if self.robots is not None:
@@ -661,11 +671,27 @@ class LiveSignalMining:
             robots_ok = state.allows(hit.url, self.robots.user_agent)
             summary = state.summary()
             if not robots_ok:
-                outcome.notes.append(
-                    f"{hit.domain}: robots.txt disallows this path — page not fetched, "
-                    "search-result metadata only"
+                # D5: recorded per host in coverage — reporting, not gating.
+                # Nothing here may be silently dropped, in either branch below.
+                outcome.coverage.append(
+                    {
+                        "domain": hit.domain,
+                        "tier": hit.collection_tier,
+                        "robots_ok": False,
+                        "robots_summary": summary,
+                        "enforced": enforce,
+                    }
                 )
-                return None, f"{summary}; Disallow for this path — page not fetched"
+                if enforce:
+                    outcome.notes.append(
+                        f"{hit.domain}: robots.txt disallows this path — page not fetched, "
+                        "search-result metadata only"
+                    )
+                    return None, f"{summary}; Disallow for this path — page not fetched"
+                outcome.notes.append(
+                    f"{hit.domain}: robots.txt disallows this path — fetched anyway (spec D5: "
+                    "recorded in coverage, not gated; VSM_ENFORCE_TIER_C=1 restores the refusal)"
+                )
         budget.check(1, what=f"page fetch {hit.domain}")
         at = self.clock()
         try:
