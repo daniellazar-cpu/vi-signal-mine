@@ -1,7 +1,7 @@
 import pytest
 
 from vsm.analysis.cluster import Theme
-from vsm.analysis.momentum import momentum
+from vsm.analysis.momentum import NO_BASELINE, momentum
 
 
 def th(name, volume):
@@ -13,7 +13,7 @@ def test_first_snapshot_reports_no_baseline_rather_than_a_trend():
     assert out[0].volume_now == 5
     assert out[0].volume_prior is None
     assert out[0].delta is None and out[0].delta_pct is None
-    assert out[0].reason == "no prior snapshot"
+    assert out[0].reason == NO_BASELINE
 
 
 def test_growth_against_the_immediately_prior_snapshot():
@@ -48,6 +48,18 @@ def test_a_theme_that_vanished_is_reported_at_zero():
     names = {m.theme_name: m for m in out}
     assert names["gone"].volume_now == 0
     assert names["gone"].delta == -7
+
+
+def test_two_themes_sharing_a_name_are_summed_not_dropped():
+    """Two Theme fragments with the same name are two counted pieces of the
+    same reported topic. A plain dict-by-name would let the second overwrite
+    the first and understate volume_now; summing is the version that does
+    not throw signals away."""
+    fragment_a = Theme("th-a", "cost", ("s1", "s2"), 2, {}, {})
+    fragment_b = Theme("th-b", "cost", ("s3",), 1, {}, {})
+    out = momentum([fragment_a, fragment_b], prior_snapshots=[])
+    assert out[0].theme_name == "cost"
+    assert out[0].volume_now == 3
 
 
 def test_no_field_named_forecast_exists():

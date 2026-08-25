@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Sequence
 
-__all__ = ["ThemeMomentum", "momentum"]
+__all__ = ["ThemeMomentum", "momentum", "NO_BASELINE"]
 
 NO_BASELINE = "no prior snapshot"
 
@@ -36,7 +36,15 @@ class ThemeMomentum:
 
 
 def _volumes(themes: Sequence[Any]) -> dict[str, int]:
-    return {t.name: t.volume for t in themes}
+    """Sum, don't overwrite. Two ``Theme`` objects sharing a name are two
+    counted fragments of the same reported topic; keying a plain dict
+    comprehension on the name would let the second silently discard the
+    first one's signals. Silently dropping counted signals is worse than
+    summing them."""
+    totals: dict[str, int] = {}
+    for t in themes:
+        totals[t.name] = totals.get(t.name, 0) + t.volume
+    return totals
 
 
 def momentum(

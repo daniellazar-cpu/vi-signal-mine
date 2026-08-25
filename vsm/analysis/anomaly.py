@@ -12,6 +12,22 @@ normal — and if it did, it would also mask the next real spike.
 A spike must clear both a multiple and a floor. Doubling from one mention to two
 is arithmetically a spike and substantively nothing, and a section full of
 those teaches its reader to skip the section.
+
+**"Appeared" is scoped to the baseline window, not to all history.** A theme
+present six snapshots ago, silent for the last three, and back now is *new
+for the purpose of this comparison* — what happened outside the window is not
+part of what "normal" means here. It is reported as ``theme_appeared``, never
+``volume_spike``: scoring a return against a baseline of zero would produce a
+manufactured, unbounded-looking ratio (anything over zero), and stating
+plainly that the theme has no baseline in the comparison window is the more
+honest description of what changed.
+
+**A baseline of ``0.0`` is a measurement, not a missing value.** A theme that
+sat in the window with real snapshots but no volume has a true baseline of
+zero — that is different from having no baseline at all (``None``), which
+only happens when there are no prior snapshots. Every comparison below tests
+``baseline is not None``, never ``if baseline``, so a real zero is not
+mistaken for an absence and does not silently suppress a spike.
 """
 
 from __future__ import annotations
@@ -72,7 +88,10 @@ def detect_anomalies(
         return []
 
     now = {t.name: t.volume for t in current_themes}
-    seen_before = {t.name for snapshot in prior_snapshots for t in snapshot}
+    # Scoped to the baseline window, not all history: what a theme did before
+    # the window is not part of what "normal" means for this comparison.
+    window = list(prior_snapshots)[-BASELINE_WINDOW:]
+    seen_in_window = {t.name for snapshot in window for t in snapshot}
     found: list[Anomaly] = []
     counter = 0
 
@@ -81,22 +100,23 @@ def detect_anomalies(
         counter += 1
         found.append(Anomaly(f"anom-{counter:03d}", kind, name, observed, baseline, detail))
 
-    for name in sorted(set(now) | seen_before):
+    for name in sorted(set(now) | seen_in_window):
         observed = now.get(name, 0)
         baseline = baseline_for(name, prior_snapshots)
 
-        if name not in seen_before and observed >= MIN_VOLUME:
+        if name not in seen_in_window and observed >= MIN_VOLUME:
             _add("theme_appeared", name, observed, baseline,
-                 f"{observed} signals, and the theme is absent from every prior snapshot")
+                 f"{observed} signals; absent from every one of the last "
+                 f"{len(window)} snapshot(s) used as the baseline")
             continue
-        if name not in now and baseline and baseline >= MIN_VOLUME:
+        if name not in now and baseline is not None and baseline >= MIN_VOLUME:
             _add("theme_vanished", name, 0, baseline,
                  f"baseline was {baseline:g}; this snapshot has none")
             continue
-        if baseline and observed > baseline * SPIKE_MULTIPLE and observed >= MIN_VOLUME:
+        if baseline is not None and observed > baseline * SPIKE_MULTIPLE and observed >= MIN_VOLUME:
             _add("volume_spike", name, observed, baseline,
                  f"{observed} against a baseline of {baseline:g}")
-        elif baseline and baseline >= MIN_VOLUME and observed * SPIKE_MULTIPLE < baseline:
+        elif baseline is not None and baseline >= MIN_VOLUME and observed * SPIKE_MULTIPLE < baseline:
             _add("volume_collapse", name, observed, baseline,
                  f"{observed} against a baseline of {baseline:g}")
     return found
