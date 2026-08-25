@@ -981,6 +981,17 @@ resemblance to whatever the first implementation happened to do. Write
 so Task 24 registers its backend and inherits every case unchanged — that shared
 suite is the deliverable here, not the Protocol declaration.
 
+**Two rules for the shared suite, both learned the hard way in this plan.**
+First, every case must reach the store through its public surface or through a
+hook the factory supplies — a case that reaches for `sqlite3` directly is
+SQLite-only and silently stops covering the second backend, which defeats the
+entire point of the file. Second, the ordering case must be written so it would
+**fail** against an `ORDER BY started_at` implementation: scramble the timestamps
+against insertion order first, because a sequential loop passes under both
+orderings on a monotonic clock. On Postgres the ordering comes from `BIGSERIAL`
+rather than a `MAX(seq)+1` subquery, so this is the one case policing two
+genuinely different implementations.
+
 Do not build a SQL dialect shim. The two backends will each write their own SQL.
 
 - [ ] **Step 1: Write the failing test**
