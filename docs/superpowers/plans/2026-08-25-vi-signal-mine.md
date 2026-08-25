@@ -161,11 +161,23 @@ __all__ = [
 
 
 class VsmError(Exception):
-    """Base for everything this tool raises deliberately."""
+    """Base for everything this tool raises deliberately.
+
+    ``str(exc)`` carries the rule when one is set, because the whole point of
+    recording it is that a reader who finds this in a log should not have to
+    open the source to learn which rule fired. Storing ``rule`` without
+    surfacing it meant every call site had to remember to repeat the code in
+    its own message — and a guard that forgets leaves the rule invisible
+    exactly when it matters.
+    """
 
     def __init__(self, message: str, *, rule: str = "") -> None:
         super().__init__(message)
         self.rule = rule
+
+    def __str__(self) -> str:
+        base = super().__str__()
+        return f"{self.rule}: {base}" if self.rule else base
 
 
 class ConfigError(VsmError):
@@ -4884,12 +4896,20 @@ def env(tmp_path):
     return ts, rs, topic
 
 
-def _rows(n, venue="studentdoctor.net", theme="tolerability"):
-    return [{"signal_id": f"s{i}", "venue": f"v{i}.example.org", "theme": theme,
+def _rows(n, theme="tolerability"):
+    """`n` signals on `n` genuinely independent publishers.
+
+    Distinct **registrable** domains, not subdomains of one: `v0.example.org`
+    and `v1.example.org` both reduce to `example.org`, so a fixture built that
+    way collapses to a single source and no claim in it can ever reach
+    `corroborated` — which would leave the report's main-body path untested
+    while every test still passed.
+    """
+    return [{"signal_id": f"s{i}", "venue": f"outlet{i}.com", "theme": theme,
              "title": f"{theme} {i}", "excerpt": theme,
              "captured_at": "2026-08-25T00:00:00+00:00",
              "collection_method": "serp_result",
-             "url": f"https://v{i}.example.org/{i}"} for i in range(n)]
+             "url": f"https://outlet{i}.com/{i}"} for i in range(n)]
 
 
 def _pipeline(rs, topic, rows):
@@ -4911,8 +4931,11 @@ def test_the_methodology_states_the_author_basis(env):
     ts, rs, topic = env
     insight = _pipeline(rs, topic, _rows(4))
     run = run_report(topic, insight.run_id, rs)
-    text = rs.read_artifact(run.run_id, "methodology.md")
-    assert "venue" in text.lower()
+    text = rs.read_artifact(run.run_id, "methodology.md").lower()
+    # A bare "venue" appears for several unrelated reasons, so it would pass
+    # with the author-basis sentence deleted. Assert the claim itself.
+    assert "author class" in text
+    assert "derived from the venue" in text
 
 
 def test_the_methodology_states_the_ae_scope_limit_exactly_once(env):
