@@ -490,6 +490,19 @@ class AnthropicClient:
         self._retry_backoff_s = max(0.0, float(retry_backoff_s))
         self._max_attempts = _MAX_ATTEMPTS
 
+    # ------------------------------------------------------------------ ledger
+    @property
+    def spend(self) -> LlmSpend:
+        """The cumulative ledger for this client's whole life.
+
+        Public because callers need the *run* total, not the per-call figure on
+        a single StructuredOutcome — INSIGHT makes several calls and records one
+        cost. Read it directly; never through `getattr` with a default, because
+        a zero from a renamed attribute reads exactly like a run that spent
+        nothing.
+        """
+        return self._spend
+
     # ------------------------------------------------------------- lifecycle
     def close(self) -> None:
         """Release the HTTP connection pool.

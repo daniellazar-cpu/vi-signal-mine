@@ -55,6 +55,28 @@ def test_complete_structured_returns_validated_data():
     assert out.spend.usd > 0
 
 
+def test_spend_is_a_public_cumulative_ledger():
+    """A run makes several calls and records one cost. The client's own
+    ``.spend`` must therefore accumulate across calls, not just the per-call
+    figure a single ``StructuredOutcome`` carries — and it must be a plain
+    public attribute, never read through a defaulting ``getattr``, because a
+    zero from a renamed attribute is indistinguishable from a run that
+    genuinely spent nothing.
+    """
+    calls = []
+    client = AnthropicClient(
+        sdk=_FakeAnthropic({"themes": []}, calls), model="claude-opus-5", cap_usd=5.0
+    )
+    assert client.spend.usd == 0.0
+    assert client.spend.calls == 0
+
+    client.complete_structured(system="SYS", user="USR", schema=SCHEMA, max_output_tokens=64)
+    client.complete_structured(system="SYS", user="USR", schema=SCHEMA, max_output_tokens=64)
+
+    assert client.spend.usd > 0
+    assert client.spend.calls == 2
+
+
 def test_the_system_prompt_is_sent_as_a_cacheable_prefix():
     """drafting-style prompts are byte-identical across runs, which is the only
     reason the cache ever hits. Interpolating a topic into the system prompt
