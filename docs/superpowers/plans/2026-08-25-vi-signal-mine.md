@@ -1401,7 +1401,7 @@ def test_complete_structured_returns_validated_data():
     )
     assert out.ok is True
     assert out.data == {"themes": ["tolerability", "cost"]}
-    assert out.spend.usd() > 0
+    assert out.spend.usd > 0
 
 
 def test_the_system_prompt_is_sent_as_a_cacheable_prefix():
@@ -1589,10 +1589,18 @@ One byte-stable system prompt per pass. Every prompt ends with the same closing 
 ```python
 """System prompts. Each one is a **constant** and must stay byte-identical.
 
-The cache prefix is the system block. Interpolating a topic, a brand or a term
-list into one of these makes the prefix unique per run and throws the cache
-away — and the cache is most of the cost argument. Run-specific content goes in
-the user message, always.
+Run-specific content — a topic, a brand, a term list — goes in the *user*
+message, never interpolated into one of these. Interpolating would make the
+system block unique per run.
+
+**On caching, honestly.** The parent engine treats that discipline as
+load-bearing because its prompts are long enough to cache. Ours are not: each of
+these is roughly 140 tokens against Claude Opus's 512-token minimum cacheable
+prefix, so **no cache hit is possible today** and the cost argument the parent
+makes does not transfer at this size. The discipline is kept anyway because it
+costs nothing and becomes real if these grow — but do not repeat the parent's
+cost claim about it, because here it would be a claim we have not earned, which
+is the same fault G5 rejects in the report.
 """
 
 from __future__ import annotations
@@ -1694,6 +1702,25 @@ def test_the_two_banned_lists_are_equal():
     from vsm.llm.prompts import BANNED_DIRECTIVES as prompt
 
     assert set(guard) == set(prompt)
+
+
+def test_the_prompts_are_below_the_cache_floor_and_we_say_so():
+    """Recorded state, not an aspiration.
+
+    Every system prompt is ~140 tokens against Claude Opus's 512-token minimum
+    cacheable prefix, so no prompt cache hit is possible today. If someone
+    lengthens a prompt past the floor this fails, and the docstring in
+    `prompts.py` should then be updated to stop disclaiming the benefit — the
+    point is that the claim tracks reality in either direction.
+    """
+    import vsm.llm.prompts as P
+    from vsm.llm.client import prefix_is_cacheable
+
+    systems = [v for k, v in vars(P).items() if k.endswith("_SYSTEM")]
+    assert systems
+    assert all(
+        prefix_is_cacheable("claude-opus-5", text) is False for text in systems
+    )
 
 
 def test_every_schema_forbids_extra_properties():
@@ -4145,7 +4172,9 @@ def run_insight(
     )
     store.write_artifact(run.run_id, "findings.json", [asdict(f) for f in findings])
 
-    spend = getattr(getattr(client, "_spend", None), "usd", lambda: 0.0)()
+    # `LlmSpend.usd` is a property in the vendored client, not a method.
+    spend_obj = getattr(client, "spend", None)
+    spend = float(getattr(spend_obj, "usd", 0.0) or 0.0)
     return store.finish(run.run_id, "complete", cost_usd=spend)
 ```
 
