@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Literal, Mapping, Sequence
+from typing import Any, Iterable, Literal, Mapping, Sequence
 
 from vsm.mining.tiers import registrable_domain
 
@@ -46,6 +46,31 @@ class Finding:
     signal_ids: tuple[str, ...]
     independent_sources: int
     tier: Tier
+    #: Ids the claim named that do not resolve to a ledger row. A later guard
+    #: binds every claim's signal_ids back to real rows and blocks the whole
+    #: report on any that fail — so a hallucinated id belongs neither in
+    #: ``signal_ids`` (where it would inflate the evidence list past what
+    #: ``independent_sources`` was actually computed from) nor nowhere at all
+    #: (a silent drop is indistinguishable from the model finding nothing).
+    #: It is recorded here instead.
+    unresolved_ids: tuple[str, ...] = ()
+
+
+def _dedupe_preserve_order(ids: Iterable[str]) -> list[str]:
+    """First-seen order, no repeats.
+
+    A repeated id must count once. Left undeduped it doesn't change
+    ``independent_source_count`` (union-find collapses a sid unioned with
+    itself), but it would make ``signal_ids`` overstate the evidence a
+    finding rests on.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for i in ids:
+        if i not in seen:
+            seen.add(i)
+            out.append(i)
+    return out
 
 
 def _norm_title(signal: Mapping[str, Any]) -> str:
@@ -107,8 +132,10 @@ def corroborate(
 ) -> list[Finding]:
     findings: list[Finding] = []
     for index, claim in enumerate(claims, start=1):
-        ids = tuple(str(s) for s in claim.get("signal_ids", []))
-        rows = [signals_by_id[i] for i in ids if i in signals_by_id]
+        raw_ids = _dedupe_preserve_order(str(s) for s in claim.get("signal_ids", []))
+        ids = tuple(i for i in raw_ids if i in signals_by_id)
+        unresolved = tuple(i for i in raw_ids if i not in signals_by_id)
+        rows = [signals_by_id[i] for i in ids]
         count = independent_source_count(rows)
         findings.append(
             Finding(
@@ -117,6 +144,7 @@ def corroborate(
                 signal_ids=ids,
                 independent_sources=count,
                 tier=tier_for_count(count),
+                unresolved_ids=unresolved,
             )
         )
     return findings

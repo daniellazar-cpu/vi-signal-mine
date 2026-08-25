@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from vsm.llm.prompts import CLUSTER_SYSTEM
 from vsm.llm.schema import THEMES_SCHEMA
@@ -40,6 +40,22 @@ def kind_mix_for(signals: Sequence[Mapping[str, Any]]) -> dict[str, int]:
     """Venue kinds, straight from the registry. An unregistered venue counts as
     ``unknown`` rather than being assigned a plausible kind."""
     return dict(Counter(kind_of(str(s.get("venue") or "")) or "unknown" for s in signals))
+
+
+def _dedupe_preserve_order(ids: Iterable[Any]) -> list[Any]:
+    """First-seen order, no repeats.
+
+    A repeated id in the model's list would otherwise count the same signal
+    twice into ``volume`` — the same misrepresentation ``corroborate.py``
+    guards against for ``signal_ids``, kept consistent here.
+    """
+    seen: set[Any] = set()
+    out: list[Any] = []
+    for i in ids:
+        if i not in seen:
+            seen.add(i)
+            out.append(i)
+    return out
 
 
 def _theme(theme_id: str, name: str, rows: Sequence[Mapping[str, Any]]) -> Theme:
@@ -86,7 +102,8 @@ def cluster_themes(
     themes: list[Theme] = []
     for index, proposed in enumerate(out.data.get("themes", []), start=1):
         # An id the model invented cannot conjure a signal into the ledger.
-        rows = [by_id[sid] for sid in proposed.get("signal_ids", []) if sid in by_id]
+        proposed_ids = _dedupe_preserve_order(proposed.get("signal_ids", []))
+        rows = [by_id[sid] for sid in proposed_ids if sid in by_id]
         if not rows:
             continue
         themes.append(

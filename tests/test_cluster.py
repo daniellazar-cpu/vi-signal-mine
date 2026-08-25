@@ -53,6 +53,29 @@ def test_a_model_supplied_volume_is_ignored():
     assert themes[0].volume == 2
 
 
+def test_duplicate_signal_ids_from_the_model_do_not_inflate_volume():
+    """A repeated id in the model's list must count once, in first-seen
+    order — otherwise the same signal is counted into volume twice, which
+    is exactly the "a number nobody can reproduce" failure this pass exists
+    to prevent, just introduced through a duplicate rather than an invented
+    number."""
+
+    class _Client:
+        def complete_structured(self, **kw):
+            class _Out:
+                ok = True
+                data = {"themes": [
+                    {"theme_id": "th-1", "name": "tolerability",
+                     "signal_ids": ["a", "a", "b"]}
+                ]}
+                reason = ""
+            return _Out()
+
+    themes = cluster_themes(ROWS[:2], client=_Client())
+    assert themes[0].signal_ids == ("a", "b")
+    assert themes[0].volume == 2
+
+
 def test_an_unknown_signal_id_from_the_model_is_dropped():
     """The model may hallucinate an id. It cannot conjure a signal into the
     ledger by naming one."""
