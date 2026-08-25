@@ -6,8 +6,10 @@ import pytest
 from vsm.config import Settings
 from vsm.mining.budget import Budget
 from vsm.mining.client import BrightDataClient
-from vsm.mining.miner import LiveSignalMining, MiningOutcome
+from vsm.mining.discover import DiscoverClient
+from vsm.mining.miner import LiveSignalMining, MiningConfig, MiningOutcome
 from vsm.mining.robots import RobotsCache
+from vsm.mining.serp import SerpClient
 from vsm.mining.signals import Hit, build_row
 from vsm.mining.tiers import assert_collectable
 from vsm.mining.unlocker import UnlockerClient
@@ -191,3 +193,176 @@ def test_run_layer_allows_pass_through_unaffected():
     assert page is not None
     assert page.robots_ok is True
     assert outcome.coverage == []
+
+
+# --------------------------------------------------------------------------- #
+# Round 3 (coordinator correction): three more ungated drops surfaced by the
+# round-2 smoke check — the parent's own "parser" and "run layer" checkpoints.
+# Until these convert too, D5 is inert: a Tier-C host still produces no row at
+# all, which is exactly the outcome the decision was meant to reverse.
+# --------------------------------------------------------------------------- #
+
+
+def _serp(handler) -> SerpClient:
+    settings = Settings.from_env({"VSM_OFFLINE": "1", "BRIGHTDATA_API_KEY": "bd-fake"})
+    bd_client = BrightDataClient(settings, transport=httpx.MockTransport(handler))
+    return SerpClient(bd_client, zone=settings.brightdata_serp_zone)
+
+
+def _serp_handler_with_tier_c(request: httpx.Request) -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "organic": [
+                {
+                    "rank": 1,
+                    "title": "Doximity thread",
+                    "link": TIER_C_URL,
+                    "description": "clinicians discuss OIC",
+                }
+            ]
+        },
+    )
+
+
+def _discover(handler) -> DiscoverClient:
+    settings = Settings.from_env({"VSM_OFFLINE": "1", "BRIGHTDATA_API_KEY": "bd-fake"})
+    bd_client = BrightDataClient(settings, transport=httpx.MockTransport(handler))
+    return DiscoverClient(bd_client, sleep=lambda s: None)
+
+
+def _discover_handler_with_tier_c(request: httpx.Request) -> httpx.Response:
+    if request.method == "POST":
+        return httpx.Response(200, json={"status": "ok", "task_id": "task-1"})
+    return httpx.Response(
+        200,
+        json={
+            "status": "done",
+            "results": [
+                {"link": TIER_C_URL, "title": "Doximity", "description": "d", "relevance_score": 0.9}
+            ],
+        },
+    )
+
+
+def test_serp_search_records_tier_c_without_stripping_it():
+    """Gate 6 (serp.py): a Tier-C link survives the parser by default, carrying
+    its tier. A parser that silently shortens its own result list is the worst
+    of the seven gates — nothing downstream can tell "the venue said nothing"
+    from "we deleted it"."""
+    client = _serp(_serp_handler_with_tier_c)
+    results = client.search("opioid-induced constipation forum")
+    assert [r.link for r in results] == [TIER_C_URL]
+    assert results[0].tier == "C"
+
+
+def test_serp_search_strips_tier_c_when_enforced(monkeypatch):
+    monkeypatch.setenv("VSM_ENFORCE_TIER_C", "1")
+    client = _serp(_serp_handler_with_tier_c)
+    results = client.search("opioid-induced constipation forum")
+    assert results == []
+
+
+def test_discover_rows_record_tier_c_without_stripping_it():
+    """Gate 7 (discover.py): same contract as the SERP parser (gate 6)."""
+    client = _discover(_discover_handler_with_tier_c)
+    rows = client.discover("OIC", intent="clinical discussion")
+    assert [r.link for r in rows] == [TIER_C_URL]
+    assert rows[0].tier == "C"
+
+
+def test_discover_rows_strip_tier_c_when_enforced(monkeypatch):
+    monkeypatch.setenv("VSM_ENFORCE_TIER_C", "1")
+    client = _discover(_discover_handler_with_tier_c)
+    rows = client.discover("OIC", intent="clinical discussion")
+    assert rows == []
+
+
+def _call_rows_for(mining: LiveSignalMining, hits: list[Hit]) -> tuple[list[dict], set, set]:
+    budget = Budget(campaign_id="t1")
+    outcome = MiningOutcome()
+    attempted: set[str] = set()
+    restricted: set[str] = set()
+    rows = mining._rows_for(
+        hits,
+        cluster=CLUSTER,
+        campaign_id="t1",
+        budget=budget,
+        outcome=outcome,
+        index={},
+        attempted=attempted,
+        restricted=restricted,
+        state={"fetched": 0},
+        denied=[],
+        superseded=[],
+        metadata_only=set(),
+    )
+    return rows, attempted, restricted
+
+
+def test_run_layer_rows_for_records_tier_c_without_dropping_the_hit():
+    """Gate 5 (miner.py _rows_for), isolated from the SERP/Discover parsers: a
+    Hit already carrying a Tier-C url still becomes a row by default, with
+    collection_tier == "C" so the tier is on the record, and its domain lands
+    in `restricted` too — once as a row, once as a Tier-C host that was
+    collected from. The excerpt rule is unrelated and must hold unchanged:
+    D5 changed whether we collect, not whether we quote."""
+    mining = LiveSignalMining(
+        serp=None, discover=None, unlocker=None, robots=None, config=MiningConfig(fetch_pages=False)
+    )
+    hit = Hit(url=TIER_C_URL, title="Doximity thread", description="clinicians discuss OIC")
+
+    rows, _attempted, restricted = _call_rows_for(mining, [hit])
+
+    assert len(rows) == 1
+    assert rows[0]["collection_tier"] == "C"
+    assert rows[0]["excerpt"] is None, "D5 must not move the excerpt rule as a side effect"
+    assert "doximity.com" in restricted
+
+
+def test_run_layer_rows_for_still_drops_tier_c_hit_when_enforced(monkeypatch):
+    monkeypatch.setenv("VSM_ENFORCE_TIER_C", "1")
+    mining = LiveSignalMining(
+        serp=None, discover=None, unlocker=None, robots=None, config=MiningConfig(fetch_pages=False)
+    )
+    hit = Hit(url=TIER_C_URL, title="Doximity thread", description="clinicians discuss OIC")
+
+    rows, _attempted, restricted = _call_rows_for(mining, [hit])
+
+    assert rows == []
+    assert "doximity.com" in restricted
+
+
+def _run_with_tier_c_serp_hit() -> tuple[LiveSignalMining, MiningConfig]:
+    serp = _serp(_serp_handler_with_tier_c)
+    config = MiningConfig(fetch_pages=False, discover_results_per_cluster=0)
+    return LiveSignalMining(serp=serp, discover=None, unlocker=None, robots=None, config=config), config
+
+
+def test_run_layer_end_to_end_produces_a_row_for_a_tier_c_hit_when_flag_unset():
+    """End-to-end assertion through the full run layer (this is what the
+    round-2 smoke check caught): with VSM_ENFORCE_TIER_C unset, a Tier-C host
+    among the SERP hits produces a row, not a drop — gates 5 and 6 have to
+    cooperate for that to happen, which a per-gate unit test cannot show by
+    itself."""
+    mining, _config = _run_with_tier_c_serp_hit()
+
+    outcome = mining.run(campaign_id="camp1", clusters=[CLUSTER], queries_per_cluster=1)
+
+    assert len(outcome.rows) == 1
+    row = outcome.rows[0]
+    assert row["venue"] == "doximity.com"
+    assert row["collection_tier"] == "C"
+    assert row["excerpt"] is None
+    assert "doximity.com" in outcome.venues_restricted
+    assert "doximity.com" in outcome.venues_collected
+
+
+def test_run_layer_end_to_end_produces_no_row_when_enforced(monkeypatch):
+    monkeypatch.setenv("VSM_ENFORCE_TIER_C", "1")
+    mining, _config = _run_with_tier_c_serp_hit()
+
+    outcome = mining.run(campaign_id="camp1", clusters=[CLUSTER], queries_per_cluster=1)
+
+    assert outcome.rows == []
+    assert "doximity.com" not in outcome.venues_collected

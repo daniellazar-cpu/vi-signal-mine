@@ -25,12 +25,13 @@ Two documented traps handled here:
 
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Sequence
 
 from vsm.mining.client import BrightDataClient, BrightDataError
-from vsm.mining.tiers import domain_of, is_tier_c
+from vsm.mining.tiers import domain_of, tier_for
 
 __all__ = ["DiscoverResult", "DiscoverClient", "looks_blocked", "BLOCK_SIGNATURES"]
 
@@ -64,6 +65,10 @@ class DiscoverResult:
     content: str | None = None
     query: str = ""
     intent: str = ""
+    #: D5: recorded on every result, not just the ones this parser lets through.
+    #: By default a Tier-C link still comes back here, carrying ``tier="C"`` —
+    #: ``VSM_ENFORCE_TIER_C=1`` restores the parent's stripping instead.
+    tier: str = "B"
 
     @property
     def domain(self) -> str:
@@ -105,7 +110,11 @@ class DiscoverClient:
         mode: str = "standard",
         filter_keywords: Sequence[str] | None = None,
     ) -> list[DiscoverResult]:
-        """Trigger a job, poll to ``done``, return the results with Tier C stripped."""
+        """Trigger a job, poll to ``done``, return the results.
+
+        Tier is computed and attached to every result (spec D5); stripping is
+        gated behind ``VSM_ENFORCE_TIER_C=1``. See :meth:`_rows`.
+        """
         if not query.strip():
             return []
         attempts = self.empty_retries + 1
@@ -182,14 +191,24 @@ class DiscoverClient:
     # ----------------------------------------------------------------- helpers
     @staticmethod
     def _rows(raw: Any, *, query: str, intent: str) -> list[DiscoverResult]:
+        """Parse Discover's raw results. Tier is recorded, not gated (spec D5):
+        a Tier-C link is returned like any other by default, carrying
+        ``tier="C"``; a parser that silently shortened its own result list would
+        leave nothing downstream able to tell "the venue said nothing" from "we
+        deleted it". ``VSM_ENFORCE_TIER_C=1`` restores the parent's refusal —
+        the link never reaches this list at all (PRD §9.1)."""
         if not isinstance(raw, list):
             return []
+        enforce = os.environ.get("VSM_ENFORCE_TIER_C", "0") == "1"
         rows: list[DiscoverResult] = []
         for item in raw:
             if not isinstance(item, dict):
                 continue
             link = str(item.get("link") or "")
-            if not link or is_tier_c(link):
+            if not link:
+                continue
+            tier = tier_for(link)
+            if tier == "C" and enforce:
                 continue  # PRD §9.1 — refused before anything downstream sees it
             content = item.get("content")
             text = str(content) if isinstance(content, str) and content.strip() else None
@@ -205,6 +224,7 @@ class DiscoverClient:
                     content=text,
                     query=query,
                     intent=intent,
+                    tier=tier,
                 )
             )
         return rows

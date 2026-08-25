@@ -416,6 +416,7 @@ class LiveSignalMining:
     ) -> list[dict[str, Any]]:
         """Tier-gate, deny-list, optionally page-fetch, and normalise one batch."""
         cfg = self.config
+        enforce = os.environ.get("VSM_ENFORCE_TIER_C", "0") == "1"
         rows: list[dict[str, Any]] = []
         for hit in hits:
             domain = hit.domain
@@ -423,9 +424,13 @@ class LiveSignalMining:
                 continue
             attempted.add(domain)
             if is_tier_c(hit.url, catalogue=self.catalogue):
-                # never fetched, never a row — human-read only (PRD §9.1)
+                # D5: still recorded as restricted — coverage names the host as
+                # Tier C either way — but no longer drops the hit before it
+                # becomes a row. VSM_ENFORCE_TIER_C=1 restores the parent's
+                # refusal: never fetched, never a row, human-read only (PRD §9.1).
                 restricted.add(domain)
-                continue
+                if enforce:
+                    continue
             # the budget rule, applied after the compliance rule and before any spend
             kept, dropped = partition([hit], url_of=lambda h: h.url, brand_slugs=self.brand_slugs)
             if dropped:

@@ -21,13 +21,14 @@ Billing: per 1,000 **successful** requests.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any, Sequence
 from urllib.parse import urlencode
 
 from vsm.mining.client import BrightDataClient, BrightDataError
 from vsm.mining.recency import parse_posted_at
-from vsm.mining.tiers import domain_of, is_tier_c
+from vsm.mining.tiers import domain_of, tier_for
 
 __all__ = ["SerpResult", "SerpClient", "GOOGLE_SEARCH_URL"]
 
@@ -48,6 +49,10 @@ class SerpResult:
     #: exposed nothing parseable. A relative "3 days ago" is refused, because
     #: resolving it would be our arithmetic presented as the venue's fact (PRD §5.3).
     posted_at: str | None = None
+    #: D5: recorded on every result, not just the ones this parser lets through.
+    #: By default a Tier-C link still comes back here, carrying ``tier="C"`` —
+    #: ``VSM_ENFORCE_TIER_C=1`` restores the parent's stripping instead.
+    tier: str = "B"
 
     @property
     def domain(self) -> str:
@@ -96,12 +101,16 @@ class SerpClient:
     def search(
         self, query: str, *, limit: int = 10, start: int = 0, tbs: str = ""
     ) -> list[SerpResult]:
-        """Run one SERP request and return the organic results, Tier-C stripped.
+        """Run one SERP request and return the organic results.
 
-        Tier-C domains are dropped **here** as well as in the run layer: a SERP
-        result is only a link, but the next thing anyone does with a link is fetch
-        it, and this class must never hand one out (PRD §9.1).
+        Tier is computed and attached to every result (spec D5): by default a
+        Tier-C link comes back like any other, carrying ``tier="C"`` so nothing
+        downstream can mistake "the venue said nothing" for "we deleted it".
+        ``VSM_ENFORCE_TIER_C=1`` restores the parent's stripping — a Tier-C
+        result never handed out at all (PRD §9.1) — for this parser and the
+        run layer alike.
         """
+        enforce = os.environ.get("VSM_ENFORCE_TIER_C", "0") == "1"
         response = self.client.request(
             "POST",
             "/request",
@@ -120,7 +129,10 @@ class SerpClient:
             if not isinstance(item, dict):
                 continue
             link = str(item.get("link") or "")
-            if not link or is_tier_c(link):
+            if not link:
+                continue
+            tier = tier_for(link)
+            if tier == "C" and enforce:
                 continue
             results.append(
                 SerpResult(
@@ -130,6 +142,7 @@ class SerpClient:
                     description=str(item.get("description") or item.get("snippet") or "").strip(),
                     query=query,
                     posted_at=parse_posted_at(item.get("date") or item.get("published")),
+                    tier=tier,
                 )
             )
             if len(results) >= limit:
