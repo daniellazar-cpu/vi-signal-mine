@@ -19,10 +19,7 @@ dev = ["pytest"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-filterwarnings = [
-    "error",
-    "ignore:Exception ignored while finalizing database connection:pytest.PytestUnraisableExceptionWarning",
-]
+filterwarnings = ["error"]
 
 [tool.setuptools.packages.find]
 include = ["vsm*"]

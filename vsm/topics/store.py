@@ -92,6 +92,7 @@ class TopicStore:
                     json.dumps(list(topic.never_say)),
                 ),
             )
+            c.commit()
         return topic
 
     def get(self, topic_id: str) -> Topic:
@@ -110,6 +111,9 @@ class TopicStore:
 
     def update(self, topic_id: str, **fields: Any) -> Topic:
         current = self.get(topic_id)
+        for key in fields:
+            if key not in _UPDATABLE:
+                raise KeyError(f"column {key!r} is not updatable")
         if "spend_band" in fields and fields["spend_band"] not in BANDS:
             raise KeyError(f"unknown spend band: {fields['spend_band']!r}")
         sets, values = [], []
@@ -123,4 +127,5 @@ class TopicStore:
         values.append(topic_id)
         with self._conn() as c:
             c.execute(f"UPDATE topics SET {','.join(sets)} WHERE topic_id=?", values)
+            c.commit()
         return self.get(topic_id)

@@ -61,3 +61,42 @@ def test_update_returns_the_new_state(store):
     t2 = store.update(t.topic_id, spend_band="deep")
     assert t2.spend_band == "deep"
     assert store.get(t.topic_id).spend_band == "deep"
+
+
+def test_persist_across_store_instances(tmp_path):
+    """Proves that writes are committed and survive a fresh store instance."""
+    db_path = tmp_path / "persist.db"
+    store1 = TopicStore(db_path)
+    t = store1.create(name="persistent", therapeutic_area="test", spend_band="probe")
+
+    # Second store on the same path must see the topic.
+    store2 = TopicStore(db_path)
+    found = store2.get(t.topic_id)
+    assert found == t
+
+
+def test_create_rejects_unknown_spend_band(store):
+    """Create must reject invalid spend bands."""
+    with pytest.raises(KeyError, match="unknown spend band"):
+        store.create(name="bad", therapeutic_area="test", spend_band="enormous")
+
+
+def test_update_rejects_unknown_spend_band(store):
+    """Update must reject invalid spend bands."""
+    t = store.create(name="A", therapeutic_area="gi", spend_band="probe")
+    with pytest.raises(KeyError, match="unknown spend band"):
+        store.update(t.topic_id, spend_band="massive")
+
+
+def test_update_rejects_created_at_column(store):
+    """Update must reject attempts to modify the created_at timestamp."""
+    t = store.create(name="A", therapeutic_area="gi", spend_band="probe")
+    with pytest.raises(KeyError, match="column.*not updatable"):
+        store.update(t.topic_id, created_at="2000-01-01T00:00:00Z")
+
+
+def test_update_rejects_seq_column(store):
+    """Update must reject attempts to modify the seq column."""
+    t = store.create(name="A", therapeutic_area="gi", spend_band="probe")
+    with pytest.raises(KeyError, match="column.*not updatable"):
+        store.update(t.topic_id, seq=999)
