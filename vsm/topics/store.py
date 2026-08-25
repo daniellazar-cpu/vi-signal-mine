@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -30,11 +31,15 @@ CREATE TABLE IF NOT EXISTS topics (
     competitors      TEXT NOT NULL DEFAULT '[]',
     questions        TEXT NOT NULL DEFAULT '[]',
     never_say        TEXT NOT NULL DEFAULT '[]',
-    seq              INTEGER
+    seq              INTEGER NOT NULL
 );
 """
 
 _TUPLE_FIELDS = ("competitors", "questions", "never_say")
+_UPDATABLE = frozenset({
+    "name", "therapeutic_area", "spend_band", "brand", "molecule",
+    "competitors", "questions", "never_say",
+})
 
 
 class TopicStore:
@@ -43,11 +48,12 @@ class TopicStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._conn() as c:
             c.executescript(_SCHEMA)
+            c.commit()
 
-    def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path))
+    def _conn(self) -> closing[sqlite3.Connection]:
+        conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
-        return conn
+        return closing(conn)
 
     @staticmethod
     def _row_to_topic(row: sqlite3.Row) -> Topic:

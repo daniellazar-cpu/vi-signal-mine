@@ -805,6 +805,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -826,7 +827,8 @@ CREATE TABLE IF NOT EXISTS topics (
     competitors      TEXT NOT NULL DEFAULT '[]',
     questions        TEXT NOT NULL DEFAULT '[]',
     never_say        TEXT NOT NULL DEFAULT '[]',
-    seq              INTEGER
+    -- NOT NULL: a later task orders snapshots by this column.
+    seq              INTEGER NOT NULL
 );
 """
 
@@ -840,10 +842,21 @@ class TopicStore:
         with self._conn() as c:
             c.executescript(_SCHEMA)
 
-    def _conn(self) -> sqlite3.Connection:
+    def _conn(self) -> closing[sqlite3.Connection]:
+        """A connection that is committed **and closed**.
+
+        ``sqlite3.Connection.__exit__`` commits or rolls back; it does not
+        close. ``with self._conn() as c`` on a bare connection therefore leaks
+        one per call, which surfaces as a ``ResourceWarning`` at finalisation —
+        evidence, not noise. ``closing`` is the fix; silencing the warning is
+        not.
+
+        Note the shape this produces: ``closing`` yields the connection but
+        does not commit, so every write path must commit explicitly.
+        """
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
-        return conn
+        return closing(conn)
 
     @staticmethod
     def _row_to_topic(row: sqlite3.Row) -> Topic:
@@ -898,10 +911,22 @@ class TopicStore:
             rows = c.execute("SELECT * FROM topics ORDER BY seq DESC").fetchall()
         return [self._row_to_topic(r) for r in rows]
 
+    #: Columns `update` may write. `topic_id` is the primary key and `seq` is
+    #: the ordering a later task's history slicing depends on; neither is a
+    #: field a caller has any business setting, and interpolating raw kwarg
+    #: names into `SET {key}=?` without this would let them.
+    UPDATABLE = frozenset({
+        "name", "therapeutic_area", "spend_band", "brand", "molecule",
+        "competitors", "questions", "never_say",
+    })
+
     def update(self, topic_id: str, **fields: Any) -> Topic:
         current = self.get(topic_id)
         if "spend_band" in fields and fields["spend_band"] not in BANDS:
             raise KeyError(f"unknown spend band: {fields['spend_band']!r}")
+        rejected = sorted(set(fields) - self.UPDATABLE)
+        if rejected:
+            raise KeyError(f"not updatable: {', '.join(rejected)}")
         sets, values = [], []
         for key, value in fields.items():
             sets.append(f"{key}=?")
@@ -1101,6 +1126,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -1121,7 +1147,10 @@ CREATE TABLE IF NOT EXISTS runs (
     cost_usd      REAL NOT NULL DEFAULT 0.0,
     parent_run_id TEXT,
     note          TEXT NOT NULL DEFAULT '',
-    seq           INTEGER
+    -- NOT NULL because snapshot ordering depends on it: history is a slice of a
+    -- seq-ordered list, and a NULL here would sort unpredictably and silently
+    -- drop a baseline.
+    seq           INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS runs_topic ON runs (topic_id, mode, seq);
 """
@@ -1140,10 +1169,21 @@ class RunStore:
         with self._conn() as c:
             c.executescript(_SCHEMA)
 
-    def _conn(self) -> sqlite3.Connection:
+    def _conn(self) -> closing[sqlite3.Connection]:
+        """A connection that is committed **and closed**.
+
+        ``sqlite3.Connection.__exit__`` commits or rolls back; it does not
+        close. ``with self._conn() as c`` on a bare connection therefore leaks
+        one per call, which surfaces as a ``ResourceWarning`` at finalisation —
+        evidence, not noise. ``closing`` is the fix; silencing the warning is
+        not.
+
+        Note the shape this produces: ``closing`` yields the connection but
+        does not commit, so every write path must commit explicitly.
+        """
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
-        return conn
+        return closing(conn)
 
     @staticmethod
     def _to_run(row: sqlite3.Row) -> Run:
