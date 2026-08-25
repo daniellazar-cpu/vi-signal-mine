@@ -52,7 +52,7 @@ def test_complete_structured_returns_validated_data():
     )
     assert out.ok is True
     assert out.data == {"themes": ["tolerability", "cost"]}
-    assert out.spend.usd() > 0
+    assert out.spend.usd > 0
 
 
 def test_the_system_prompt_is_sent_as_a_cacheable_prefix():
@@ -99,6 +99,31 @@ def test_forced_llm_without_a_key_raises():
 def test_prefix_cacheability_is_reported_not_assumed():
     assert prefix_is_cacheable("claude-opus-5", "x" * 10) is False
     assert prefix_is_cacheable("claude-opus-5", "x" * 40_000) is True
+
+
+def test_system_prompts_are_not_yet_cacheable():
+    """Every ``*_SYSTEM`` prompt is ~140 tokens; Claude Opus 5's cacheable-prefix
+    floor is 512. None of them is cached today, and the caching discipline they
+    keep anyway (byte-identical, no interpolation) earns nothing yet — it costs
+    nothing to keep and starts paying off the day one of them grows past the
+    floor. This test is the tripwire for that day: it fails once a prompt
+    crosses the floor, which is the signal that the docstring's claim needs to
+    flip from "not cacheable" to "cacheable" instead of silently going stale.
+    """
+    from vsm.llm import prompts
+
+    system_prompts = {
+        name: value
+        for name, value in vars(prompts).items()
+        if name.endswith("_SYSTEM")
+    }
+    assert system_prompts
+    for name, text in system_prompts.items():
+        assert prefix_is_cacheable("claude-opus-5", text) is False, (
+            f"{name} now clears the cacheable-prefix floor — update the "
+            "module docstring's caching claim before this test's failure is "
+            "the only place that says so"
+        )
 
 
 @pytest.mark.xfail(reason="guards land in Task 16", strict=False)

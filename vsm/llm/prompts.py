@@ -1,9 +1,19 @@
 """System prompts. Each one is a **constant** and must stay byte-identical.
 
-The cache prefix is the system block. Interpolating a topic, a brand or a term
-list into one of these makes the prefix unique per run and throws the cache
-away — and the cache is most of the cost argument. Run-specific content goes in
-the user message, always.
+The cache prefix is the system block, so run-specific content — a topic, a
+brand, a term list — always goes in the user message, never here. Putting it
+here would make the prefix unique per run and defeat any cache hit that
+prefix could otherwise get.
+
+**None of these five prompts clears the cache floor today.** Each is roughly
+140 tokens; Claude Opus 5's minimum cacheable prefix is 512 tokens (see
+``vsm.llm.client.cache_floor_for``), so as written, none of them is ever
+actually cached — `tests/test_llm.py::test_system_prompts_are_not_yet_cacheable`
+pins this and will fail the day a prompt crosses the floor, which is the
+point: the claim then has to be corrected in the other direction too. The
+discipline (byte-identical constant, no interpolation) is kept anyway,
+because it costs nothing to keep and becomes a real cache hit for free the
+moment any of these prompts grows past ~512 tokens.
 """
 
 from __future__ import annotations

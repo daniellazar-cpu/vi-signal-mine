@@ -16,7 +16,10 @@ entry point: :meth:`~vsm.llm.client.AnthropicClient.complete_structured`.
   raises rather than silently generating nothing.
 * :mod:`~vsm.llm.prompts` — one byte-stable system prompt per pass. Never
   interpolate run-specific content into one of these; that is what the user
-  message is for, and it is the entire reason the prefix is cacheable.
+  message is for. None of the five prompts clears the model's cacheable-prefix
+  floor as written (see the module docstring), so this discipline earns
+  nothing today — it costs nothing to keep and starts mattering the moment a
+  prompt grows past that floor.
 * :mod:`~vsm.llm.schema` — one JSON schema per pass, each closed
   (``additionalProperties: false``) so the model cannot invent a field the
   rest of this tool has to treat as trustworthy.

@@ -142,6 +142,7 @@ class LlmSpend:
     estimated_calls: int = 0
     estimated_usd: float = 0.0
 
+    @property
     def usd(self) -> float:
         return round(
             self.input_tokens / 1_000_000 * _RATE_IN_PER_M
@@ -153,7 +154,7 @@ class LlmSpend:
 
     @property
     def estimated(self) -> bool:
-        """True when any part of ``usd()`` was estimated rather than metered."""
+        """True when any part of ``usd`` was estimated rather than metered."""
         return self.estimated_calls > 0
 
     def record(self, usage: UsageLike | None) -> float:
@@ -167,13 +168,13 @@ class LlmSpend:
         """
         if usage is None:
             return 0.0
-        before = self.usd()
+        before = self.usd
         self.calls += 1
         self.input_tokens += int(getattr(usage, "input_tokens", 0) or 0)
         self.output_tokens += int(getattr(usage, "output_tokens", 0) or 0)
         self.cache_read_tokens += int(getattr(usage, "cache_read_input_tokens", 0) or 0)
         self.cache_write_tokens += int(getattr(usage, "cache_creation_input_tokens", 0) or 0)
-        return round(self.usd() - before, 6)
+        return round(self.usd - before, 6)
 
     def record_estimate(
         self,
@@ -189,14 +190,14 @@ class LlmSpend:
         happened — and separately against ``estimated_calls``, so nobody
         mistakes the number for something Anthropic told us.
         """
-        before = self.usd()
+        before = self.usd
         self.calls += 1
         self.estimated_calls += 1
         self.input_tokens += max(0, int(input_tokens))
         self.output_tokens += max(0, int(output_tokens))
         self.cache_read_tokens += max(0, int(cache_read_tokens))
         self.cache_write_tokens += max(0, int(cache_write_tokens))
-        added = round(self.usd() - before, 6)
+        added = round(self.usd - before, 6)
         self.estimated_usd = round(self.estimated_usd + added, 6)
         return added
 
@@ -213,7 +214,7 @@ class LlmSpend:
             "output_tokens": self.output_tokens,
             "cache_read_tokens": self.cache_read_tokens,
             "cache_write_tokens": self.cache_write_tokens,
-            "usd": self.usd(),
+            "usd": self.usd,
             "estimated_calls": self.estimated_calls,
             "estimated_usd": self.estimated_usd,
             "estimated": self.estimated,
@@ -537,7 +538,7 @@ class AnthropicClient:
         """Refuse now if the call about to be made could breach the cap.
 
         ``reserve_usd`` is the worst case for that one call, reserved
-        *before* it runs. Testing ``self._spend.usd() >= cap`` would only
+        *before* it runs. Testing ``self._spend.usd >= cap`` would only
         fire once spend has already gone over — a tripwire, not a ceiling,
         and one call could overshoot by its own full cost. Reserving instead
         makes the recorded total unable to pass the cap at all, with one
@@ -558,9 +559,9 @@ class AnthropicClient:
                 "model spend cap is $0.00 (VSM_RUN_COST_CAP_USD=0): no model call "
                 "may be made. Unset it, or set it negative, for no cap."
             )
-        if self._spend.usd() + reserve_usd > cap:
+        if self._spend.usd + reserve_usd > cap:
             return (
-                f"model spend cap would be breached: ${self._spend.usd():.4f} spent of "
+                f"model spend cap would be breached: ${self._spend.usd:.4f} spent of "
                 f"${cap:.2f} (VSM_RUN_COST_CAP_USD) after {self._spend.calls} call(s), "
                 f"and this call reserves up to ${reserve_usd:.4f}"
             )
