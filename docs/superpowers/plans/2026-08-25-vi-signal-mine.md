@@ -28,6 +28,8 @@ Every task's requirements implicitly include this section.
 - **Nothing invents a number.** Absent data is `None` plus a stated reason, never a plausible default. This is the parent's rule and it is the reason this tool can be handed to a client.
 - **Tests are hermetic.** `httpx.MockTransport` for the three Bright Data surfaces; an injected client for Anthropic. No test makes a network call.
 - **Commit after every task.** Conventional-commit subject, imperative mood, no trailing period.
+- **Two storage backends, one contract** (spec D16). `TopicStore`/`RunStore` are the local SQLite+filesystem implementations. `vsm/storage.py` declares the Protocol both they and the later Postgres/blob pair satisfy. **The SQL is duplicated between backends on purpose** — for a 5-column and a 9-column table, two clear implementations beat one dialect shim, and a shim that papers over `?` vs `%s` is where the subtle bugs live.
+- **Never write to a path that is not the configured var dir.** On Vercel only `/tmp` is writable and it belongs to *one invocation*. Anything that must survive a request goes through a store, never through an ad-hoc `open()`.
 - **Author class values are exactly** `hcp` · `patient` · `institutional` · `unknown` — derived from the six venue kinds in the registry and nothing else. Do not invent a `press` class; the registry has no such kind.
 
 ## File Structure
@@ -928,17 +930,33 @@ git commit -m "Add topics, and the three spend bands a sweep is bought in"
 
 ---
 
-## Task 4: Run model and artifact store
+## Task 4: Run model, artifact store, and the storage contract
 
 **Files:**
 - Create: `vsm/runs/__init__.py`, `vsm/runs/model.py`, `vsm/runs/store.py`
-- Test: `tests/test_runs.py`
+- Create: `vsm/storage.py` — the Protocol both backends satisfy (spec D16)
+- Test: `tests/test_runs.py`, `tests/test_storage_contract.py`
 
 **Interfaces:**
 - Consumes: `vsm.errors.NoSuchRun`
 - Produces: `RunMode = Literal["mine","insight","report"]`; `RunStatus = Literal["pending","running","complete","failed","stopped_on_budget"]`; `Run` (frozen: `run_id`, `topic_id`, `mode`, `status`, `started_at`, `finished_at: str | None`, `cost_usd: float`, `parent_run_id: str | None`, `note: str`); `RunStore(db_path, var_dir)` with `.start(topic_id, mode, parent_run_id=None) -> Run`, `.finish(run_id, status, cost_usd, note="") -> Run`, `.get(run_id) -> Run`, `.for_topic(topic_id, mode=None) -> list[Run]` (oldest first), `.snapshots(topic_id) -> list[Run]` (completed MINE runs, oldest first), `.artifacts_dir(run_id) -> Path`, `.write_artifact(run_id, name, payload) -> Path`, `.read_artifact(run_id, name) -> Any`
 
 **Why snapshots are oldest-first:** every delta pass walks history forward. Returning newest-first would make each caller reverse it, and one of them would forget.
+
+**The storage contract (spec D16).** `vsm/storage.py` declares two `Protocol`s —
+`TopicStoreLike` and `RunStoreLike` — whose members are exactly the public methods
+listed above, plus `open_stores(settings) -> tuple[TopicStoreLike, RunStoreLike]`
+which returns the SQLite+filesystem pair today. Task 24 adds a Postgres+blob pair
+behind the same names.
+
+Declaring the Protocol now costs about forty lines and buys one thing: the later
+backend has a contract to satisfy that is checked by a shared test, rather than a
+resemblance to whatever the first implementation happened to do. Write
+`tests/test_storage_contract.py` as a **parametrised suite over a store factory**,
+so Task 24 registers its backend and inherits every case unchanged — that shared
+suite is the deliverable here, not the Protocol declaration.
+
+Do not build a SQL dialect shim. The two backends will each write their own SQL.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -5290,3 +5308,299 @@ which is the only failure mode that matters in something handed to a client.
 
 A test that genuinely encodes stale behaviour should be **rewritten with the
 reason recorded in the commit message**, never quietly relaxed.
+
+
+---
+
+## Task 24: The Postgres and blob backend
+
+**Files:**
+- Create: `vsm/backends/__init__.py`, `vsm/backends/postgres.py`, `vsm/backends/blob.py`, `vsm/backends/dburl.py`
+- Modify: `vsm/storage.py` — `open_stores` selects a backend from settings
+- Modify: `pyproject.toml` — add `psycopg[binary]` as an optional extra, not a core dependency
+- Test: `tests/test_dburl.py`, `tests/test_storage_contract.py` (register the new backend)
+
+**Interfaces:**
+- Consumes: `vsm/storage.py`'s two Protocols, `Settings`
+- Produces: `PostgresTopicStore`, `PostgresRunStore`, `BlobArtifacts`; `resolve_db_url(env) -> str | None`; `open_stores(settings)` returning the Postgres pair when a database is configured and the SQLite pair otherwise
+
+**Read the spec's §11 before starting.** It records what the parent engine already
+lost to this exact platform, and every requirement below comes from one of those
+failures rather than from theory.
+
+- [ ] **Step 1: Write the failing `resolve_db_url` test**
+
+```python
+# tests/test_dburl.py
+from vsm.backends.dburl import resolve_db_url
+
+
+def test_unpooled_url_wins():
+    """The pooled URL is PgBouncer in transaction mode and does not support
+    prepared statements — a failure that surfaces as a confusing runtime error
+    rather than at connect time. Prefer the unpooled one."""
+    got = resolve_db_url({
+        "POSTGRES_URL": "postgres://pooled/db",
+        "POSTGRES_URL_NON_POOLING": "postgres://direct/db",
+    })
+    assert "direct" in got
+
+
+def test_the_postgres_scheme_alias_is_rewritten():
+    """Every provider's dashboard emits `postgres://`. Drivers want
+    `postgresql://`. Rewriting it here removes the trap rather than documenting
+    it."""
+    assert resolve_db_url({"DATABASE_URL": "postgres://h/db"}).startswith("postgresql://")
+
+
+def test_no_database_configured_returns_none_not_a_tmp_sqlite_path():
+    """The parent fell back to `sqlite:////tmp/...` here and lost a real
+    visitor's consent record: /tmp on a serverless host belongs to one
+    invocation, so the write succeeded and the container holding it was
+    destroyed. Returning None makes the caller decide, loudly."""
+    assert resolve_db_url({}) is None
+
+
+def test_every_recognised_variable_name():
+    for name in ("POSTGRES_URL_NON_POOLING", "POSTGRES_URL", "DATABASE_URL"):
+        assert resolve_db_url({name: "postgres://h/db"}) is not None
+```
+
+- [ ] **Step 2: Run it, watch it fail, then write `vsm/backends/dburl.py`**
+
+Read the three variables in that order. Rewrite the `postgres://` scheme. Return
+`None` when none is set — the caller warns; this module does not guess.
+
+- [ ] **Step 3: Write the Postgres stores**
+
+Same public methods as the SQLite pair, own SQL. Two notes that will otherwise
+cost an hour: Postgres placeholders are `%s` not `?`, and the monotonic `seq`
+column is `BIGSERIAL` rather than a `SELECT COALESCE(MAX(seq),0)+1` subquery —
+which is also safer, because the subquery races under concurrency and the
+sequence does not. Snapshot ordering depends on `seq` (Task 4's ruling), so this
+is load-bearing, not cosmetic.
+
+- [ ] **Step 4: Write `BlobArtifacts`**
+
+Artifacts are files locally and blobs on Vercel. Keep the same
+`write_artifact` / `read_artifact` / `artifacts_dir` surface. **Carry the
+traversal guard across** — Task 4 rejects an artifact name that escapes its run
+directory, and a key-based store needs the same check on the key, for the same
+reason.
+
+- [ ] **Step 5: Register the backend in the shared contract suite**
+
+`tests/test_storage_contract.py` is parametrised over a store factory. Add the
+Postgres+blob factory, skipped when no test database is configured. Every case
+Task 4 wrote must pass against the new backend unchanged; if a case needs
+altering to pass, the backend is wrong, not the case.
+
+- [ ] **Step 6: `open_stores` selects, and says which it chose**
+
+Postgres+blob when `resolve_db_url` finds a URL, SQLite+filesystem otherwise, and
+it **logs which one at INFO**. The parent's own note on this is the reason: the
+warning went nowhere because no handler was configured, so the one signal saying
+"your writes are being lost" was discarded. Log the consequence, not the
+condition.
+
+- [ ] **Step 7: Run the suite and commit**
+
+```bash
+git add -A
+git commit -m "Add the Postgres and blob backend behind the storage contract"
+```
+
+---
+
+## Task 25: Make the app survive Vercel
+
+**Files:**
+- Create: `api/index.py`, `vercel.json`, `.vercelignore`
+- Create: `vsm/platform.py` — where the app is running, and what that forbids
+- Modify: `vsm/modes/insight.py` — resumable passes (spec D17)
+- Modify: `vsm/modes/mine.py` — band restriction (spec D14)
+- Test: `tests/test_platform.py`, `tests/test_insight_resume.py`
+
+**Interfaces:**
+- Consumes: `Settings`, the mode functions
+- Produces: `platform.is_vercel()`, `platform.vercel_env()`, `platform.assert_serveable()`, `platform.assert_band_allowed(band)`; `run_insight(..., resume=True)`
+
+- [ ] **Step 1: Write the platform test**
+
+```python
+# tests/test_platform.py
+import pytest
+
+from vsm.errors import GuardViolation
+from vsm.platform import assert_band_allowed, assert_serveable, is_vercel
+
+
+def test_production_deployment_refuses_to_serve(monkeypatch):
+    """Spec D15. Protection is Vercel preview gating, which covers preview
+    deployments only. This guard is what makes 'preview-only' a property of the
+    code instead of a dashboard setting that has to stay correct — a deploy that
+    escapes to a production domain is inert rather than open, with the API keys
+    behind it."""
+    monkeypatch.setenv("VERCEL_ENV", "production")
+    with pytest.raises(GuardViolation, match="production"):
+        assert_serveable()
+
+
+def test_preview_deployment_serves(monkeypatch):
+    monkeypatch.setenv("VERCEL_ENV", "preview")
+    assert assert_serveable() is None
+
+
+def test_local_serves(monkeypatch):
+    monkeypatch.delenv("VERCEL_ENV", raising=False)
+    monkeypatch.delenv("VERCEL", raising=False)
+    assert assert_serveable() is None
+    assert is_vercel() is False
+
+
+@pytest.mark.parametrize("band", ["standard", "deep"])
+def test_only_probe_runs_on_vercel(monkeypatch, band):
+    """Spec D14. A standard or deep sweep does not fit in a function timeout,
+    and a sweep that dies halfway leaves a half-written snapshot that later
+    momentum silently treats as real."""
+    monkeypatch.setenv("VERCEL", "1")
+    with pytest.raises(GuardViolation, match="probe"):
+        assert_band_allowed(band)
+
+
+def test_probe_runs_on_vercel(monkeypatch):
+    monkeypatch.setenv("VERCEL", "1")
+    assert assert_band_allowed("probe") is None
+
+
+def test_every_band_runs_locally(monkeypatch):
+    monkeypatch.delenv("VERCEL", raising=False)
+    for band in ("probe", "standard", "deep"):
+        assert assert_band_allowed(band) is None
+
+
+def test_the_refusal_names_where_to_run_it_instead(monkeypatch):
+    """A guard that only says no teaches nothing."""
+    monkeypatch.setenv("VERCEL", "1")
+    with pytest.raises(GuardViolation) as exc:
+        assert_band_allowed("deep")
+    assert "local" in str(exc.value).lower()
+```
+
+- [ ] **Step 2: Write `vsm/platform.py`**
+
+`is_vercel()` reads `VERCEL`. `vercel_env()` reads `VERCEL_ENV`.
+`assert_serveable()` raises when the env is `production`. `assert_band_allowed`
+raises for anything but `probe` on Vercel, and the message names local execution
+as the alternative.
+
+- [ ] **Step 3: Wire both guards in**
+
+`assert_serveable()` runs as ASGI middleware in `vsm/ui/app.py`, so it covers
+**every** route including static and health — a guard with an exempt route is a
+guard with a way around it. `assert_band_allowed(topic.spend_band)` runs in
+`run_mine` before the estimate.
+
+- [ ] **Step 4: Write the INSIGHT resume test**
+
+```python
+# tests/test_insight_resume.py
+def test_a_resumed_insight_skips_passes_already_on_disk(tmp_path):
+    """Spec D17. INSIGHT is the mode that will hit a function timeout on a
+    large snapshot. Each pass already writes its artifact the moment it
+    finishes, so resuming costs a re-request rather than the work."""
+    # Build a snapshot, run insight, delete ONE artifact, re-run with
+    # resume=True, and assert: the deleted artifact is rebuilt, and the
+    # surviving artifacts keep their original mtime and byte content.
+
+
+def test_resume_false_rebuilds_everything(tmp_path):
+    # Same setup; assert every artifact is rewritten.
+```
+
+Write both bodies out fully when you implement — the assertions above describe
+what to check, and mtime plus byte-identity together are what prove a pass was
+skipped rather than re-run to the same answer.
+
+- [ ] **Step 5: Implement `resume` in `run_insight`**
+
+Default `resume=True`. Before each pass, if its artifact exists on this run,
+skip it. A resumed run must produce the identical artifact set to an unresumed
+one — the difference is only what was recomputed.
+
+- [ ] **Step 6: Write `api/index.py`, `vercel.json`, `.vercelignore`**
+
+Four things the parent learned the hard way, all in spec §11:
+
+1. Vercel discovers functions by **scanning `api/`**; it does not read an
+   entrypoint from `pyproject.toml`. A `[tool.vercel]` table is inert.
+2. The rewrite destination **must carry `$1`**. Without it every path collapses
+   to one literal path, matches no route, and the app serves its own styled 404
+   for every URL — clearly running, serving nothing.
+3. Strip the function prefix with an **ASGI wrapper, not `root_path`**.
+   `root_path` also shifts URL *generation*, which would put `/api/index` into
+   every link the app emits.
+4. Set `VSM_VAR_DIR=/tmp/vsm-var` so the ephemeral path is at least writable —
+   and rely on Task 24's Postgres+blob for anything that must survive.
+
+`.vercelignore` must not exclude anything the app reads at runtime. The parent
+shipped a deployment whose seed loader was excluded and spent a cycle on it.
+
+- [ ] **Step 7: Run the suite and commit**
+
+```bash
+git add -A
+git commit -m "Refuse to serve a production deployment, and make INSIGHT resumable"
+```
+
+---
+
+## Task 26: Deploy, and verify it actually works
+
+**Files:**
+- Create: `docs/DEPLOY.md`
+
+**Interfaces:**
+- Consumes: the pushed repository from Task 23, a Vercel project
+- Produces: a gated preview deployment, and a record of what was verified on it
+
+**This task spends money and publishes something. Do not run it without the owner present** — creating the Vercel project, provisioning the database, and setting the secrets are all theirs to do or approve.
+
+- [ ] **Step 1: Write `docs/DEPLOY.md` first**
+
+The exact sequence: create the Vercel project from the repo, provision Postgres,
+set `ANTHROPIC_API_KEY` / `BRIGHTDATA_API_KEY` / `BRIGHTDATA_SERP_ZONE` /
+`BRIGHTDATA_UNLOCKER_ZONE` / `VSM_OFFLINE=0` / `VSM_RUN_COST_CAP_USD`, confirm
+Vercel Authentication is enabled on preview deployments, and ship via the
+`deploy` branch. **Never `vercel --prod`** — that is the existing convention for
+these apps, and Task 25's guard now enforces it in code.
+
+- [ ] **Step 2: Deploy the `deploy` branch as a preview**
+
+- [ ] **Step 3: Verify, in the browser, in this order**
+
+1. The preview URL demands authentication before rendering anything.
+2. The topics page renders and can create a topic — **then reload from a
+   different request and confirm the topic is still there.** This is the parent's
+   exact failure and the only way to catch it is to look after the container has
+   turned over.
+3. A `probe` MINE run completes inside the function timeout, and its snapshot is
+   readable afterwards.
+4. `standard` is refused, with a message naming local execution.
+5. An INSIGHT run over that snapshot completes, or times out and **resumes** to
+   completion on a second request.
+6. A report renders with its citations clickable.
+
+- [ ] **Step 4: Record what actually happened**
+
+Append results to `docs/DEPLOY.md`: the URL, the wall-clock of the probe run, the
+real cost, and anything that behaved differently from local. Record failures too.
+If INSIGHT could not finish even with resume, say so plainly and state the
+snapshot size at which it stopped being viable — that number is the honest limit
+of D14 and belongs in writing rather than in someone's memory.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add -A && git commit -m "Record the deployment and what was verified on it" && git push
+```

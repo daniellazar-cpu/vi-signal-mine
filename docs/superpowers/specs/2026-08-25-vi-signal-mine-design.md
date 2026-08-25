@@ -69,6 +69,10 @@ a later reader would otherwise reopen.
 | D11 | **Internal tool, client-deliverable output.** | Vi staff run it. The report is built to be handed to a client as-is: provenance appendix, methodology statement, visible confidence tiers. Nothing ships externally before the legal question in O1 is answered. |
 | D12 | **Vendored fork.** | `vsm/mining` and `vsm/llm` are copies. Parent is not modified. Gold-list drift accepted. |
 | D13 | **No forecasts and no accuracy claims in v1.** | We report *measured* movement between snapshots. We do not predict, and we do not quote an accuracy figure, because we have not backtested one. Enforced by G5. |
+| D14 | **The full app deploys to Vercel, with live runs restricted to the `probe` band there.** | `standard` and `deep` refuse on Vercel with a message naming local execution. See §11 for why, and for what a probe has to fit inside. |
+| D15 | **Protection is Vercel preview gating only — no app-level auth.** Concern raised, owner's decision. | Enforced in code by a **production-refusal guard**: `VERCEL_ENV == "production"` answers 503 on every route. Preview-only becomes a property of the code rather than of a dashboard setting. |
+| D16 | **Storage goes behind a protocol now; the second backend lands at the end.** | SQLite + filesystem locally, Postgres + blob on Vercel. Local stays the default and stays hermetic. |
+| D17 | **INSIGHT is resumable.** | A re-run skips any pass whose artifact already exists. Required by D14: a serverless timeout mid-INSIGHT must not discard the passes that finished. |
 
 ### What does not come across
 
@@ -462,6 +466,59 @@ routes them to a named human — detect, label, route, record; **never file.** T
 parent's rule that the engine never posts generalises directly: the engine never
 files.
 
+## 11. Deployment — and what the parent already learned
+
+The parent engine deployed this same stack to Vercel and wrote the verdict into
+its own entrypoint: *"Serverless is the wrong shape for the pipeline; it is a
+fine shape for the publication."* It survives there because it has a publication
+half that reads content from a JSON file. **This tool is all pipeline.** There is
+no read-only half to fall back on, so every one of the parent's three failures
+lands on us directly.
+
+**`/tmp` belongs to one invocation.** The parent lost a real visitor's consent
+record this way: the row was written to SQLite under `/tmp`, every layer returned
+success, and the container holding it was destroyed. Four consecutive requests to
+that deployment came back from four different containers. Its commit message is
+the sentence to remember — *"which is worse than a failure, because a failure
+would have been noticed the same day."* `TopicStore`, `RunStore` and every run
+artifact are exactly that shape, which is what D16 exists to fix.
+
+**A database has to be adopted, not configured.** Vercel Postgres, Neon and
+Supabase each export a connection string under their own name, and none of them
+is ours. The parent reads `POSTGRES_URL_NON_POOLING` first, because the pooled
+URL is PgBouncer in transaction mode and breaks prepared statements — a failure
+that surfaces as a confusing runtime error rather than at connect time.
+
+**Vercel finds functions by scanning `api/`.** It does not read an entrypoint out
+of `pyproject.toml`. The rewrite destination must carry `$1`, or every path
+collapses to one literal path and the app renders its own styled 404 for every
+URL — running, and serving nothing.
+
+### What a probe has to fit inside
+
+D14 restricts Vercel to the `probe` band. The three modes are already separate
+requests, which is what makes this viable at all:
+
+| Mode on Vercel | Shape | Risk |
+|---|---|---|
+| MINE (`probe`) | one lexicon call, SERP + Discover, **no page fetches** | Fits, with margin |
+| INSIGHT | several model passes over every signal | **The tight one** — mitigated by D17 |
+| REPORT | one model call | Fits |
+
+INSIGHT is the mode that will hit the wall on a large snapshot, which is why D17
+makes it resumable rather than trying to make it fast. Each pass already writes
+its artifact the moment it finishes; resuming means skipping the ones that are
+already on disk. A timeout costs a re-request, not the work.
+
+### The production-refusal guard
+
+D15 is the owner's decision and the exposure is real: a public URL with no
+application auth, holding keys that spend money. The guard is what makes the
+chosen protection hold rather than depend on a dashboard staying correct — if
+`VERCEL_ENV` is `production`, every route answers 503. A deploy that escapes to a
+production domain is inert instead of open. It is not a second auth mechanism and
+does not substitute for one.
+
 ## 9. Build order
 
 1. Skeleton, config, topic + run stores, error types
@@ -474,7 +531,7 @@ files.
 8. One live smoke run with real keys — cost recorded
 9. GitHub repo created and pushed
 
-## 10. Open questions for a human
+## 12. Open questions for a human
 
 - **O1** Does surfacing a suspected adverse event to a Vi client, from public
   data Vi collected, place any duty on **Vi**, or only on the marketing
