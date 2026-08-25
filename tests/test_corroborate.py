@@ -44,8 +44,9 @@ def test_a_registered_conversational_venues_subdomains_are_not_collapsed():
 
 def test_twenty_posts_on_one_patient_community_are_twenty_sources():
     """The case the whole fix exists for: twenty people posting in one forum
-    must not collapse onto the forum's domain. Corroborated at 20."""
-    rows = [sig(str(i), "inspire.com", f"thread {i}") for i in range(20)]
+    must not collapse onto the forum's domain. Corroborated at 20. Must not
+    regress back toward domain-based collapsing for a true forum."""
+    rows = [sig(str(i), "patient.info", f"thread {i}") for i in range(20)]
     assert independent_source_count(rows) == 20
     assert tier_for_count(independent_source_count(rows)) == "corroborated"
 
@@ -54,19 +55,41 @@ def test_five_posts_on_one_forum_sharing_one_title_is_one_source():
     """A cross-post: one person (or one syndicated notice) posted the same
     text into five threads on one conversational venue. The title clause —
     unchanged for conversational venues — still catches this even though the
-    post-key path no longer collapses the venue's domain."""
+    post-key path no longer collapses the venue's domain. Must not regress."""
     title = "Has anyone tried switching from Movantik?"
     rows = [sig(str(i), "reddit.com", title) for i in range(5)]
     assert independent_source_count(rows) == 1
 
 
-def test_three_distinct_evidence_publishers_are_three_sources():
-    """Unchanged by the venue-kind split: publisher venues (here, three
-    genuine 'evidence' kind hosts) are still independent by domain."""
+def test_three_articles_from_one_trade_press_outlet_are_one_source():
+    """The regression this round exists to fix. statnews.com's *kind* is
+    hcp_discussion — the same kind as reddit.com or patient.info — but its
+    *band* is BAND_OPINION (explicit in the registry), because it is trade
+    press: one editorial voice, not a forum of many people. Keyed on kind
+    alone, three distinct-URL, distinct-title articles from this one outlet
+    counted as three independent sources and cleared 'corroborated' on that
+    single publisher's say-so — the exact failure the whole rule exists to
+    prevent, reintroduced in the direction nobody notices because it produces
+    a confident report instead of an empty one. This must fail against
+    kind-only keying and pass only when the band is also checked."""
+    rows = [sig("a", "statnews.com", "one"), sig("b", "statnews.com", "two"),
+            sig("c", "statnews.com", "three")]
+    assert independent_source_count(rows) == 1
+    assert tier_for_count(independent_source_count(rows)) == "single_source"
+
+
+def test_two_pages_of_one_registered_publisher_are_one_source():
+    """Nothing previously pinned domain collapse for a *registered*
+    publisher-kind venue specifically — the three-distinct-domain tests all
+    return the same count under kind-only or band-aware keying alike, since
+    every domain in them is already unique. Two pages of one registered
+    evidence-kind venue (pubmed.ncbi.nlm.nih.gov, band SUBSTRATE) must still
+    collapse to one publisher, exercising the branch where venue_for(...)
+    returns a real entry and the band check must still say 'not
+    conversational' rather than accidentally falling through."""
     rows = [sig("a", "pubmed.ncbi.nlm.nih.gov", "one"),
-            sig("b", "cochranelibrary.com", "two"),
-            sig("c", "clinicaltrials.gov", "three")]
-    assert independent_source_count(rows) == 3
+            sig("b", "pubmed.ncbi.nlm.nih.gov", "two")]
+    assert independent_source_count(rows) == 1
 
 
 def test_five_syndicated_copies_of_one_release_count_once():
