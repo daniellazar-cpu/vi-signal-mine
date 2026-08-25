@@ -339,7 +339,6 @@ def test_system_prompts_are_not_yet_cacheable():
         )
 
 
-@pytest.mark.xfail(reason="guards land in Task 16", strict=False)
 def test_the_two_banned_lists_are_equal():
     """If these drift, the model is told a different rule than the one that
     rejects its output."""
