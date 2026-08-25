@@ -19,9 +19,54 @@ def test_three_distinct_domains_are_three_sources():
     assert independent_source_count(rows) == 3
 
 
-def test_subdomains_of_one_host_are_one_source():
-    rows = [sig("a", "op-med.doximity.com", "one"), sig("b", "www.doximity.com", "two")]
+def test_subdomains_of_an_unregistered_publisher_are_one_source():
+    """Domain collapse is the *publisher* path. ``doximity.com`` no longer
+    serves as this example: it is registered as ``hcp_discussion`` (a real
+    forum), so under venue-kind-aware independence its two pages are two
+    posts, not one publisher — see
+    test_a_registered_conversational_venues_subdomains_are_not_collapsed
+    below. This test picks a domain absent from the registry, so it falls to
+    the publisher key and its subdomains correctly still collapse."""
+    rows = [sig("a", "op-med.examplepublisher.com", "one"),
+            sig("b", "www.examplepublisher.com", "two")]
     assert independent_source_count(rows) == 1
+
+
+def test_a_registered_conversational_venues_subdomains_are_not_collapsed():
+    """The mirror image of the test above, and the whole reason for the
+    venue-kind split: doximity.com is a real hcp_discussion forum, so two
+    different pages on it are two different posts by (presumably) two
+    different people, not one publisher. Collapsing them by domain is
+    exactly the bug that shipped an empty report body."""
+    rows = [sig("a", "op-med.doximity.com", "one"), sig("b", "www.doximity.com", "two")]
+    assert independent_source_count(rows) == 2
+
+
+def test_twenty_posts_on_one_patient_community_are_twenty_sources():
+    """The case the whole fix exists for: twenty people posting in one forum
+    must not collapse onto the forum's domain. Corroborated at 20."""
+    rows = [sig(str(i), "inspire.com", f"thread {i}") for i in range(20)]
+    assert independent_source_count(rows) == 20
+    assert tier_for_count(independent_source_count(rows)) == "corroborated"
+
+
+def test_five_posts_on_one_forum_sharing_one_title_is_one_source():
+    """A cross-post: one person (or one syndicated notice) posted the same
+    text into five threads on one conversational venue. The title clause —
+    unchanged for conversational venues — still catches this even though the
+    post-key path no longer collapses the venue's domain."""
+    title = "Has anyone tried switching from Movantik?"
+    rows = [sig(str(i), "reddit.com", title) for i in range(5)]
+    assert independent_source_count(rows) == 1
+
+
+def test_three_distinct_evidence_publishers_are_three_sources():
+    """Unchanged by the venue-kind split: publisher venues (here, three
+    genuine 'evidence' kind hosts) are still independent by domain."""
+    rows = [sig("a", "pubmed.ncbi.nlm.nih.gov", "one"),
+            sig("b", "cochranelibrary.com", "two"),
+            sig("c", "clinicaltrials.gov", "three")]
+    assert independent_source_count(rows) == 3
 
 
 def test_five_syndicated_copies_of_one_release_count_once():

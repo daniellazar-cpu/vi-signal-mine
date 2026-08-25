@@ -1,4 +1,13 @@
-"""G6 — an uncorroborated finding may not reach the report's main body.
+"""G6 — an uncorroborated *claim* may not reach the report's main body.
+
+This gates claims, not themes. A theme's volume, venue mix and kind mix are
+counts — arithmetic over rows that are already in the ledger — and a count
+needs no corroboration; it is what it is. What needs three independent
+sources is an assertion *about* a theme ("tolerability is the dominant
+concern"), because that is a claim someone could be wrong about, and Rung 4
+exists to keep an unsupported claim out of the body. So this guard runs in
+REPORT over the :class:`~vsm.analysis.corroborate.Finding` list the report
+writes, never over the theme list :mod:`vsm.analysis.cluster` produces.
 
 ``emerging`` findings are publishable in a separately labelled section, because
 two independent sources is a real if provisional observation. ``single_source``
