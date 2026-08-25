@@ -1,0 +1,25 @@
+[project]
+name = "vi-signal-mine"
+version = "0.1.0"
+description = "A pulse instrument: what is being said about a brand or product online, and what changed"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "jinja2",
+    "httpx",
+    "python-multipart",
+    "pyyaml",
+    "anthropic",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["error"]
+
+[tool.setuptools.packages.find]
+include = ["vsm*"]

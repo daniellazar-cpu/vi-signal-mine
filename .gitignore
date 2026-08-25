@@ -1,20 +1,7 @@
-# state — runs, artifacts, database
-var/
-*.db
-*.db-journal
-
-# secrets
-.env
-.env.local
-
-# python
-__pycache__/
-*.py[cod]
 .venv/
-*.egg-info/
+__pycache__/
+*.pyc
 .pytest_cache/
-.ruff_cache/
-.mypy_cache/
-
-# os
+var/
+.env
 .DS_Store
