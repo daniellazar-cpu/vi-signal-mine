@@ -26,6 +26,7 @@ from vsm.guards.cost import CostCap, estimate_run_usd
 from vsm.llm.prompts import LEXICON_SYSTEM
 from vsm.llm.schema import LEXICON_SCHEMA
 from vsm.mining.miner import MiningConfig
+from vsm.platform import assert_band_allowed
 from vsm.runs.model import Run
 from vsm.runs.store import RunStore
 from vsm.topics.model import SpendBand, Topic
@@ -91,6 +92,13 @@ def run_mine(
     cluster_count: int | None = None,
     cap_usd: float | None = None,
 ) -> Run:
+    # Spec D14, checked before anything else in this function — before the
+    # estimate, before the lexicon call, before a run row even exists.
+    # Refusing here means a disallowed band on Vercel spends nothing and
+    # leaves nothing running; checking any later would mean the guard fires
+    # only after money already went out.
+    assert_band_allowed(topic.spend_band)
+
     band = topic.band()
     run = store.start(topic.topic_id, "mine")
     cap = CostCap(cap_usd if cap_usd is not None else 5.0)

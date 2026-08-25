@@ -1,0 +1,39 @@
+# Keep the function bundle to what actually serves a request. Vercel builds
+# one Python function from api/ and installs dependencies from
+# pyproject.toml; everything listed below is dev-only or never read at
+# request time, and each megabyte here is cold-start latency on every
+# invocation.
+#
+# The parent engine shipped a deployment that excluded `scripts/` on the
+# assumption a directory named that way was dev-only tooling — its content
+# store did `from scripts.seed import seed_assets` at request time, so every
+# route (including its own 404 handler) raised `ModuleNotFoundError` and the
+# site returned 500 for everything. `tests/test_deployment_scaffolding.py`
+# checks this file against what `vsm/` and `api/` actually import, so that
+# mistake fails a test here instead of costing a deploy cycle.
+
+tests/
+docs/
+.superpowers/
+.claude/
+.impeccable/
+.git/
+.venv/
+.pytest_cache/
+var/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.egg-info/
+Makefile
+README.md
+PRODUCT.md
+.env.example
+
+# NOT ignored, and each for a reason a future edit should not undo:
+#   vsm/             the application — including vsm/ui/templates (read by
+#                     Jinja2's FileSystemLoader) and vsm/ui/static (served by
+#                     StaticFiles) at request time, not just vsm/*.py.
+#   api/              the Vercel entrypoint itself.
+#   pyproject.toml    Vercel installs dependencies from this file; there is
+#                     no requirements.txt in this repo to fall back to.

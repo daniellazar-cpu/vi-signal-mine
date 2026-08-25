@@ -24,20 +24,51 @@ from fastapi import FastAPI, Form, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
+from starlette.responses import PlainTextResponse
 from starlette.templating import Jinja2Templates
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from vsm.config import get_settings
-from vsm.errors import NoSuchRun, NoSuchTopic, VsmError
+from vsm.errors import GuardViolation, NoSuchRun, NoSuchTopic, VsmError
 from vsm.guards.cost import estimate_run_usd
 from vsm.llm.client import get_client
 from vsm.mining.venues import kind_of
 from vsm.modes.insight import run_insight
 from vsm.modes.mine import run_mine
 from vsm.modes.report import run_report
+from vsm.platform import assert_serveable
 from vsm.topics.model import BANDS
 from vsm.ui.render import forest_plot_svg, fmt_dt, net_stance_text, pct, sparkline_svg, usd
 
 __all__ = ["create_app"]
+
+
+class ProductionRefusalMiddleware:
+    """Spec D15, wired as raw ASGI rather than a per-route dependency.
+
+    A dependency has to be attached to every route by hand, which means the
+    very next route someone adds is exempt until they remember it. ASGI
+    middleware sits above the router entirely — it runs before FastAPI's
+    routing even looks at the path, so it covers every route this app has
+    today (including the mounted ``/static`` files) and every route it gains
+    later, with no per-route action required to keep it that way.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        try:
+            assert_serveable()
+        except GuardViolation as exc:
+            response = PlainTextResponse(str(exc), status_code=503)
+            await response(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -265,6 +296,9 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
     templates = Jinja2Templates(env=env)
 
     app = FastAPI(title="Vi Signal Mine")
+    # Spec D15. Added before anything is mounted or routed so it wraps the
+    # whole app — static files included, with no route exempt.
+    app.add_middleware(ProductionRefusalMiddleware)
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
     def render(request: Request, name: str, status_code: int = 200, **ctx: Any) -> HTMLResponse:

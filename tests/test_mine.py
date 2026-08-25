@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from vsm.errors import GuardViolation
 from vsm.guards.cost import estimate_run_usd
 from vsm.modes.mine import run_mine
 from vsm.runs.store import RunStore
@@ -202,3 +203,28 @@ def test_a_sweep_that_costs_more_than_estimated_stops_but_keeps_what_it_collecte
     # The real bill, not the estimate and not zero — the sweep already spent it.
     assert cost["actual_usd"] == pytest.approx(99.0)
     assert run.cost_usd == pytest.approx(99.0)
+
+
+# --- Spec D14: only `probe` is allowed to run on Vercel --------------------
+
+
+def test_a_disallowed_band_on_vercel_refuses_before_starting_a_run(stores, monkeypatch):
+    """The guard runs before `store.start()`, not after: a disallowed band
+    on Vercel must leave no run row and spend nothing, not start a run that
+    then fails partway. Checked here by asserting the topic's run list is
+    still empty after the raise, not just that a GuardViolation was raised —
+    a guard placed after `store.start()` would also satisfy the raise alone."""
+    ts, rs = stores
+    monkeypatch.setenv("VERCEL", "1")
+    topic = _topic(ts, band="standard")
+    with pytest.raises(GuardViolation, match="probe"):
+        run_mine(topic, rs, miner=_FakeMiner(), cluster_count=1)
+    assert rs.for_topic(topic.topic_id) == []
+
+
+def test_the_probe_band_still_runs_on_vercel(stores, monkeypatch):
+    ts, rs = stores
+    monkeypatch.setenv("VERCEL", "1")
+    topic = _topic(ts, band="probe")
+    run = run_mine(topic, rs, miner=_FakeMiner(), cluster_count=1)
+    assert run.status == "complete"
