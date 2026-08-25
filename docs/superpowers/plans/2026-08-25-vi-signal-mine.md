@@ -1505,23 +1505,39 @@ and on `AnthropicClient`:
         max_output_tokens: int,
         on_progress: Callable[[dict[str, Any]], None] | None = None,
     ) -> StructuredOutcome:
-        """One schema-constrained completion, under the same retry and metering
-        loop the parent uses.
+        """One schema-constrained completion, under the parent's retry loop.
 
-        ``system`` is sent as a cache-controlled block. It **must** be
-        byte-identical across runs or the prefix is unique per run and the cache
-        never hits — which is why run-specific content belongs in ``user``.
+        ``system`` is sent as a cache-controlled block and must be
+        byte-identical across runs — see ``prompts.py``.
+
+        **Every path through this loop books what it may have been billed.**
+        That is the whole reason the loop is hand-rolled instead of delegated to
+        the SDK: a retried-away attempt was still charged, and an attempt that
+        succeeded without returning a usage block was still charged. Both have
+        to land in the ledger, flagged as estimates when that is what they are.
+        Three separate ways of getting this wrong were found in review, all of
+        which produced a green test suite — see the tests below.
         """
+        prompt_chars = len(system) + len(user)
         reserve = worst_case_usd(
-            prompt_chars=len(system) + len(user), max_output_tokens=max_output_tokens
+            prompt_chars=prompt_chars, max_output_tokens=max_output_tokens
         )
-        blocked = self._check_budget(reserve_usd=reserve)
-        if blocked:
-            raise BudgetExceeded(blocked, rule="G3")
 
         last_reason = ""
-        for attempt in range(self._max_attempts):
-            meter = _AttemptMeter()
+        for attempt in range(1, self._max_attempts + 1):
+            # Re-checked at the TOP of every attempt, not once before the first.
+            # A loop that only pre-flights the budget is not a cap: three
+            # attempts against a $1 cap spent $3.60 before this moved here.
+            blocked = self._check_budget(reserve_usd=reserve)
+            if blocked:
+                if attempt == 1:
+                    raise BudgetExceeded(blocked, rule="G3")
+                return StructuredOutcome(False, None, self._spend, blocked)
+
+            # `prompt_chars` is what makes a billed-but-failed attempt bookable.
+            # Without it `estimate()` returns zeros and a three-attempt failure
+            # on a 10k-character prompt is recorded as having cost nothing.
+            meter = _AttemptMeter(prompt_chars=prompt_chars)
             try:
                 message = self._sdk.messages.create(
                     model=self._model,
@@ -1537,11 +1553,36 @@ and on `AnthropicClient`:
                     tools=[_tool_for(schema)],
                     tool_choice={"type": "tool", "name": "emit"},
                 )
-            except BaseException as exc:  # noqa: BLE001 — re-raised below if fatal
+            except BaseException as exc:  # noqa: BLE001 — booked, then re-judged
                 self._meter_attempt(meter, exc)
                 last_reason = _reason_for(exc)
-                if not _is_retryable(exc, meter) or attempt == self._max_attempts - 1:
+                if not _is_retryable(exc, meter) or attempt == self._max_attempts:
                     return StructuredOutcome(False, None, self._spend, last_reason)
+                self._sleep_before_retry(attempt, exc)
+                continue
+
+            # Success. Book it THROUGH the meter, never via `_spend.record`
+            # directly: `record(None)` records nothing at all — not the dollars,
+            # not even the call — so a response carrying no usage block would
+            # log a completed generation as a free one, unflagged.
+            meter.usage = getattr(message, "usage", None)
+            self._meter_attempt(meter)
+
+            for block in getattr(message, "content", []) or []:
+                if getattr(block, "type", "") == "tool_use":
+                    data = dict(getattr(block, "input", {}) or {})
+                    if on_progress:
+                        on_progress({"event": "structured_done", "keys": sorted(data)})
+                    return StructuredOutcome(True, data, self._spend)
+
+            # Billed and unusable. Retry, but pace it — a tight loop against a
+            # provider is both rude and, since the attempt was charged, costly.
+            last_reason = "model returned no tool_use block"
+            if attempt == self._max_attempts:
+                return StructuredOutcome(False, None, self._spend, last_reason)
+            self._sleep_before_retry(attempt, RuntimeError(last_reason))
+
+        return StructuredOutcome(False, None, self._spend, last_reason)
                 self._sleep_before_retry(attempt, exc)
                 if (blocked := self._check_budget(reserve_usd=reserve)):
                     return StructuredOutcome(False, None, self._spend, blocked)
@@ -1593,6 +1634,130 @@ Note `effective_drafter_mode()` returns `"llm"` for a forced mode even with no k
 
 Run: `pytest tests/test_llm.py -v`
 Expected: 6 passed
+
+- [ ] **Step 4b: Write the failure-path tests — the loop exists for money**
+
+Every one of the three Critical defects found in review produced a **green
+suite**, because every test used a fake that always succeeded and always
+returned a usage block. A money-safety loop tested only on its happy path is
+untested. These three are not optional.
+
+```python
+# append to tests/test_llm.py
+class _RaisingAnthropic:
+    """Always fails, the way a read timeout does — after the request went out."""
+
+    def __init__(self, exc):
+        self._exc = exc
+
+        class _M:
+            def create(_self, **kwargs):
+                raise exc
+        self.messages = _M()
+
+
+class _NoUsageAnthropic:
+    """Succeeds, but the response carries no usage block."""
+
+    def __init__(self, payload):
+        class _Block:
+            type = "tool_use"
+            input = payload
+
+        class _Msg:
+            content = [_Block()]
+            # deliberately no `usage`
+
+        class _M:
+            def create(_self, **kwargs):
+                return _Msg()
+        self.messages = _M()
+
+
+class _NoToolUseAnthropic:
+    """Succeeds and is billed, but returns nothing usable."""
+
+    def __init__(self):
+        class _Usage:
+            input_tokens = 100_000
+            output_tokens = 10_000
+            cache_read_input_tokens = 0
+            cache_creation_input_tokens = 0
+
+        class _Msg:
+            content = []
+            usage = _Usage()
+
+        class _M:
+            def create(_self, **kwargs):
+                return _Msg()
+        self.messages = _M()
+
+
+def test_a_billed_but_failed_attempt_is_still_booked():
+    """The entire reason this loop is hand-rolled. A retried-away attempt was
+    charged; recording zero for it is the failure mode the SDK's own retry has.
+    """
+    import httpx
+
+    client = AnthropicClient(
+        sdk=_RaisingAnthropic(httpx.ReadTimeout("boom")),
+        model="claude-opus-5", cap_usd=100.0, retry_backoff_s=0.0,
+    )
+    out = client.complete_structured(
+        system="S" * 5000, user="U" * 5000, schema=SCHEMA, max_output_tokens=1024
+    )
+    assert out.ok is False
+    assert client.spend.calls > 0 or client.spend.estimated_calls > 0
+    assert client.spend.usd > 0, "a failed-but-billed attempt recorded nothing"
+
+
+def test_a_success_with_no_usage_block_is_still_booked():
+    """`_spend.record(None)` records nothing — not the dollars, not the call —
+    so this path would log a completed generation as a free one."""
+    client = AnthropicClient(
+        sdk=_NoUsageAnthropic({"themes": ["x"]}),
+        model="claude-opus-5", cap_usd=100.0, retry_backoff_s=0.0,
+    )
+    out = client.complete_structured(
+        system="S" * 4000, user="U" * 4000, schema=SCHEMA, max_output_tokens=512
+    )
+    assert out.ok is True and out.data == {"themes": ["x"]}
+    assert client.spend.usd > 0, "a completed generation was logged as free"
+    assert client.spend.estimated is True, "an estimated cost must say so"
+
+
+def test_the_cap_binds_mid_loop_not_only_before_the_first_attempt():
+    """A cap that is only pre-flighted is not a cap. Before the budget check
+    moved to the top of the loop body, three attempts against a $1 cap spent
+    $3.60 and raised nothing."""
+    client = AnthropicClient(
+        sdk=_NoToolUseAnthropic(),
+        model="claude-opus-5", cap_usd=1.0, retry_backoff_s=0.0,
+    )
+    out = client.complete_structured(
+        system="S" * 1000, user="U" * 1000, schema=SCHEMA, max_output_tokens=512
+    )
+    assert out.ok is False
+    assert client.spend.usd <= 1.0 + 1e-6, f"cap breached: spent {client.spend.usd}"
+
+
+def test_the_retry_backoff_uses_a_one_based_attempt_index():
+    """`_sleep_before_retry` computes `2 ** (attempt - 1)`, so a zero-based
+    loop index halves every wait. Pinned because it is silent when wrong."""
+    import httpx
+
+    waits = []
+    client = AnthropicClient(
+        sdk=_RaisingAnthropic(httpx.ReadTimeout("boom")),
+        model="claude-opus-5", cap_usd=100.0, retry_backoff_s=0.5,
+    )
+    client._sleep_before_retry = lambda attempt, exc: waits.append(attempt)
+    client.complete_structured(
+        system="S", user="U", schema=SCHEMA, max_output_tokens=64
+    )
+    assert waits and min(waits) >= 1, f"attempt index must be 1-based, got {waits}"
+```
 
 - [ ] **Step 5: Write `vsm/llm/prompts.py`**
 
