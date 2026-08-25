@@ -4320,6 +4320,9 @@ def run_insight(
     resolver: Any | None = None,
 ) -> Run:
     resolver = resolver or VenueResolver()
+    # Snapshot the client's cumulative total before any pass runs, so the cost
+    # recorded against this run is its own and not the client's whole history.
+    spend_before = client.spend.usd if client is not None else 0.0
     run = store.start(topic.topic_id, "insight", parent_run_id=snapshot_run_id)
     signals = store.read_artifact(snapshot_run_id, "signals.json")
 
@@ -4352,12 +4355,16 @@ def run_insight(
     )
     store.write_artifact(run.run_id, "findings.json", [asdict(f) for f in findings])
 
-    # Read the cumulative ledger DIRECTLY — no `getattr` with a default.
-    # A cost of 0.0 produced by a renamed attribute is indistinguishable from a
-    # run that genuinely spent nothing, and this is the number an operator
-    # trusts to know what they spent. A rename must raise, not round to zero.
-    # `client is None` is the real offline case and is the only zero we accept.
-    spend = client.spend.usd if client is not None else 0.0
+    # Charge THIS RUN's model spend, which is a delta, not the client's total.
+    # `client.spend` is a cumulative ledger for the client's whole life, so a
+    # client shared across two runs — an INSIGHT after a MINE is the obvious
+    # wiring — would bill the first run's spend to the second.
+    #
+    # Read directly, never through `getattr` with a default: a cost of 0.0
+    # produced by a renamed attribute is indistinguishable from a run that
+    # genuinely spent nothing, and this is the number an operator trusts to
+    # know what they spent. A rename must raise, not round to zero.
+    spend = round(client.spend.usd - spend_before, 6) if client is not None else 0.0
     return store.finish(run.run_id, "complete", cost_usd=spend)
 ```
 

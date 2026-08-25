@@ -260,7 +260,7 @@ run spends less than the plan allowed.
 twenty times more. That ratio is the whole argument for gold-first. A real
 Stage-2 sweep in the parent cost $0.0315.
 
-→ `signals.jsonl` · `provenance.json` · `coverage.json` · `cost.json` · `plan.json`
+→ `signals.json` · `provenance.json` · `coverage.json` · `cost.json` · `plan.json`
 
 ### 4.2 INSIGHT — turn a snapshot into findings
 
