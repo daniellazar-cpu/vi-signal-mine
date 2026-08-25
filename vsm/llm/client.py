@@ -715,6 +715,9 @@ class AnthropicClient:
                             log.debug("progress callback raised; continuing", exc_info=True)
                     return StructuredOutcome(True, data, self._spend)
             last_reason = "model returned no tool_use block"
+            if attempt == self._max_attempts:
+                return StructuredOutcome(False, None, self._spend, last_reason)
+            self._sleep_before_retry(attempt, RuntimeError(last_reason))
         return StructuredOutcome(False, None, self._spend, last_reason)
 
 

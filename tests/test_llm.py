@@ -122,8 +122,13 @@ class _FakeMessagesNoToolUse:
             type = "text"
 
         class _Usage:
-            input_tokens = 1000
-            output_tokens = 200
+            # Chosen so that, against the cap and reserve this test uses, two
+            # calls land with real headroom under the cap and a third would
+            # breach it by a comparable margin -- not a razor's-width fit
+            # that a rate or estimator constant change could flip for an
+            # unrelated reason.
+            input_tokens = 1200
+            output_tokens = 400
             cache_read_input_tokens = 0
             cache_creation_input_tokens = 0
 
@@ -238,14 +243,24 @@ def test_the_cap_binds_mid_loop():
     """Reproduces the reported defect directly: the budget used to be checked
     once before the first attempt and then only on the exception-retry path,
     so a success that produced nothing usable looped straight back into
-    another billed call with no re-check. Each simulated call costs $0.01;
-    the cap here permits two but must block the third before it is made.
+    another billed call with no re-check.
+
+    Each simulated call costs $0.016. The pre-flight reserve check before the
+    third call is what must trip: it sees $0.017612 after one call and
+    $0.033612 after two, against a $0.025 cap -- roughly $0.007-0.009 of
+    headroom on each side, not the four-hundredths-of-a-cent margin the first
+    version of this test had, which a rate or estimator-constant change could
+    flip for a reason unrelated to the defect this test exists to catch.
+
+    ``retry_backoff_s=0.0`` matters here specifically: the no-tool_use path
+    now paces itself between attempts like every other retry, so without it
+    this test would sleep.
     """
     calls = []
     client = AnthropicClient(
         sdk=_FakeAnthropicNoToolUse(calls),
         model="claude-opus-5",
-        cap_usd=0.012,
+        cap_usd=0.025,
         retry_backoff_s=0.0,
     )
     out = client.complete_structured(
@@ -253,7 +268,7 @@ def test_the_cap_binds_mid_loop():
     )
     assert out.ok is False
     assert len(calls) == 2, "the third, cap-breaching call must never be made"
-    assert out.spend.usd <= 0.02 + 1e-9, "spend must not include a third call"
+    assert out.spend.usd <= 0.032 + 1e-9, "spend must not include a third call"
 
 
 def test_the_retry_backoff_index_is_one_based():
