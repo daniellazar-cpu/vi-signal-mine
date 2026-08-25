@@ -76,7 +76,7 @@ class VenueResolver:
         if value is None:
             return AuthorClass(
                 value="unknown",
-                basis="venue",
+                basis=self.basis,
                 confidence=None,
                 rationale=(
                     f"{venue!r} is not in the registry, so its author class is "
@@ -85,7 +85,7 @@ class VenueResolver:
             )
         return AuthorClass(
             value=value,
-            basis="venue",
+            basis=self.basis,
             confidence=None,
             rationale=(
                 f"venue {venue!r} is registered as {kind!r}; the class is derived "

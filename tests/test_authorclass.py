@@ -41,6 +41,22 @@ def test_venue_basis_never_carries_an_npi():
     assert got.npi is None and got.basis == "venue"
 
 
+def test_a_subclass_overriding_basis_is_actually_read_not_hardcoded():
+    """VenueResolver.resolve must read self.basis, not repeat the literal
+    "venue" in each return. Otherwise a future subclass that sets a different
+    basis would silently keep reporting "venue" — exactly the kind of drift
+    this field exists to prevent."""
+
+    class RelabeledResolver(VenueResolver):
+        basis = "identity"
+
+    got = RelabeledResolver().resolve(sig("studentdoctor.net"))
+    assert got.basis == "identity"
+
+    miss = RelabeledResolver().resolve(sig("some-random-blog.example"))
+    assert miss.basis == "identity"
+
+
 def test_an_identity_resolver_satisfies_the_same_protocol():
     """Proves §3.3 is a seam and not a comment. This stub is what the v2
     Provider360 resolver will replace."""
