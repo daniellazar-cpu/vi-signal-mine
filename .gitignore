@@ -6,3 +6,6 @@ var/
 .env
 .DS_Store
 *.egg-info/
+
+# impeccable scratch (decision mocks, local config)
+.impeccable/
