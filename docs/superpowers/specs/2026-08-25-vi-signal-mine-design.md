@@ -64,7 +64,7 @@ a later reader would otherwise reopen.
 | D6 | **The rung 0–5 claim ladder and 19 clinical QA checks do not travel.** | Output is intelligence, not a promotional asset needing claim classification. |
 | D7 | **Purpose is pulse, not education.** Awareness of what is being said about a customer's brand or product online. | Superseded revision 1. Drives everything in §4–§5. |
 | D8 | **v1 covers capability rungs 1–7** (see research §1): corpus, entity resolution, corroboration, clustering, stance, momentum, anomaly. | The dual-lens gap is in. Handle→NPI author identity is **out** (D9). |
-| D9 | **Author class comes from the venue, not from identity.** | We can say "this is HCP-venue conversation"; we cannot say "this is Dr X, NPI 123". The social-handle→NPI join is scoped separately — see O2. |
+| D9 | **Author class comes from the venue in v1, behind a resolver seam.** | v1 says "this is HCP-venue conversation"; it cannot say "this is Dr X, NPI 123". Every artifact records the **basis** alongside the class, so identity-derived resolution drops in without touching stance or dual-lens. O2 is answered — the join is permitted — but it stays out of v1 (§3.3). |
 | D10 | **No adverse-event classification in v1.** | Noted in the methodology statement as a scope limit, once, in the appendix. See the risk in §8. |
 | D11 | **Internal tool, client-deliverable output.** | Vi staff run it. The report is built to be handed to a client as-is: provenance appendix, methodology statement, visible confidence tiers. Nothing ships externally before the legal question in O1 is answered. |
 | D12 | **Vendored fork.** | `vsm/mining` and `vsm/llm` are copies. Parent is not modified. Gold-list drift accepted. |
@@ -103,6 +103,7 @@ vi-signal-mine/
       corroborate.py         independence test + confidence tier
       cluster.py             themes; theme naming; venue mix
       stance.py              stance per theme, per venue class
+      authorclass.py         signal → author class + basis. The v2 seam (§3.3)
       duallens.py            HCP-venue view vs patient-venue view, and the gap
       momentum.py            snapshot deltas; null with a reason when N=1
       anomaly.py             this snapshot vs the topic's rolling baseline
@@ -187,6 +188,40 @@ counts, deltas, confidence tiers, momentum, or anomaly thresholds — those are
 arithmetic in `analysis/`, because a number a model produced is a number nobody
 can reproduce. The division is the same one the parent draws when it lets the
 model contribute query *strings* while routing stays deterministic.
+
+### 3.3 The author-resolution seam
+
+O2 is answered: the social-handle → NPI join is permitted. It is still not in
+v1, because it is a data-engineering problem against Provider360 and the Pipl
+bridge, not a feature of this UI, and building it inside a UI project is how it
+would get done badly. What v1 owes it is a seam it can drop into.
+
+`analysis/authorclass.py` is the only place any pass may learn who is speaking:
+
+```
+resolve_author_class(signal, resolver) -> AuthorClass(value, basis, confidence)
+```
+
+- **v1 resolver** — venue-derived, from the registry's `kind`.
+  `basis="venue"`. Says a post came from an HCP-discussion venue.
+- **v2 resolver** — identity-derived, handle → NPI. `basis="identity"`, and
+  carries the NPI. Says a named clinician wrote it.
+
+Two rules make the seam worth having.
+
+**Every consumer reads `value` and `basis`, and may assume neither.** `stance.py`
+and `duallens.py` take an `AuthorClass`, never a venue. Swapping the resolver
+therefore changes no code downstream — which is the entire point, and is what a
+test asserts by running both passes against a stub identity resolver.
+
+**The basis travels into the report, always.** "HCP" from a venue and "HCP" from
+an NPI are different claims, and a report that prints them identically is
+lying about the stronger one. `methodology.md` states which resolver ran.
+Collapsing the two would be the same category of error as the parent's
+`resolved=False` stamp on every model-returned reference — a trust state the
+producer is not entitled to assert.
+
+Nothing else in v1 changes. The seam costs one module and one dataclass.
 
 ## 4. The three modes
 
@@ -404,6 +439,9 @@ Tests that carry weight:
 - **G5** — forecast and accuracy language rejected anywhere in the report.
 - **G6** — a `single-source` finding cannot reach the report body.
 - **Stance** — no code path produces a venue-class-blended stance number.
+- **Author seam** — stance and dual-lens produce identical structure under a
+  stub identity resolver as under the venue resolver, and the recorded `basis`
+  differs. Proves §3.3 is a seam and not a comment.
 - **Offline switch** — with `VSM_OFFLINE=1` and both keys present in the
   environment, no outbound call is attempted anywhere.
 - **Chaining** — a report resolves back through its runs to the exact signal
@@ -442,12 +480,13 @@ files.
   data Vi collected, place any duty on **Vi**, or only on the marketing
   authorisation holder? Legal, not product. Gates D11 client delivery. Related
   to the parent's open item O3.
-- **O2** Is a social-handle → NPI join permitted under the licences covering
-  Provider360 and the Pipl NPI↔HEM bridge? This is the moat identified in the
-  research — CREATION.co built 3M+ verified HCP profiles to do what Vi's
-  7.24M-HCP graph could do better — and the technique is worthless if the
-  licence forbids the join. **Scope as its own piece of work; do not let it into
-  a UI project.**
+- **O2 — ANSWERED 2026-08-25: yes, the join is permitted.** The owner confirmed
+  that a social-handle → NPI join is allowed under the licences covering
+  Provider360 and the Pipl NPI↔HEM bridge. This is the moat the research
+  identified — CREATION.co built 3M+ verified HCP profiles to do what Vi's
+  7.24M-HCP graph could do better. It is **deliberately not in v1**; §3.3 is the
+  seam that keeps it a drop-in rather than a rewrite. Scope it as its own piece
+  of work.
 - **O3** Does the gold list need re-verification before the first live run? It
   was checked 2026-08-02; robots answers and venue availability drift.
 - **O4** With D5 in force, does Vi need an internal aggregate record of hosts
