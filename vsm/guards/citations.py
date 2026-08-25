@@ -39,12 +39,12 @@ def bind_citations(
 ) -> list[Citation]:
     if not signal_ids:
         raise GuardViolation(
-            "G1: a claim was written with no signal ids to bind to", rule="G1"
+            "a claim was written with no signal ids to bind to", rule="G1"
         )
     missing = [sid for sid in signal_ids if sid not in ledger]
     if missing:
         raise GuardViolation(
-            f"G1: claim cites signal ids that are not in the ledger: "
+            f"claim cites signal ids that are not in the ledger: "
             f"{', '.join(missing)}",
             rule="G1",
         )

@@ -19,12 +19,24 @@ def env(tmp_path):
     return ts, rs, topic
 
 
-def _rows(n, venue="studentdoctor.net", theme="tolerability"):
-    return [{"signal_id": f"s{i}", "venue": f"v{i}.example.org", "theme": theme,
+def _rows(n, theme="tolerability"):
+    """``n`` signals on ``n`` genuinely distinct publishers.
+
+    Each row lives on its own registrable domain (``outlet0.com``,
+    ``outlet1.com``, ...), none of which is in the gold-list registry, so
+    each one is its own independent source under the publisher-domain path
+    in ``independence_key`` — unlike four subdomains of one registrable
+    domain (the earlier ``v{i}.example.org`` shape), which all collapse to
+    a single source and can never produce a ``corroborated`` finding. That
+    collapse previously meant no test in this file ever exercised the
+    corroborated-claim path in the report body; see
+    ``test_a_corroborated_finding_reaches_the_report_body``.
+    """
+    return [{"signal_id": f"s{i}", "venue": f"outlet{i}.com", "theme": theme,
              "title": f"{theme} {i}", "excerpt": theme,
              "captured_at": "2026-08-25T00:00:00+00:00",
              "collection_method": "serp_result",
-             "url": f"https://v{i}.example.org/{i}"} for i in range(n)]
+             "url": f"https://outlet{i}.com/{i}"} for i in range(n)]
 
 
 def _pipeline(rs, topic, rows):
@@ -43,11 +55,16 @@ def test_report_writes_its_four_artifacts(env):
 
 
 def test_the_methodology_states_the_author_basis(env):
+    """A bare 'venue' substring is too weak to pin this: the 'Where' section
+    also says 'venue registry' for an unrelated reason, so that check would
+    still pass even if the author-class basis statement were deleted
+    outright. Assert the actual claim instead."""
     ts, rs, topic = env
     insight = _pipeline(rs, topic, _rows(4))
     run = run_report(topic, insight.run_id, rs)
-    text = rs.read_artifact(run.run_id, "methodology.md")
-    assert "venue" in text.lower()
+    text = rs.read_artifact(run.run_id, "methodology.md").lower()
+    assert "author class" in text
+    assert "derived from the venue" in text
 
 
 def test_the_methodology_states_the_ae_scope_limit_exactly_once(env):
@@ -80,6 +97,40 @@ def test_an_uncorroborated_finding_cannot_reach_the_body(env):
     run = run_report(topic, insight.run_id, rs)
     body = rs.read_artifact(run.run_id, "pulse_report.md")
     assert "single source" in body.lower() or "not corroborated" in body.lower()
+
+
+def test_a_corroborated_finding_reaches_the_report_body(env):
+    """G6, the other direction. Four genuinely independent publishers clear
+    the three-source bar, and the resulting claim — not just a count in the
+    themes table, but the actual assertion about the theme — must reach the
+    main body with its tier visible. If the corroborated-claims section were
+    broken (e.g. never populated), the fallback text says no theme has
+    reached three sources yet, which does not contain this phrase."""
+    ts, rs, topic = env
+    insight = _pipeline(rs, topic, _rows(4))
+    run = run_report(topic, insight.run_id, rs)
+    body = rs.read_artifact(run.run_id, "pulse_report.md")
+    assert "corroborated on 4 independent sources" in body.lower()
+    corroborated_section = body.split("## Corroborated findings")[1].split("## Emerging")[0]
+    assert "tolerability" in corroborated_section.lower()
+
+
+def test_an_emerging_finding_appears_only_under_its_own_heading(env):
+    """Two independent sources is real but provisional (spec: 'emerging' is
+    publishable, but only in a section that names the tier). It must not
+    sit in the main 'Corroborated findings' section, which this snapshot's
+    theme has not earned."""
+    ts, rs, topic = env
+    insight = _pipeline(rs, topic, _rows(2))
+    run = run_report(topic, insight.run_id, rs)
+    body = rs.read_artifact(run.run_id, "pulse_report.md")
+
+    corroborated_section = body.split("## Corroborated findings")[1].split("## Emerging")[0]
+    emerging_section = body.split("## Emerging")[1].split("## What changed")[0]
+
+    assert "tolerability" not in corroborated_section.lower()
+    assert "tolerability" in emerging_section.lower()
+    assert "emerging" in emerging_section.lower()
 
 
 def test_forecast_language_from_the_model_blocks_the_report(env):

@@ -31,5 +31,5 @@ def assert_no_banned_terms(
     if found:
         place = f" in {where}" if where else ""
         raise GuardViolation(
-            f"G4: never-say terms present{place}: {', '.join(found)}", rule="G4"
+            f"never-say terms present{place}: {', '.join(found)}", rule="G4"
         )

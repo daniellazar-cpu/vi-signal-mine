@@ -38,7 +38,7 @@ def assert_advisory(text: str, *, where: str = "") -> None:
     if found:
         place = f" in {where}" if where else ""
         raise GuardViolation(
-            f"G2: directive language{place}: {', '.join(found)}. "
+            f"directive language{place}: {', '.join(found)}. "
             "This report suggests; it does not decide.",
             rule="G2",
         )

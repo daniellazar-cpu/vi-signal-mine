@@ -42,7 +42,7 @@ def assert_no_unmeasured_claims(text: str, *, where: str = "") -> None:
     if found:
         place = f" in {where}" if where else ""
         raise GuardViolation(
-            f"G5: forecast or accuracy language{place}: {', '.join(found)}. "
+            f"forecast or accuracy language{place}: {', '.join(found)}. "
             "This report describes measured movement between dated snapshots; "
             "it does not predict, and it quotes no accuracy figure it has not "
             "backtested.",

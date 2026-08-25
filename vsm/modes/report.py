@@ -355,12 +355,19 @@ def run_report(
         if captured_ats
         else "capture timestamps were not recorded on these signals"
     )
+    # Written so the claim is assertable, not just gesturable: the exact
+    # phrases "author class" and "derived from the venue" / "derived from
+    # resolved author identity" state the basis in words a test — or a
+    # reader — can pin, rather than relying on the word "venue" appearing
+    # somewhere in the document for an unrelated reason (it does, in the
+    # "Where" section above, which is why a bare substring check on "venue"
+    # is not a real assertion about this claim).
     basis_line = (
-        "venue-derived — who is speaking was read from the registry's classification "
-        "of the venue a signal came from, not from resolving any author's identity"
+        "author class was derived from the venue a signal came from — the "
+        "registry's classification of the venue, not any resolved author identity"
         if basis == "venue"
-        else "identity-derived — who is speaking was resolved from author identity, "
-        "not merely inferred from the venue"
+        else "author class was derived from resolved author identity, not merely "
+        "from the venue a signal came from"
     )
     methodology_lines = [
         "# Methodology",

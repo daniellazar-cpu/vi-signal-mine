@@ -24,6 +24,10 @@ class VsmError(Exception):
         super().__init__(message)
         self.rule = rule
 
+    def __str__(self) -> str:
+        base = super().__str__()
+        return f"{self.rule}: {base}" if self.rule else base
+
 
 class ConfigError(VsmError):
     """The environment says something we cannot act on."""
