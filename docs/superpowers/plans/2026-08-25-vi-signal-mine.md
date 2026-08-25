@@ -1007,6 +1007,17 @@ def test_artifact_name_cannot_escape_the_run_directory(store):
         store.write_artifact(r.run_id, "../../etc/passwd", {})
 
 
+def test_snapshot_order_survives_identical_timestamps(store):
+    """Ordering is by the monotonic seq column, not by wall-clock time. Two
+    runs created in the same microsecond must still have a defined order."""
+    ids = []
+    for _ in range(5):
+        r = store.start("top-1", "mine")
+        store.finish(r.run_id, "complete", cost_usd=0.0)
+        ids.append(r.run_id)
+    assert [r.run_id for r in store.snapshots("top-1")] == ids
+
+
 def test_parent_run_is_recorded(store):
     mine = store.start("top-1", "mine")
     store.finish(mine.run_id, "complete", cost_usd=0.0)
@@ -1169,7 +1180,12 @@ class RunStore:
             return [self._to_run(r) for r in c.execute(sql, args).fetchall()]
 
     def snapshots(self, topic_id: str) -> list[Run]:
-        """Completed MINE runs, **oldest first** — every delta walks forward."""
+        """Completed MINE runs, **oldest first** — every delta walks forward.
+
+        Ordered by the monotonic ``seq`` column, not by ``started_at``. Callers
+        establish "before" by position in this list; comparing timestamps would
+        tie whenever two runs land in the same microsecond.
+        """
         return [
             r for r in self.for_topic(topic_id, "mine") if r.status == "complete"
         ]
@@ -3923,10 +3939,14 @@ Each pass writes as soon as it finishes, so a failure late in the chain still
 leaves the earlier work on disk and re-running is cheap.
 
 **History means what came before.** The baseline is built only from snapshots
-that started earlier than this one; if it included later ones, the same
+earlier in the series than this one; if it included later ones, the same
 snapshot would produce different deltas depending on when the insight run
 happened, which would make every number in the report a function of the
 operator's schedule.
+
+"Earlier" is decided by the store's monotonic sequence, not by comparing
+``started_at``. Two snapshots created in the same microsecond compare equal on
+a timestamp, and the baseline would silently lose one.
 """
 
 from __future__ import annotations
@@ -3953,11 +3973,17 @@ def _prior_snapshot_themes(
     topic: Topic, store: RunStore, snapshot_run_id: str, client: Any | None
 ) -> list[list[Any]]:
     """Themes from every completed MINE run that started before this one."""
-    this_run = store.get(snapshot_run_id)
-    earlier = [
-        r for r in store.snapshots(topic.topic_id)
-        if r.started_at < this_run.started_at
-    ]
+    # Ordered by the store's monotonic sequence, never by wall-clock time:
+    # two snapshots created in the same microsecond would otherwise compare
+    # equal and silently drop a baseline.
+    series = store.snapshots(topic.topic_id)
+    try:
+        position = [r.run_id for r in series].index(snapshot_run_id)
+    except ValueError:
+        # This snapshot is not a completed MINE run of this topic, so it has
+        # no place in the series and therefore no history.
+        return []
+    earlier = series[:position]
     out: list[list[Any]] = []
     for run in earlier:
         try:
