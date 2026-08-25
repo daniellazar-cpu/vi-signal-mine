@@ -22,9 +22,12 @@ duplication.
 
 from __future__ import annotations
 
+import logging
+import os
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Mapping, Protocol, runtime_checkable
 
+from vsm.backends.dburl import resolve_db_url
 from vsm.config import Settings
 from vsm.runs.model import Run
 from vsm.runs.store import RunStore
@@ -32,6 +35,8 @@ from vsm.topics.model import Topic
 from vsm.topics.store import TopicStore
 
 __all__ = ["TopicStoreLike", "RunStoreLike", "open_stores"]
+
+_log = logging.getLogger(__name__)
 
 
 @runtime_checkable
@@ -85,10 +90,40 @@ class RunStoreLike(Protocol):
     def read_artifact(self, run_id: str, name: str) -> Any: ...
 
 
-def open_stores(settings: Settings) -> tuple[TopicStoreLike, RunStoreLike]:
-    """The SQLite-plus-filesystem pair. Task 24 adds a Postgres-plus-blob pair
-    behind this same name, selected by ``settings`` rather than by the
-    caller reaching for a different constructor."""
+def open_stores(
+    settings: Settings, env: Mapping[str, str] | None = None
+) -> tuple[TopicStoreLike, RunStoreLike]:
+    """Postgres-plus-blob when a database URL resolves, SQLite-plus-filesystem
+    otherwise. ``env`` is injectable for tests; production callers (``vsm/app.py``)
+    leave it at ``None`` and get ``os.environ``.
+
+    Deliberately does not import ``vsm.backends.postgres`` / ``.blob`` at
+    module scope — those import ``psycopg``, an optional extra never a core
+    dependency, and the whole point of ``resolve_db_url`` returning ``None``
+    is that a plain local install with no database configured must still work.
+
+    Logs which backend it picked, at INFO, and names the *consequence* rather
+    than the condition — the parent engine's equivalent warning went nowhere
+    because nothing had configured a log handler, so the one signal saying
+    "your writes are being lost" was silently discarded. Naming the
+    consequence means even a bare, unconfigured root logger printing to
+    stderr says something an operator would notice.
+    """
+    db_url = resolve_db_url(env if env is not None else os.environ)
+    if db_url:
+        from vsm.backends.postgres import PostgresRunStore, PostgresTopicStore
+
+        _log.info(
+            "storage backend: Postgres+blob (a database URL is configured) — "
+            "topics, runs and artifacts survive across invocations"
+        )
+        return PostgresTopicStore(db_url), PostgresRunStore(db_url)
+
+    _log.info(
+        "storage backend: SQLite+filesystem (no database URL configured) — "
+        "writes live under var_dir and do NOT survive a serverless "
+        "container being recycled"
+    )
     return (
         TopicStore(settings.db_path),
         RunStore(settings.db_path, settings.var_dir),

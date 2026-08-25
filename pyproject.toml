@@ -16,6 +16,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
+# Never a core dependency: the local tool and the hermetic test suite must
+# install and run without a database driver. Only needed when a Postgres URL
+# is actually configured (see vsm/backends/dburl.py, vsm/storage.py).
+postgres = ["psycopg[binary]"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

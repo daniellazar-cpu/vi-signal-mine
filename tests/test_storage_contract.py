@@ -35,6 +35,8 @@ fresh, isolated storage.
 
 from __future__ import annotations
 
+import hashlib
+import os
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -69,9 +71,53 @@ def _sqlite_stores(
     return topic_store, run_store, _scramble_started_at
 
 
-# Task 24 appends its Postgres+blob factory here, e.g.:
-#   STORE_FACTORIES.append(pytest.param(_postgres_blob_stores, id="postgres"))
+# Task 24's Postgres+blob factory. Skipped entirely (never even added to
+# STORE_FACTORIES, rather than added-then-skipped) when either `psycopg` is
+# not installed — it is an optional extra, never a core dependency, see
+# pyproject.toml — or no test database is configured. Point
+# VSM_TEST_DATABASE_URL at a scratch Postgres to exercise it, e.g.:
+#   VSM_TEST_DATABASE_URL=postgresql://postgres:pw@localhost:5432/postgres \
+#       pytest tests/test_storage_contract.py
+try:
+    import psycopg  # noqa: F401
+
+    _HAS_PSYCOPG = True
+except ImportError:
+    _HAS_PSYCOPG = False
+
+_TEST_DB_URL = os.environ.get("VSM_TEST_DATABASE_URL")
+
+
+def _postgres_blob_stores(
+    tmp_path: Path,
+) -> tuple[TopicStoreLike, RunStoreLike, ScrambleStartedAt]:
+    from vsm.backends.postgres import PostgresRunStore, PostgresTopicStore
+
+    # A real Postgres server is shared across every test in the run, unlike
+    # SQLite's fresh file per `tmp_path`. A schema name derived deterministically
+    # from `tmp_path` gives the same two guarantees the SQLite factory gets for
+    # free: two calls against the *same* `tmp_path` land in the same schema (so
+    # they see each other's writes, as the cross-instance-persistence cases
+    # require), and two different `tmp_path`s — i.e. two different tests —
+    # land in different schemas and cannot collide.
+    digest = hashlib.sha256(str(tmp_path).encode()).hexdigest()[:16]
+    schema = f"vsm_test_{digest}"
+    topic_store = PostgresTopicStore(_TEST_DB_URL, schema=schema)
+    run_store = PostgresRunStore(_TEST_DB_URL, schema=schema)
+
+    def _scramble_started_at(run_id: str, started_at: str) -> None:
+        with psycopg.connect(_TEST_DB_URL, autocommit=True) as conn:
+            conn.execute(
+                f"UPDATE {schema}.runs SET started_at=%s WHERE run_id=%s",
+                (started_at, run_id),
+            )
+
+    return topic_store, run_store, _scramble_started_at
+
+
 STORE_FACTORIES = [pytest.param(_sqlite_stores, id="sqlite")]
+if _HAS_PSYCOPG and _TEST_DB_URL:
+    STORE_FACTORIES.append(pytest.param(_postgres_blob_stores, id="postgres"))
 
 
 @pytest.fixture(params=STORE_FACTORIES)
