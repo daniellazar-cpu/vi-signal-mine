@@ -81,7 +81,11 @@ def stance_for_themes(
     by_id = {str(s["signal_id"]): s for s in signals}
     stances = classify_signals(signals, client=client)
     classes = {sid: resolver.resolve(row) for sid, row in by_id.items()}
-    basis = next((c.basis for c in classes.values()), "venue")
+    # Prefer an actually-resolved class's basis; fall back to the resolver's
+    # own ``basis`` attribute (VenueResolver exposes one) so an empty signal
+    # list still reports the basis the injected resolver would have produced,
+    # rather than inventing "venue" regardless of what ran.
+    basis = next((c.basis for c in classes.values()), getattr(resolver, "basis", "venue"))
 
     results: list[ThemeStance] = []
     for theme in themes:

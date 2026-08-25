@@ -83,3 +83,19 @@ def test_without_a_client_every_signal_is_unclear_not_neutral():
 
 def test_the_five_stances_are_fixed():
     assert STANCES == ("positive", "negative", "mixed", "neutral", "unclear")
+
+
+def test_the_basis_still_comes_from_the_resolver_with_no_signals_to_classify():
+    """An empty signal list leaves no resolved AuthorClass to read a basis
+    from. The basis must still come from the resolver that was injected —
+    not a hardcoded 'venue' regardless of what actually ran."""
+
+    class StubIdentity:
+        basis = "identity"
+
+        def resolve(self, signal):
+            return AuthorClass("hcp", "identity", 0.97, "NPI matched")
+
+    themes = cluster_themes(ROWS, client=None)
+    out = stance_for_themes(themes, [], StubIdentity(), client=None)
+    assert out[0].basis == "identity"
