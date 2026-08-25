@@ -3933,9 +3933,17 @@ def test_median_ignores_one_freak_week():
     assert median([4, 6]) == 5
 
 
-def test_baseline_uses_at_most_the_previous_three_snapshots():
-    priors = [[th("x", 100)], [th("x", 4)], [th("x", 5)], [th("x", 6)]]
-    assert baseline_for("x", priors) == 5
+def test_baseline_uses_the_LATEST_three_snapshots_not_the_oldest():
+    """Window size AND recency, which are separate claims.
+
+    A fixture like [100, 4, 5, 6] cannot tell them apart: the latest three
+    median to 5 and so do the *oldest* three, so a window that slices from the
+    wrong end passes. These volumes are chosen so the two windows disagree —
+    latest three are [7, 8, 9] (median 8), oldest three [1, 2, 3] (median 2).
+    """
+    priors = [[th("x", 1)], [th("x", 2)], [th("x", 3)],
+              [th("x", 7)], [th("x", 8)], [th("x", 9)]]
+    assert baseline_for("x", priors) == 8
 
 
 def test_a_theme_appearing_is_an_anomaly():
@@ -3952,8 +3960,16 @@ def test_a_theme_vanishing_is_an_anomaly():
 def test_a_spike_needs_both_a_multiple_and_a_floor():
     """Doubling from 1 to 2 is noise, and a report full of noise teaches its
     reader to skip the section."""
-    noise = detect_anomalies([th("x", 2)], [[th("x", 1)], [th("x", 1)]])
-    assert not [a for a in noise if a.kind == "volume_spike"]
+    # The floor has to be reached to be tested. `observed=2, baseline=1` is
+    # rejected by the multiplier (2 > 2 is false) before the floor matters, so
+    # that fixture passes even with MIN_VOLUME deleted. `observed=4,
+    # baseline=1` CLEARS the multiplier (4 > 2) and is stopped only by the
+    # floor (4 < 5) — which is the behaviour this test is named for.
+    noise = detect_anomalies([th("x", 4)], [[th("x", 1)], [th("x", 1)]])
+    assert not [a for a in noise if a.kind == "volume_spike"], (
+        "a 4x rise on a baseline of 1 is still only 4 mentions; the floor "
+        "is what stops a section filling with arithmetic that means nothing"
+    )
 
     real = detect_anomalies([th("x", 20)], [[th("x", 5)], [th("x", 5)]])
     spike = [a for a in real if a.kind == "volume_spike"]
