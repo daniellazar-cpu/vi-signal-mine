@@ -1,5 +1,8 @@
+from types import SimpleNamespace
+
 import pytest
 
+from vsm.guards.cost import estimate_run_usd
 from vsm.modes.mine import run_mine
 from vsm.runs.store import RunStore
 from vsm.topics.store import TopicStore
@@ -39,6 +42,22 @@ class _FakeMiner:
             provenance = {"provider": "fake"}
 
         return _Outcome()
+
+
+class _FakeClusterClient:
+    """Stands in for AnthropicClient: answers the lexicon call and reports a
+    fixed cumulative spend through `.spend.usd`, exactly like the real
+    client's public, read-only ledger."""
+
+    def __init__(self, *, spend_usd, clusters=None):
+        self.spend = SimpleNamespace(usd=spend_usd)
+        self._clusters = clusters if clusters is not None else [
+            {"cluster_id": "c1", "label": "OIC", "terms": ["naldemedine"],
+             "areas": ["gastroenterology"], "queries": ["naldemedine reviews"]},
+        ]
+
+    def complete_structured(self, *, system, user, schema, max_output_tokens, on_progress=None):
+        return SimpleNamespace(ok=True, data={"clusters": self._clusters}, reason="")
 
 
 @pytest.fixture
@@ -97,3 +116,62 @@ def test_coverage_records_venues_that_answered_and_that_did_not(stores):
     coverage = rs.read_artifact(run.run_id, "coverage.json")
     assert set(coverage["venues_attempted"]) >= set(coverage["venues_collected"])
     assert "venues_empty" in coverage
+
+
+def test_a_lexicon_call_that_alone_breaches_the_cap_stops_before_any_sweep(stores):
+    """The estimate needs a cluster count, and the cluster count comes from
+    the lexicon call — so that call cannot be gated in advance, only
+    accounted for the moment it returns. A lexicon call that alone exhausts
+    the budget must stop the run cleanly rather than proceed to a sweep it
+    cannot afford, and the real money it already spent must still show up in
+    the record rather than reading as a free run."""
+    ts, rs = stores
+    topic = _topic(ts)
+    run = run_mine(
+        topic, rs,
+        client=_FakeClusterClient(spend_usd=10.0),
+        miner=_FakeMiner(),
+        cluster_count=1,
+        cap_usd=1.0,
+    )
+    assert run.status == "stopped_on_budget"
+    assert rs.read_artifact(run.run_id, "signals.json") == []
+    cost = rs.read_artifact(run.run_id, "cost.json")
+    assert cost["stopped"] is True
+    assert "lexicon" in cost["reason"].lower()
+    # Real spend, already incurred — reported, not swallowed into a zero
+    # just because the cap declined to accept it after the fact.
+    assert cost["model_usd"] == pytest.approx(10.0)
+    assert run.cost_usd == pytest.approx(10.0)
+
+
+def test_a_sweep_that_costs_more_than_estimated_stops_but_keeps_what_it_collected(stores):
+    """The second, more interesting breach: the estimate clears the cap
+    comfortably, the sweep runs, and only afterwards does its real cost turn
+    out to exceed what was budgeted. Unlike a pre-sweep breach, rows were
+    actually collected here and must not be discarded — "partial rows, a
+    recorded deferral, no overspend" is the contract, not "no rows", and this
+    is the one test in the file where the pipeline's *second*
+    ``BudgetExceeded`` catch site — the one that fires on the actual cost,
+    not the estimate — is the one that fires."""
+    ts, rs = stores
+    topic = _topic(ts)
+    estimate = estimate_run_usd(topic.band(), cluster_count=1).total_usd
+    run = run_mine(
+        topic, rs,
+        miner=_FakeMiner(cost=99.0),
+        cluster_count=1,
+        cap_usd=estimate + 0.03,  # clears the estimate; the actual cost will not
+    )
+    assert run.status == "stopped_on_budget"
+    rows = rs.read_artifact(run.run_id, "signals.json")
+    assert rows, "the sweep ran and collected rows — they must survive the stop"
+    assert {r["signal_id"] for r in rows} == {"sig-a", "sig-b"}
+    assert all(r["topic_id"] == topic.topic_id for r in rows)
+    cost = rs.read_artifact(run.run_id, "cost.json")
+    assert cost["stopped"] is True
+    assert "cap" in cost["reason"].lower()
+    assert cost["estimate_usd"] == pytest.approx(estimate)
+    # The real bill, not the estimate and not zero — the sweep already spent it.
+    assert cost["actual_usd"] == pytest.approx(99.0)
+    assert run.cost_usd == pytest.approx(99.0)

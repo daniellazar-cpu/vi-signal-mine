@@ -93,43 +93,65 @@ def run_mine(
 ) -> Run:
     band = topic.band()
     run = store.start(topic.topic_id, "mine")
+    cap = CostCap(cap_usd if cap_usd is not None else 5.0)
 
     clusters = build_clusters(topic, client)
-    n = cluster_count if cluster_count is not None else len(clusters)
-    estimate = estimate_run_usd(band, cluster_count=n)
-    cap = CostCap(cap_usd if cap_usd is not None else 5.0)
 
     # MiningConfig is CONSTRUCTOR state on LiveSignalMining, not a run()
     # argument. A caller that wants a configured live miner builds it with
     # `LiveSignalMining(serp=..., config=config_for(band))` and passes it in;
     # `run_mine` only decides the shape, so a test can inject a fake.
     stopped, reason, outcome = False, "", None
+
     # Read the model's cumulative spend directly as `client.spend.usd` — never
     # through `getattr(client, "spend", default)`. A zero produced by a
     # renamed attribute is indistinguishable from a run that genuinely spent
     # nothing, and this is the number an operator trusts to know what they
-    # spent. `client is None` (the real offline case, and every case in this
-    # test suite) is the only zero to accept.
-    model_cost = client.spend.usd if client is not None else 0.0
-    try:
-        cap.spend(estimate.total_usd)
-    except BudgetExceeded as exc:
-        stopped, reason = True, str(exc)
+    # spent. `client is None` (the offline case) is the only zero to accept.
+    #
+    # There is a genuine chicken-and-egg here: the estimate needs a cluster
+    # count, and the cluster count comes from the lexicon call, so that call
+    # has already happened — and already been billed — by the time we get
+    # here. The fix is not to reorder around it (there is no way to know the
+    # cluster count before making it) but to account for it: charge the real
+    # lexicon spend to the run's cap immediately, before the estimate check,
+    # so the cap governs the run's whole spend and not only the part that
+    # comes after the lexicon call.
+    lexicon_usd = client.spend.usd if client is not None else 0.0
+    if client is not None:
+        try:
+            cap.spend(lexicon_usd)
+        except BudgetExceeded as exc:
+            stopped = True
+            reason = f"the lexicon call alone breached the cap: {exc}"
+
+    n = cluster_count if cluster_count is not None else len(clusters)
+    estimate = estimate_run_usd(band, cluster_count=n)
+
+    if not stopped:
+        try:
+            cap.spend(estimate.total_usd)
+        except BudgetExceeded as exc:
+            stopped, reason = True, str(exc)
 
     if not stopped and miner is not None:
         # `campaign_id` is the vendored miner's name for what this fork calls a
         # topic. They are the same value; both land on the row (see below).
         outcome = miner.run(campaign_id=topic.topic_id, clusters=clusters)
-        # Re-read after the sweep: a live client may have made further calls
-        # since `build_clusters`, and this must reflect the run's whole spend.
-        model_cost = client.spend.usd if client is not None else 0.0
         try:
-            cap.spend(max(0.0, outcome.cost_usd + model_cost - estimate.total_usd))
+            cap.spend(max(0.0, outcome.cost_usd - estimate.total_usd))
         except BudgetExceeded as exc:
+            # The sweep has already run and already spent real money — a
+            # breach caught here is the cap catching up to a bill that came
+            # in higher than estimated, not a purchase we can still decline.
+            # The rows already collected are kept (below): "partial rows, a
+            # recorded deferral, no overspend, no exception thrown at the
+            # pipeline" is the vendored miner's own contract for an internal
+            # stop, and this is that same contract applied one level up.
             stopped, reason = True, str(exc)
 
     rows: list[dict[str, Any]] = []
-    if outcome is not None and not stopped:
+    if outcome is not None:
         for row in outcome.rows:
             enriched = dict(row)
             # `campaign_id` is already on the row — the vendored `build_row`
@@ -168,22 +190,24 @@ def run_mine(
             "notes": list(getattr(outcome, "notes", [])) if outcome else [],
         },
     )
-    # Same acceptance rule as `actual_usd` below: a run that stopped on budget
-    # has its spend represented by `cap.spent()` (what actually cleared the
-    # cap), not by what the sweep or the model would have cost had it run to
-    # completion — that number was never accepted, so it is not the run's
-    # recorded cost. Reuses `model_cost` itself rather than re-reading
-    # `client.spend.usd`, so this cannot disagree with the figure the cap
-    # check above just used.
-    actual_model_cost = model_cost if not stopped else 0.0
+    # Both figures are real, never invented, and neither is zeroed out just
+    # because the run stopped: `actual_usd` is what the sweep really cost
+    # (genuinely zero if it never ran — nothing was bought), `model_usd` is
+    # what the lexicon call really cost (genuinely zero if no client was
+    # used). `cap.spent()` below is a different number on purpose — it is
+    # what the *cap* accepted, which can be less than what was actually
+    # spent when a breach is discovered after the money already went out;
+    # collapsing the two would either hide a real bill or invent a smaller
+    # one, and both are the failure this guard exists to prevent.
+    actual_usd = round(getattr(outcome, "cost_usd", 0.0), 6) if outcome is not None else 0.0
     store.write_artifact(
         run.run_id,
         "cost.json",
         {
             "estimate_usd": estimate.total_usd,
             "breakdown": estimate.breakdown,
-            "actual_usd": round(getattr(outcome, "cost_usd", 0.0), 6) if outcome and not stopped else 0.0,
-            "model_usd": actual_model_cost,
+            "actual_usd": actual_usd,
+            "model_usd": lexicon_usd,
             "cap_usd": cap.cap_usd,
             "spent_usd": cap.spent(),
             "stopped": stopped,
@@ -198,10 +222,9 @@ def run_mine(
     return store.finish(
         run.run_id,
         "stopped_on_budget" if stopped else "complete",
-        cost_usd=(
-            cap.spent()
-            if stopped
-            else round(getattr(outcome, "cost_usd", 0.0) + actual_model_cost, 6)
-        ),
+        # The run's recorded cost is the real total (lexicon + sweep), not
+        # `cap.spent()` — by the time either figure is known, that money has
+        # already been spent regardless of what the cap decided to accept.
+        cost_usd=round(lexicon_usd + actual_usd, 6),
         note=reason,
     )
