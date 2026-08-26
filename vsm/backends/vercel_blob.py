@@ -662,14 +662,16 @@ class BlobRunStore:
         return path_cls(run_id) / name
 
     def read_artifact(self, run_id: str, name: str) -> Any:
+        """One fetch, deciding *before* touching the bytes whether they are
+        JSON — deliberately not built on ``_BlobNamespace.read_json``, whose
+        job is topic/run records that are always JSON. An artifact is not:
+        ``pulse_report.md`` is plain markdown, and ``read_json`` calling
+        ``json.loads`` on it unconditionally would raise
+        ``json.JSONDecodeError`` before this method ever got a chance to
+        treat the name's ``.json`` suffix as the deciding signal, the same
+        bug the filesystem (``RunStore``) and Postgres (``BlobArtifacts``)
+        backends both avoid by checking the suffix first, parsing second."""
         _validated_key(run_id, name)
-        data = self._ns.read_json(self._artifact_path(run_id, name))
-        if data is not None and name.endswith(".json"):
-            return data
-        # Not JSON, or JSON parsing wasn't attempted — re-read as text via
-        # the same resolve path so a non-JSON artifact (e.g. a `.md` report)
-        # round-trips its exact bytes rather than being coerced through
-        # `json.loads`.
         url = self._ns._resolve(self._artifact_path(run_id, name))
         if url is None:
             raise FileNotFoundError(f"no artifact named {name!r} on run {run_id!r}")
