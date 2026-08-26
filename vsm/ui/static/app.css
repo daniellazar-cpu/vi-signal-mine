@@ -100,6 +100,23 @@ p { margin: 0 0 var(--space-xs); max-width: 72ch; }
   background: var(--bg-subtle);
 }
 .field-note { display: block; margin: 4px 0 0; }
+
+/* The ephemeral-storage notice (Task: works-on-deploy). Quiet and specific,
+   shown only where the risk is real — the topic-creation form and the
+   screen a user lands on right after creating one — never on every screen,
+   which would train a reader to stop reading it. A bordered box like
+   .empty-state, not the inverted full-width .synthetic-banner: this is a
+   fact about the deployment, not a warning about the data on this page. */
+.storage-notice {
+  margin: 0 0 var(--space-md);
+  padding: 10px var(--space-sm);
+  border: var(--border-hairline) solid var(--rule-strong);
+  background: var(--bg-subtle);
+  font-size: var(--t-small-size);
+  line-height: var(--t-small-lh);
+  color: var(--fg1);
+  max-width: 68ch;
+}
 .cell-sub { display: block; margin-top: 2px; }
 .muted { color: var(--fg2); }
 
@@ -279,7 +296,16 @@ legend {
 }
 .band-card:hover { border-color: var(--fg1); }
 .band-card input { width: auto; margin-right: 8px; accent-color: var(--signal); }
-.band-card-selected { border: 1.5px solid var(--signal); background: var(--vi-violet-06); }
+/* The highlight must follow the radio's live checked state, not a static
+   server-rendered class — a class computed once at render time cannot
+   track a click that never leaves the browser (no JS on this page), so it
+   stays parked on whichever band was checked when the page loaded while
+   the reader's actual selection moves elsewhere. `:has()` reacts to the
+   input's live state the same way the insight tabs above react to
+   `:checked` on a sibling; the input is a *descendant* of `.band-card`
+   here (the label wraps it) rather than a preceding sibling, which is what
+   calls for `:has()` instead of the `~` combinator those tabs use. */
+.band-card:has(input:checked) { border: 1.5px solid var(--signal); background: var(--vi-violet-06); }
 .band-card-name { display: block; font-weight: var(--w-medium); font-size: var(--t-body-size); margin-bottom: 6px; }
 .band-card-estimate { display: block; font-family: var(--vi-font-mono); font-size: var(--t-small-size); font-weight: var(--w-medium); color: var(--fg1); margin-bottom: 10px; }
 .band-card-detail { display: block; font-size: var(--t-caption-size); color: var(--fg2); }

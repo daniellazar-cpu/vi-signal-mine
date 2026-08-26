@@ -10,6 +10,9 @@
   <a class="btn btn-primary" href="/topics/new">New topic</a>
 </section>
 <p class="page-caption">{{ explainer('topics') }}</p>
+{% if ephemeral_storage %}
+<p class="storage-notice">{{ ephemeral_storage_notice }}</p>
+{% endif %}
 
 {% if rows %}
 <div class="table-scroll">

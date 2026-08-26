@@ -27,10 +27,24 @@ __all__ = [
     "GLOSSARY",
     "FIELD_GUIDE",
     "FIRST_RUN_STEPS",
+    "EPHEMERAL_STORAGE_NOTICE",
     "explainer",
 ]
 
 TAGLINE = "What people are saying about a brand or product online — and what changed."
+
+#: Shown at the one point the risk is real — the topic-creation form, and
+#: the screen a user lands on right after creating one — never elsewhere.
+#: One quiet, specific line, not a warning repeated on every screen: what is
+#: missing (a database), what it costs (a topic outlives this container only
+#: by luck), and the fix (Postgres). Whether this shows at all is computed
+#: from whether a database URL resolves (vsm.backends.dburl.resolve_db_url),
+#: never from any one topic's own data.
+EPHEMERAL_STORAGE_NOTICE = (
+    "This instance has no database connected, so topics created here last "
+    "only as long as this container keeps running. Connecting Postgres "
+    "keeps them for good."
+)
 
 WHAT_IT_IS = (
     "Vi Signal Mine watches a topic over time. It collects what is being said "
@@ -53,7 +67,15 @@ MODES = (
             "where it came from, when it was captured, and what it cost."
         ),
         "produces": "Signals, provenance, coverage, cost",
-        "cost": "A probe run is about 3 cents. A deep run is a few dollars.",
+        # Say the number the form shows, not a flattering slice of it. A probe
+        # estimates near 6 cents: about a penny of search and 5 cents of model
+        # time. "About 3 cents" was the search half quoted as the whole, which
+        # is the kind of small dishonesty that makes a reader stop trusting
+        # every other figure on the page.
+        "cost": (
+            "A probe run estimates at about 6 cents — roughly a penny of "
+            "search and 5 cents of model time. A deep run is a few dollars."
+        ),
     },
     {
         "key": "insight",

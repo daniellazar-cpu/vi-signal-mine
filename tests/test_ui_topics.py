@@ -162,3 +162,93 @@ def test_the_topic_form_marks_exactly_one_field_required(client):
     body = c.get("/topics/new").text
     assert body.count("Required") == 1
     assert "Optional" in body
+
+
+# --- The ephemeral-storage notice (defect 1b) --------------------------
+
+
+def _no_database_configured(monkeypatch):
+    for var in ("POSTGRES_URL_NON_POOLING", "POSTGRES_URL", "DATABASE_URL"):
+        monkeypatch.delenv(var, raising=False)
+
+
+def test_the_ephemeral_notice_appears_on_the_new_topic_form_with_no_database(client, monkeypatch):
+    from vsm.ui.content import EPHEMERAL_STORAGE_NOTICE
+
+    _no_database_configured(monkeypatch)
+    c, _, _ = client
+    body = c.get("/topics/new").text
+    assert EPHEMERAL_STORAGE_NOTICE in body
+
+
+def test_the_ephemeral_notice_is_absent_when_a_database_url_resolves(client, monkeypatch):
+    from vsm.ui.content import EPHEMERAL_STORAGE_NOTICE
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql://example/db")
+    c, _, _ = client
+    body = c.get("/topics/new").text
+    assert EPHEMERAL_STORAGE_NOTICE not in body
+
+
+def test_the_ephemeral_notice_appears_on_the_topics_list_after_creating_one(client, monkeypatch):
+    """The screen a user actually lands on right after `POST /topics` —
+    the redirect target — is the topics list, not a dedicated
+    "topic created" page. That is "after a topic is created" for this app."""
+    from vsm.ui.content import EPHEMERAL_STORAGE_NOTICE
+
+    _no_database_configured(monkeypatch)
+    c, ts, _ = client
+    ts.create(name="OIC", therapeutic_area="gi", spend_band="probe")
+    body = c.get("/").text
+    assert EPHEMERAL_STORAGE_NOTICE in body
+
+
+def test_the_ephemeral_notice_is_absent_from_the_edit_form(client, monkeypatch):
+    """The risk named is *creating* a topic that will not survive — editing
+    an already-persisted-for-this-container topic is not that moment, and
+    repeating the notice there would be the "every screen" over-disclosure
+    the task explicitly ruled out."""
+    from vsm.ui.content import EPHEMERAL_STORAGE_NOTICE
+
+    _no_database_configured(monkeypatch)
+    c, ts, _ = client
+    t = ts.create(name="OIC", therapeutic_area="gi", spend_band="probe")
+    body = c.get(f"/topics/{t.topic_id}/edit").text
+    assert EPHEMERAL_STORAGE_NOTICE not in body
+
+
+# --- The spend-band highlight follows the checked radio (defect 2) ------
+
+
+def _band_card_blocks(html):
+    import re
+
+    return re.findall(r'<label class="band-card">.*?</label>', html, re.S)
+
+
+def test_band_card_highlight_is_driven_by_the_checked_radio_not_a_static_class(client):
+    """Regression test for the bug: `.band-card-selected` used to be a
+    server-rendered class computed from the topic's *saved* spend band, so
+    it could not follow a client-side click — there is no JS on this page
+    to move it. The fix drives the highlight from CSS `:has(input:checked)`
+    instead, verified two ways: the stale static class is gone from the
+    markup (so it cannot light up a second, wrong card alongside the CSS
+    rule), and the CSS rule that supplies the highlight actually targets the
+    radio's live checked state."""
+    from pathlib import Path
+
+    c, ts, _ = client
+    t = ts.create(name="OIC", therapeutic_area="gi", spend_band="deep")
+    body = c.get(f"/topics/{t.topic_id}/edit").text
+
+    assert "band-card-selected" not in body
+
+    blocks = _band_card_blocks(body)
+    assert len(blocks) == 3, "expected exactly one card per spend band"
+    checked_blocks = [b for b in blocks if "checked" in b]
+    assert len(checked_blocks) == 1, "exactly one radio may be checked"
+    assert 'value="deep"' in checked_blocks[0]
+
+    css_path = Path(__file__).resolve().parent.parent / "vsm" / "ui" / "static" / "app.css"
+    css = css_path.read_text(encoding="utf-8")
+    assert ".band-card:has(input:checked)" in css

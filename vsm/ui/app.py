@@ -15,6 +15,7 @@ defaults.
 
 from __future__ import annotations
 
+import os
 import re
 from html import escape as _esc
 from pathlib import Path
@@ -28,6 +29,7 @@ from starlette.responses import PlainTextResponse
 from starlette.templating import Jinja2Templates
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from vsm.backends.dburl import resolve_db_url
 from vsm.config import get_settings
 from vsm.errors import GuardViolation, NoSuchRun, NoSuchTopic, VsmError
 from vsm.guards.cost import estimate_run_usd
@@ -43,6 +45,7 @@ from vsm.topics.model import BANDS
 from vsm.ui.content import (
     DELIVERABLE_GROUPS,
     DELIVERABLES,
+    EPHEMERAL_STORAGE_NOTICE,
     FIELD_GUIDE,
     FIRST_RUN_STEPS,
     GLOSSARY,
@@ -288,6 +291,18 @@ def _split_lines(text: str) -> tuple[str, ...]:
     return tuple(ln.strip() for ln in text.splitlines() if ln.strip())
 
 
+def _storage_is_ephemeral() -> bool:
+    """Would a topic created right now outlive this container?
+
+    ``False`` the moment a database URL resolves — the same check
+    ``vsm.storage.open_stores`` itself makes, read fresh at request time
+    rather than cached, so a database added after the process started (or a
+    test's ``monkeypatch.setenv``) is reflected on the very next request
+    rather than requiring a restart to notice.
+    """
+    return resolve_db_url(os.environ) is None
+
+
 def _band_cards() -> list[dict[str, Any]]:
     cards = []
     for name in ("probe", "standard", "deep"):
@@ -474,6 +489,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
     env.globals["stance_label"] = _stance_label
     env.globals["anomaly_label"] = _anomaly_label
     env.globals["explainer"] = explainer
+    env.globals["ephemeral_storage_notice"] = EPHEMERAL_STORAGE_NOTICE
 
     templates = Jinja2Templates(env=env)
 
@@ -543,7 +559,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         rows = [_topic_row(t) for t in topic_store.list()]
         return render(
             request, "topics.html", rows=rows, first_run_steps=FIRST_RUN_STEPS,
-            active_nav="topics",
+            active_nav="topics", ephemeral_storage=_storage_is_ephemeral(),
         )
 
     _BLANK_TOPIC_VALUES = {
@@ -556,7 +572,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         return render(
             request, "topic_form.html", mode="create", topic=None,
             band_cards=_band_cards(), errors={}, values=dict(_BLANK_TOPIC_VALUES),
-            field_guide=FIELD_GUIDE,
+            field_guide=FIELD_GUIDE, ephemeral_storage=_storage_is_ephemeral(),
         )
 
     @app.get("/topics/{topic_id}/edit", response_class=HTMLResponse)
@@ -578,7 +594,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         return render(
             request, "topic_form.html", mode="edit", topic=topic,
             band_cards=_band_cards(), errors={}, values=values,
-            field_guide=FIELD_GUIDE,
+            field_guide=FIELD_GUIDE, ephemeral_storage=_storage_is_ephemeral(),
         )
 
     @app.get("/topics/{topic_id}", response_class=HTMLResponse)
@@ -665,7 +681,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             return render(
                 request, "topic_form.html", status_code=422, mode="create", topic=None,
                 band_cards=_band_cards(), errors=errors, values=values,
-                field_guide=FIELD_GUIDE,
+                field_guide=FIELD_GUIDE, ephemeral_storage=_storage_is_ephemeral(),
             )
         topic_store.create(
             name=name.strip(), therapeutic_area=therapeutic_area.strip(), spend_band=chosen_band,
@@ -703,7 +719,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             return render(
                 request, "topic_form.html", status_code=422, mode="edit", topic=topic,
                 band_cards=_band_cards(), errors=errors, values=values,
-                field_guide=FIELD_GUIDE,
+                field_guide=FIELD_GUIDE, ephemeral_storage=_storage_is_ephemeral(),
             )
         topic_store.update(
             topic_id,

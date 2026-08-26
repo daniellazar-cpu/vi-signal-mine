@@ -7,6 +7,9 @@
   <h1>{% if mode == "edit" %}Edit {{ topic.name }}{% else %}New topic{% endif %}</h1>
 </section>
 <p class="page-caption">{{ explainer('topic_form') }}</p>
+{% if mode == "create" and ephemeral_storage %}
+<p class="storage-notice">{{ ephemeral_storage_notice }}</p>
+{% endif %}
 
 <form class="form-stack" method="post" action="{% if mode == 'edit' %}/topics/{{ topic.topic_id }}{% else %}/topics{% endif %}">
 
@@ -80,7 +83,7 @@
     {% if errors.spend_band is defined %}<p class="field-error">{{ errors.spend_band }}</p>{% endif %}
     <div class="band-cards">
       {% for card in band_cards %}
-      <label class="band-card {% if values.spend_band == card.band.name %}band-card-selected{% endif %}">
+      <label class="band-card">
         <input type="radio" name="spend_band" value="{{ card.band.name }}"
                {% if values.spend_band == card.band.name %}checked{% endif %}>
         <span class="band-card-name">{{ card.band.name }}</span>
