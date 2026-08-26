@@ -11,14 +11,56 @@ from vsm.platform import (
 )
 
 
-def test_production_deployment_refuses_to_serve(monkeypatch):
-    """Spec D15. Protection is Vercel preview gating, which covers preview
-    deployments only. This guard is what makes 'preview-only' a property of the
-    code instead of a dashboard setting that has to stay correct — a deploy that
-    escapes to a production domain is inert rather than open, with the API keys
-    behind it."""
+def test_production_refuses_only_when_it_has_something_to_lose(monkeypatch):
+    """Spec D15, as refined.
+
+    Vercel gates preview deployments only on this plan, so a production URL is
+    reachable by anyone holding it. The thing worth protecting is not the URL
+    but the live keys behind it, which can spend real money — so live keys with
+    no gate is the combination that refuses, and it is the only one.
+    """
     monkeypatch.setenv("VERCEL_ENV", "production")
-    with pytest.raises(GuardViolation, match="production"):
+    monkeypatch.setenv("VSM_OFFLINE", "0")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-live-looking-key")
+    monkeypatch.delenv("VSM_ACCESS_KEY", raising=False)
+    with pytest.raises(GuardViolation, match="VSM_ACCESS_KEY"):
+        assert_serveable()
+
+
+def test_production_serves_when_offline_leaves_nothing_to_abuse(monkeypatch):
+    """A fresh deployment carrying no secrets is inert, so it may be clicked.
+
+    The first version of this guard refused all production traffic, which made
+    the URL a person naturally lands on permanently dead — indistinguishable
+    from a broken deployment, and there was nothing to protect.
+    """
+    monkeypatch.setenv("VERCEL_ENV", "production")
+    monkeypatch.setenv("VSM_OFFLINE", "1")
+    monkeypatch.delenv("VSM_ACCESS_KEY", raising=False)
+    assert assert_serveable() is None
+
+
+def test_production_serves_when_an_access_key_gates_it(monkeypatch):
+    monkeypatch.setenv("VERCEL_ENV", "production")
+    monkeypatch.setenv("VSM_OFFLINE", "0")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-live-looking-key")
+    monkeypatch.setenv("VSM_ACCESS_KEY", "a-shared-secret")
+    assert assert_serveable() is None
+
+
+def test_the_guard_fails_closed(monkeypatch):
+    """Offline off and no access key is a refusal, never a default-allow.
+
+    Worth its own test because the permissive branches are the new behaviour,
+    and a guard that grew two ways to say yes is exactly where an accidental
+    third one would hide.
+    """
+    monkeypatch.setenv("VERCEL_ENV", "production")
+    monkeypatch.setenv("VSM_OFFLINE", "0")
+    monkeypatch.delenv("VSM_ACCESS_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("BRIGHTDATA_API_KEY", raising=False)
+    with pytest.raises(GuardViolation):
         assert_serveable()
 
 

@@ -28,6 +28,7 @@ from vsm.errors import GuardViolation
 
 __all__ = [
     "is_vercel",
+    "production_is_safe",
     "vercel_env",
     "assert_serveable",
     "assert_band_allowed",
@@ -43,27 +44,70 @@ def vercel_env() -> str | None:
     return os.environ.get("VERCEL_ENV") or None
 
 
-def assert_serveable() -> None:
-    """Spec D15. Refuses every route on a production Vercel deployment.
+def production_is_safe() -> tuple[bool, str]:
+    """May a production deployment serve, and on what grounds?
 
-    The chosen protection is Vercel's own preview gating, which covers
-    preview deployments only — there is deliberately no application-level
-    auth in front of this tool. That leaves exactly one way a production
-    domain could still end up serving requests: a dashboard setting drifting
-    or being configured wrong. This guard is what makes "preview-only" a
-    property of the code instead of something that has to stay correct in a
-    dashboard — a deploy that reaches a production domain answers nothing
-    instead of answering with live API keys behind it.
+    Returns ``(allowed, reason)``. The reason travels either way, because "why
+    is this page dead" and "why is this page open" are both questions someone
+    asks in a hurry.
+
+    **What this guard actually protects.** Vercel's own gating covers preview
+    deployments only on this plan, so a production URL is reachable by anyone
+    holding it. What makes that dangerous is not the URL — it is the live API
+    keys behind it, which can spend real money. So the question is not "is this
+    production?" but "is there anything here worth protecting?", and there are
+    two honest ways for the answer to be no:
+
+    * **Nothing to spend.** With ``VSM_OFFLINE=1`` no outbound call is possible
+      from any code path, so there is no key to abuse and no budget to drain.
+      A visitor gets a working but inert instance. This is the state a fresh
+      deployment is in before anyone adds secrets, which is why it can be
+      clicked through immediately.
+    * **Something in front of it.** ``VSM_ACCESS_KEY`` set means the app gates
+      itself, so live keys sit behind a shared secret rather than behind
+      nothing.
+
+    Live keys with no gate is the single combination that refuses — the actual
+    danger, stated precisely instead of approximated by "is this production".
+    Fails closed: offline off and no access key is a refusal, never a
+    default-allow.
     """
-    if vercel_env() == "production":
-        raise GuardViolation(
-            "this is a production Vercel deployment, and the app refuses to "
-            "serve any route here. Protection is Vercel preview gating, "
-            "which covers preview deployments only — this guard is what "
-            "keeps a deploy that reaches a production domain inert rather "
-            "than open with live API keys behind it.",
-            rule="D15",
+    from vsm.config import get_settings
+
+    if os.environ.get("VSM_ACCESS_KEY", "").strip():
+        return True, "an access key is set, so the app gates itself"
+    if get_settings(refresh=True).offline:
+        return (
+            True,
+            "VSM_OFFLINE=1, so no outbound call is possible and there is no "
+            "key to abuse or budget to drain",
         )
+    return False, "live API keys are configured and nothing gates this deployment"
+
+
+def assert_serveable() -> None:
+    """Spec D15. Refuses a production deployment that has something to lose.
+
+    Not every production deployment — see :func:`production_is_safe`. The
+    first version of this guard refused *all* production traffic. That was a
+    fair reading of the decision and wrong in practice: it made the URL a
+    person naturally lands on permanently dead, which reads as a broken
+    deployment rather than a protected one, and it pushed every visit onto a
+    preview URL that changes with every deploy.
+    """
+    if vercel_env() != "production":
+        return
+    allowed, reason = production_is_safe()
+    if allowed:
+        return
+    raise GuardViolation(
+        f"this production deployment refuses to serve, because {reason}. On "
+        "this plan Vercel gates preview deployments only, so a production URL "
+        "is reachable by anyone who has it. Either set VSM_ACCESS_KEY to put a "
+        "shared secret in front of the app, or set VSM_OFFLINE=1 to make it "
+        "inert and unable to spend anything.",
+        rule="D15",
+    )
 
 
 def assert_band_allowed(band: str) -> None:

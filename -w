@@ -1,0 +1,1 @@
+D15: this is a production Vercel deployment, and the app refuses to serve any route here. Protection is Vercel preview gating, which covers preview deployments only — this guard is what keeps a deploy that reaches a production domain inert rather than open with live API keys behind it.

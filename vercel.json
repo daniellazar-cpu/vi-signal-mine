@@ -12,6 +12,7 @@
     }
   },
   "env": {
-    "VSM_VAR_DIR": "/tmp/vsm-var"
+    "VSM_VAR_DIR": "/tmp/vsm-var",
+    "VSM_OFFLINE": "1"
   }
 }
