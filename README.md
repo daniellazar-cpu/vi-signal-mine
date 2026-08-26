@@ -1,6 +1,6 @@
 # Vi Signal Mine
 
-You give it a topic the way you would start an Attending Health campaign. It goes out and collects what is being said — text, engagement, where, by which kind of source. Then it corroborates, clusters, measures stance and movement, and turns that into a report Vi can put in front of a client.
+You give it a topic to mine. It goes out and collects what is being said — text, engagement, where, by which kind of source. Then it corroborates, clusters, measures stance and movement, and turns that into a report Vi can put in front of a client.
 
 ## Three modes
 
