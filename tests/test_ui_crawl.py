@@ -35,6 +35,7 @@ proving nothing.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlsplit
@@ -171,9 +172,60 @@ def _assert_no_dead_ends(result: CrawlResult) -> None:
     )
 
 
+#: This app's five mutating routes, as path shapes rather than five literal
+#: URLs — every POST-only <form action> the crawler ever finds must match
+#: one of these, on any page, in either storage mode.
+_MUTATING_ROUTE_SHAPES = tuple(
+    re.compile(p) for p in (
+        r"^/topics$",
+        r"^/topics/[^/]+$",
+        r"^/topics/[^/]+/mine$",
+        r"^/runs/[^/]+/insight$",
+        r"^/runs/[^/]+/report$",
+    )
+)
+
+
+def _assert_post_forms_are_sound(client: TestClient, result: CrawlResult, *, durable: bool) -> None:
+    """What the owner's own independent crawl found this file conflating:
+    recording a POST-only ``<form action>`` and never checking anything
+    about it is exactly as blind as never finding it. Every target found
+    here must be a real, known mutating route shape — never a stray or
+    malformed action string this crawler's own parsing happened to produce
+    — and in read-only mode it must additionally be safe to actually POST
+    to, which is checked for real, not assumed.
+
+    Read-only mode only actually fires the POST: ``storage_is_durable()``
+    being false means ``read_only_refusal`` (``vsm/ui/app.py``) answers
+    before any store write, on any request body — so hitting it for real
+    here costs nothing and proves the refusal rather than assuming it. The
+    durable case does not fire a live POST: submitting real bodies to five
+    different mutating forms mid-crawl — mine, insight and report all being
+    real (if fake-miner-backed) writes — would make this dead-link sweep a
+    second, redundant driver of the write path, when
+    ``test_every_post_form_redirects_to_a_live_page`` below already walks
+    that exact path with real field data and checks every redirect target.
+    """
+    for dest, sources in result.post_forms.items():
+        path = urlsplit(dest).path
+        assert any(p.match(path) for p in _MUTATING_ROUTE_SHAPES), (
+            f"POST form action {dest!r} (found on {sorted(sources)}) does not "
+            "match any of this app's known mutating route shapes"
+        )
+        if not durable:
+            resp = client.post(dest, data={})
+            assert resp.status_code == 409, (
+                f"POST {dest!r} (found on {sorted(sources)}) should refuse "
+                f"with 409 in read-only mode, got {resp.status_code}:\n{resp.text[:500]}"
+            )
+
+
 # --------------------------------------------------------------------- #
 # Fixtures: the two states the task calls out — seeded, and one topic    #
-# with no runs yet (the pre-run empty state).                            #
+# with no runs yet (the pre-run empty state) — each in both storage      #
+# modes: durable (the default), and read-only (no database, and this     #
+# process presented as a Vercel serverless instance — the one            #
+# combination storage_is_durable() refuses; see vsm/platform.py).        #
 # --------------------------------------------------------------------- #
 
 
@@ -193,6 +245,20 @@ def runless_client(tmp_path):
     return TestClient(create_app(topic_store=ts, run_store=rs)), ts, rs
 
 
+@pytest.fixture
+def read_only_seeded_client(tmp_path, monkeypatch):
+    """The seeded demo store, exactly as `seeded_client` builds it, but
+    with storage_is_durable() forced false for every request the returned
+    client makes — the state a real read-only deployment is in."""
+    monkeypatch.setenv("VERCEL", "1")
+    for var in ("POSTGRES_URL_NON_POOLING", "POSTGRES_URL", "DATABASE_URL"):
+        monkeypatch.delenv(var, raising=False)
+    ts = TopicStore(tmp_path / "db")
+    rs = RunStore(tmp_path / "db", tmp_path / "var")
+    seed_demo_topic(ts, rs, env={})  # the seed's own guard checks for a db url, not VERCEL
+    return TestClient(create_app(topic_store=ts, run_store=rs)), ts, rs
+
+
 # --------------------------------------------------------------------- #
 # The main deliverable.                                                  #
 # --------------------------------------------------------------------- #
@@ -206,6 +272,12 @@ def test_crawl_of_the_seeded_demo_store_has_no_dead_ends(seeded_client):
     client, _ts, _rs = seeded_client
     result = crawl(client)
     _assert_no_dead_ends(result)
+    _assert_post_forms_are_sound(client, result, durable=True)
+    assert len(result.post_forms) >= 4, (
+        f"only {len(result.post_forms)} distinct POST form targets found — "
+        "too few to be real coverage of this app's five mutating routes: "
+        f"{sorted(result.post_forms)}"
+    )
 
     # A floor, not an exact count: exact-count assertions break on every
     # unrelated content change. The seeded topic alone produces 2 MINE runs
@@ -241,6 +313,12 @@ def test_crawl_of_a_topic_with_no_runs_has_no_dead_ends(runless_client):
     client, ts, _rs = runless_client
     result = crawl(client)
     _assert_no_dead_ends(result)
+    _assert_post_forms_are_sound(client, result, durable=True)
+    assert len(result.post_forms) >= 3, (
+        f"only {len(result.post_forms)} distinct POST form targets found on "
+        f"a runless topic — expected create, edit and mine at least: "
+        f"{sorted(result.post_forms)}"
+    )
 
     assert len(result.visited) >= 8, (
         f"crawl only reached {len(result.visited)} pages on a runless store — "
@@ -256,6 +334,64 @@ def test_crawl_of_a_topic_with_no_runs_has_no_dead_ends(runless_client):
     assert f"/topics/{topic_id}" in result.visited
     assert f"/topics/{topic_id}/edit" in result.visited
     assert f"/topics/{topic_id}/confirm" in result.visited
+
+
+# --------------------------------------------------------------------- #
+# Read-only mode: the same seeded store, but storage_is_durable() is      #
+# false — the state a real deployment with no database is in. Every       #
+# already-collected screen must still be reachable, no mutating control   #
+# may render, and any POST-only form the crawl still finds (there should  #
+# be none) must be safely refused. See tests/test_read_only_mode.py for   #
+# the per-route 409 and per-template control-visibility proofs this       #
+# complements at the level of "does a real visitor ever hit a dead end."  #
+# --------------------------------------------------------------------- #
+
+
+def test_crawl_of_the_seeded_demo_store_has_no_dead_ends_when_read_only(read_only_seeded_client):
+    """The exact scenario the fix exists for, minus the part already fixed:
+    a cold container with no database, but this time storage_is_durable()
+    is false throughout the crawl. Every already-collected screen — the
+    seeded topic, both snapshots, the insight run, the report and all of
+    its artifacts — must remain fully reachable; nothing may link to a
+    mutating control that would 409 if followed."""
+    client, ts, rs = read_only_seeded_client
+    result = crawl(client)
+    _assert_no_dead_ends(result)
+
+    # The strongest version of "the control is not rendered": the crawler,
+    # which parses raw HTML exactly as a browser with scripting off would
+    # see it, finds *zero* POST-only forms anywhere in the whole crawl —
+    # not five refused ones, none at all. Kept as its own assertion (not
+    # folded into `_assert_post_forms_are_sound`, which would pass
+    # vacuously on an empty dict) so a control that leaks back into the
+    # markup fails here even before the 409 layer is reached.
+    assert not result.post_forms, (
+        f"a POST-only form is still reachable in read-only mode: {sorted(result.post_forms)}"
+    )
+    _assert_post_forms_are_sound(client, result, durable=False)  # a no-op given the assertion above, kept for symmetry
+
+    # A floor close to the durable crawl's own (38): losing exactly the
+    # /topics/new and .../edit pages (their entry links are the ones this
+    # mode hides) and nothing else is what "everything read-only stays
+    # fully available" means in page-count terms.
+    assert len(result.visited) >= 30, (
+        f"crawl only reached {len(result.visited)} pages in read-only mode — "
+        f"too few to be real coverage: {sorted(result.visited)}"
+    )
+
+    suffixes = ("/snapshot", "/insight", "/report", "/confirm", "/artifact/signals.json")
+    for suffix in suffixes:
+        assert any(p.endswith(suffix) for p in result.visited), (
+            f"read-only crawl never reached any page ending {suffix!r} — {sorted(result.visited)}"
+        )
+    assert "/" in result.visited and "/how" in result.visited and "/deliverables" in result.visited
+
+    # The two pages whose sole purpose is a now-hidden form are reachable
+    # by direct URL (the routes themselves still answer GET) but must not
+    # be *linked* from anywhere the crawl actually walked.
+    topic_id = ts.list()[0].topic_id
+    assert "/topics/new" not in result.visited
+    assert f"/topics/{topic_id}/edit" not in result.visited
 
 
 # --------------------------------------------------------------------- #

@@ -22,8 +22,9 @@ goes through.
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, Mapping
 
+from vsm.backends.dburl import resolve_db_url
 from vsm.errors import GuardViolation
 
 __all__ = [
@@ -32,6 +33,7 @@ __all__ = [
     "vercel_env",
     "assert_serveable",
     "assert_band_allowed",
+    "storage_is_durable",
     "StripFunctionPrefix",
 ]
 
@@ -128,6 +130,40 @@ def assert_band_allowed(band: str) -> None:
             f"{band!r} sweep locally instead, where there is no timeout to race.",
             rule="D14",
         )
+
+
+def storage_is_durable(env: Mapping[str, str] | None = None) -> bool:
+    """Would a write made on this request still be there for the next one?
+
+    **True** whenever a database URL resolves (spec'd by
+    :func:`vsm.backends.dburl.resolve_db_url`, the same function
+    ``vsm.storage.open_stores`` itself defers to) — Postgres+blob storage
+    survives any request landing on any instance, container recycle or not.
+
+    **Also true** whenever this process is not running as a Vercel
+    serverless function. SQLite+filesystem storage is genuinely durable
+    there too: a local run is one long-lived process reading and writing the
+    same directory on every request, nothing like the single invocation's
+    own ``/tmp`` a Vercel function is handed — which belongs to that one
+    invocation and is gone the moment the container is recycled (see
+    ``vsm/storage.py``'s own docstring). A local install must be unaffected
+    by this guard, and this is the check that makes that true without
+    needing a database at all.
+
+    **False** in exactly the one combination that cannot honour a write: no
+    database configured, on the one platform where the filesystem
+    underneath it does not survive between requests.
+
+    ``env`` is injectable for tests, the same convention ``resolve_db_url``,
+    ``open_stores`` and ``seed_demo_topic`` already use; every real caller
+    leaves it at ``None`` and gets ``os.environ`` read fresh at call time, so
+    a database configured (or ``VERCEL`` set) after the process started is
+    reflected on the very next call, never requiring a restart to notice.
+    """
+    env = env if env is not None else os.environ
+    if resolve_db_url(env) is not None:
+        return True
+    return env.get("VERCEL", "").strip() != "1"
 
 
 #: The path prefix Vercel's rewrite prepends. `vercel.json` rewrites `/(.*)`

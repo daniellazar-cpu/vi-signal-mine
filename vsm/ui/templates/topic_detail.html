@@ -10,7 +10,7 @@
 </section>
 <p class="page-caption">
   {% if topic.therapeutic_area %}{{ topic.therapeutic_area }} — {% endif %}{{ topic.spend_band }} band
-  · <a class="link-back" href="/topics/{{ topic.topic_id }}/edit">Edit topic</a>
+  {% if storage_is_durable() %}· <a class="link-back" href="/topics/{{ topic.topic_id }}/edit">Edit topic</a>{% endif %}
 </p>
 
 <h2>Runs</h2>

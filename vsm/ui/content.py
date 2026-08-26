@@ -28,23 +28,35 @@ __all__ = [
     "FIELD_GUIDE",
     "FIRST_RUN_STEPS",
     "EPHEMERAL_STORAGE_NOTICE",
+    "READ_ONLY_CONTROL_NOTE",
     "explainer",
 ]
 
 TAGLINE = "What people are saying about a brand or product online — and what changed."
 
-#: Shown at the one point the risk is real — the topic-creation form, and
-#: the screen a user lands on right after creating one — never elsewhere.
-#: One quiet, specific line, not a warning repeated on every screen: what is
-#: missing (a database), what it costs (a topic outlives this container only
-#: by luck), and the fix (Postgres). Whether this shows at all is computed
-#: from whether a database URL resolves (vsm.backends.dburl.resolve_db_url),
-#: never from any one topic's own data.
+#: Said once, clearly, at the top of every page — see the site-wide banner
+#: in ``_base.html``, driven by ``vsm.platform.storage_is_durable`` (a Jinja
+#: global, so no route needs to pass it). Never repeated screen by screen:
+#: that was the previous, incomplete version of this notice, and a warning
+#: read on every page trains a reader to stop reading it.
+#:
+#: This is not merely a caveat any more. ``storage_is_durable() is False``
+#: means every mutating route actually refuses (409) — creating or editing a
+#: topic, running a snapshot, insight or report all fail outright — so the
+#: words say that plainly rather than soften it into "might not survive".
 EPHEMERAL_STORAGE_NOTICE = (
-    "This instance has no database connected, so topics created here last "
-    "only as long as this container keeps running. Connecting Postgres "
-    "keeps them for good."
+    "This instance is a read-only demonstration: no database is connected, "
+    "so nothing created here would survive the next request landing on a "
+    "different container. Connect Postgres, or run it locally, to create "
+    "your own topics."
 )
+
+#: Stands in for a hidden mutating control (a button, a form) wherever one
+#: is not rendered — never the full notice above repeated: that has already
+#: run once, at the top of the page, and repeating it at every button-shaped
+#: hole is exactly the "sprawl" this whole approach exists to avoid. Deliberately
+#: the same short line everywhere, rather than a bespoke sentence per control.
+READ_ONLY_CONTROL_NOTE = "Not available — this instance is read-only. See the note above."
 
 WHAT_IT_IS = (
     "Vi Signal Mine watches a topic over time. It collects what is being said "

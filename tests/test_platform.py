@@ -8,6 +8,7 @@ from vsm.platform import (
     assert_band_allowed,
     assert_serveable,
     is_vercel,
+    storage_is_durable,
 )
 
 
@@ -103,6 +104,54 @@ def test_the_refusal_names_where_to_run_it_instead(monkeypatch):
     with pytest.raises(GuardViolation) as exc:
         assert_band_allowed("deep")
     assert "local" in str(exc.value).lower()
+
+
+# --- storage_is_durable: the read-only-mode guard ------------------------
+
+
+def test_storage_is_not_durable_with_no_database_on_vercel():
+    """The one combination that actually cannot honour a write: SQLite plus
+    a filesystem under a single serverless invocation's own /tmp, which does
+    not survive the container being recycled — see vsm/storage.py."""
+    assert storage_is_durable({"VERCEL": "1"}) is False
+
+
+def test_storage_is_durable_with_no_database_locally():
+    """A local run must be entirely unaffected: no VERCEL means one
+    long-lived process reading and writing the same directory on every
+    request — nothing like Vercel's per-invocation /tmp — so SQLite plus
+    the filesystem is genuinely durable here, database or not."""
+    assert storage_is_durable({}) is True
+
+
+def test_storage_is_durable_with_a_database_on_vercel():
+    """A database url resolving wins outright, Vercel or not — Postgres+blob
+    storage survives any request landing on any instance."""
+    assert storage_is_durable({"VERCEL": "1", "DATABASE_URL": "postgresql://x/y"}) is True
+
+
+def test_storage_is_durable_with_a_database_locally():
+    assert storage_is_durable({"DATABASE_URL": "postgresql://x/y"}) is True
+
+
+@pytest.mark.parametrize("var", ["POSTGRES_URL_NON_POOLING", "POSTGRES_URL", "DATABASE_URL"])
+def test_storage_is_durable_recognises_every_db_url_env_var(var):
+    """Delegates to resolve_db_url rather than re-checking one hardcoded
+    name — proven by exercising all three names that module recognises."""
+    assert storage_is_durable({"VERCEL": "1", var: "postgresql://x/y"}) is True
+
+
+def test_storage_is_durable_reads_the_real_environment_by_default(monkeypatch):
+    """No ``env`` argument means ``os.environ``, read fresh — the same
+    convention ``resolve_db_url``, ``open_stores`` and ``seed_demo_topic``
+    already use, so a database configured after the process started is
+    reflected on the very next call with no restart."""
+    monkeypatch.setenv("VERCEL", "1")
+    for var in ("POSTGRES_URL_NON_POOLING", "POSTGRES_URL", "DATABASE_URL"):
+        monkeypatch.delenv(var, raising=False)
+    assert storage_is_durable() is False
+    monkeypatch.setenv("DATABASE_URL", "postgresql://x/y")
+    assert storage_is_durable() is True
 
 
 # --- StripFunctionPrefix: the ASGI wrapper vercel.json's rewrite requires ---

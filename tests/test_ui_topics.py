@@ -164,57 +164,129 @@ def test_the_topic_form_marks_exactly_one_field_required(client):
     assert "Optional" in body
 
 
-# --- The ephemeral-storage notice (defect 1b) --------------------------
+# --- The read-only banner, and the controls that vanish with it ----------
+#
+# Superseded, not just extended: the old "ephemeral-storage notice" (defect
+# 1b) was a warning with no teeth — it showed on two screens but nothing
+# actually refused a write, which is the structural defect the read-only-mode
+# task exists to close. `storage_is_durable()` (vsm/platform.py) now also
+# weighs whether this process is a Vercel serverless instance at all, not
+# just whether a database url resolves — a bare `no database configured`
+# is durable on a local run (one long-lived process, not Vercel's
+# per-invocation /tmp), so every test below that wants the read-only branch
+# must force `VERCEL=1` as well, never database-absence alone.
 
 
-def _no_database_configured(monkeypatch):
+def _not_durable(monkeypatch):
+    """The one combination `storage_is_durable()` refuses: a Vercel
+    serverless instance with no database url resolving."""
+    monkeypatch.setenv("VERCEL", "1")
     for var in ("POSTGRES_URL_NON_POOLING", "POSTGRES_URL", "DATABASE_URL"):
         monkeypatch.delenv(var, raising=False)
 
 
-def test_the_ephemeral_notice_appears_on_the_new_topic_form_with_no_database(client, monkeypatch):
+def test_the_read_only_banner_appears_once_at_the_top_of_every_page(client, monkeypatch):
+    """Said once, clearly, at the top of the app — the site-wide banner in
+    _base.html (driven by the storage_is_durable() Jinja global), not a
+    hand-copied notice repeated per screen. Checked on unrelated pages too
+    (not just the topic screens) because "at the top of the app" means
+    every page, and `body.count(...) == 1` rules out the banner rendering
+    twice on one page as well as it rules out it being missing."""
     from vsm.ui.content import EPHEMERAL_STORAGE_NOTICE
 
-    _no_database_configured(monkeypatch)
+    _not_durable(monkeypatch)
     c, _, _ = client
-    body = c.get("/topics/new").text
-    assert EPHEMERAL_STORAGE_NOTICE in body
+    for path in ("/", "/how", "/deliverables", "/topics/new"):
+        body = c.get(path).text
+        assert body.count(EPHEMERAL_STORAGE_NOTICE) == 1, f"{path}: {body.count(EPHEMERAL_STORAGE_NOTICE)} banners"
 
 
-def test_the_ephemeral_notice_is_absent_when_a_database_url_resolves(client, monkeypatch):
+def test_the_read_only_banner_is_absent_when_a_database_url_resolves(client, monkeypatch):
     from vsm.ui.content import EPHEMERAL_STORAGE_NOTICE
 
+    monkeypatch.setenv("VERCEL", "1")
     monkeypatch.setenv("DATABASE_URL", "postgresql://example/db")
     c, _, _ = client
+    assert EPHEMERAL_STORAGE_NOTICE not in c.get("/").text
+
+
+def test_the_read_only_banner_is_absent_on_a_local_run_with_no_database(client, monkeypatch):
+    """The property the old, narrower notice got wrong, and the one this
+    task is explicit about fixing: a local run with no database configured
+    is durable (no VERCEL means one long-lived process, nothing like
+    Vercel's per-invocation /tmp), so the banner must not show — a local
+    install must be entirely unaffected by this guard."""
+    from vsm.ui.content import EPHEMERAL_STORAGE_NOTICE
+
+    monkeypatch.delenv("VERCEL", raising=False)
+    for var in ("POSTGRES_URL_NON_POOLING", "POSTGRES_URL", "DATABASE_URL"):
+        monkeypatch.delenv(var, raising=False)
+    c, _, _ = client
+    assert EPHEMERAL_STORAGE_NOTICE not in c.get("/").text
+
+
+def test_new_topic_button_is_absent_when_not_durable(client, monkeypatch):
+    """A button that cannot work is worse than an absent one — the owner's
+    own words. `POST /topics` refuses when storage is not durable
+    (tests/test_read_only_mode.py), so its one entry point must not render."""
+    _not_durable(monkeypatch)
+    c, _, _ = client
+    assert 'href="/topics/new"' not in c.get("/").text
+
+
+def test_new_topic_button_is_present_when_durable(client):
+    c, _, _ = client
+    assert 'href="/topics/new"' in c.get("/").text
+
+
+def test_the_create_form_does_not_render_when_not_durable(client, monkeypatch):
+    """Reached directly (no link points here any more, but the route still
+    answers GET) — the form itself must still be gone, not merely
+    unlinked, and a short explanation must stand in its place."""
+    from vsm.ui.content import READ_ONLY_CONTROL_NOTE
+
+    _not_durable(monkeypatch)
+    c, _, _ = client
     body = c.get("/topics/new").text
-    assert EPHEMERAL_STORAGE_NOTICE not in body
+    assert "<form" not in body
+    assert READ_ONLY_CONTROL_NOTE in body
 
 
-def test_the_ephemeral_notice_appears_on_the_topics_list_after_creating_one(client, monkeypatch):
-    """The screen a user actually lands on right after `POST /topics` —
-    the redirect target — is the topics list, not a dedicated
-    "topic created" page. That is "after a topic is created" for this app."""
-    from vsm.ui.content import EPHEMERAL_STORAGE_NOTICE
-
-    _no_database_configured(monkeypatch)
-    c, ts, _ = client
-    ts.create(name="OIC", therapeutic_area="gi", spend_band="probe")
-    body = c.get("/").text
-    assert EPHEMERAL_STORAGE_NOTICE in body
+def test_the_create_form_renders_when_durable(client):
+    c, _, _ = client
+    body = c.get("/topics/new").text
+    assert 'action="/topics"' in body
 
 
-def test_the_ephemeral_notice_is_absent_from_the_edit_form(client, monkeypatch):
-    """The risk named is *creating* a topic that will not survive — editing
-    an already-persisted-for-this-container topic is not that moment, and
-    repeating the notice there would be the "every screen" over-disclosure
-    the task explicitly ruled out."""
-    from vsm.ui.content import EPHEMERAL_STORAGE_NOTICE
+def test_the_edit_form_does_not_render_when_not_durable(client, monkeypatch):
+    from vsm.ui.content import READ_ONLY_CONTROL_NOTE
 
-    _no_database_configured(monkeypatch)
+    _not_durable(monkeypatch)
     c, ts, _ = client
     t = ts.create(name="OIC", therapeutic_area="gi", spend_band="probe")
     body = c.get(f"/topics/{t.topic_id}/edit").text
-    assert EPHEMERAL_STORAGE_NOTICE not in body
+    assert "<form" not in body
+    assert READ_ONLY_CONTROL_NOTE in body
+
+
+def test_the_edit_form_renders_when_durable(client):
+    c, ts, _ = client
+    t = ts.create(name="OIC", therapeutic_area="gi", spend_band="probe")
+    body = c.get(f"/topics/{t.topic_id}/edit").text
+    assert f'action="/topics/{t.topic_id}"' in body
+
+
+def test_the_edit_link_is_absent_from_the_topics_list_when_not_durable(client, monkeypatch):
+    _not_durable(monkeypatch)
+    c, ts, _ = client
+    t = ts.create(name="OIC", therapeutic_area="gi", spend_band="probe")
+    assert f'href="/topics/{t.topic_id}/edit"' not in c.get("/").text
+
+
+def test_the_edit_link_is_present_on_the_topics_list_when_durable(client):
+    c, ts, _ = client
+    t = ts.create(name="OIC", therapeutic_area="gi", spend_band="probe")
+    assert f'href="/topics/{t.topic_id}/edit"' in c.get("/").text
 
 
 # --- The spend-band highlight follows the checked radio (defect 2) ------

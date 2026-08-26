@@ -7,10 +7,10 @@
   <h1>{% if mode == "edit" %}Edit {{ topic.name }}{% else %}New topic{% endif %}</h1>
 </section>
 <p class="page-caption">{{ explainer('topic_form') }}</p>
-{% if mode == "create" and ephemeral_storage %}
-<p class="storage-notice">{{ ephemeral_storage_notice }}</p>
-{% endif %}
 
+{% if not storage_is_durable() %}
+<p class="storage-notice">{{ read_only_control_note }}</p>
+{% else %}
 <form class="form-stack" method="post" action="{% if mode == 'edit' %}/topics/{{ topic.topic_id }}{% else %}/topics{% endif %}">
 
   <div class="field-row field-row-required">
@@ -104,5 +104,6 @@
     <button class="btn btn-primary" type="submit">{% if mode == "edit" %}Save changes{% else %}Create topic{% endif %}</button>
   </div>
 </form>
+{% endif %}
 </div>
 {% endblock %}

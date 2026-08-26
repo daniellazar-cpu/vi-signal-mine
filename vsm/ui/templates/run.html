@@ -59,16 +59,24 @@
   {% if run.mode == "mine" %}
   <a class="btn btn-ghost" href="/runs/{{ run.run_id }}/snapshot">View snapshot</a>
   {% if run.status in ("complete", "stopped_on_budget") %}
-  <form method="post" action="/runs/{{ run.run_id }}/insight">
-    <button class="btn btn-primary" type="submit">Run insight on this snapshot</button>
-  </form>
+    {% if storage_is_durable() %}
+    <form method="post" action="/runs/{{ run.run_id }}/insight">
+      <button class="btn btn-primary" type="submit">Run insight on this snapshot</button>
+    </form>
+    {% else %}
+    <p class="storage-notice">{{ read_only_control_note }}</p>
+    {% endif %}
   {% endif %}
   {% elif run.mode == "insight" %}
   <a class="btn btn-ghost" href="/runs/{{ run.run_id }}/insight">View insight</a>
   {% if run.status == "complete" %}
-  <form method="post" action="/runs/{{ run.run_id }}/report">
-    <button class="btn btn-primary" type="submit">Generate report</button>
-  </form>
+    {% if storage_is_durable() %}
+    <form method="post" action="/runs/{{ run.run_id }}/report">
+      <button class="btn btn-primary" type="submit">Generate report</button>
+    </form>
+    {% else %}
+    <p class="storage-notice">{{ read_only_control_note }}</p>
+    {% endif %}
   {% endif %}
   {% elif run.mode == "report" %}
   <a class="btn btn-ghost" href="/runs/{{ run.run_id }}/report">View report</a>

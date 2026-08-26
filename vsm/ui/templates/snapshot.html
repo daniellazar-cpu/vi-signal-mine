@@ -151,9 +151,13 @@
 {{ deliverable_groups(deliv_groups) }}
 
 <div class="form-actions form-actions-end">
+  {% if storage_is_durable() %}
   <form method="post" action="/runs/{{ run.run_id }}/insight">
     <button class="btn btn-primary" type="submit">Run insight on this snapshot</button>
   </form>
+  {% else %}
+  <p class="storage-notice">{{ read_only_control_note }}</p>
+  {% endif %}
 </div>
 </div>
 {% endblock %}

@@ -65,6 +65,7 @@
   </p>
   {{ deliverable_groups(groups) }}
 
+  {% if storage_is_durable() %}
   <div class="confirm-actions">
     <a class="link-back" href="/topics/{{ topic.topic_id }}/edit">Change band or cancel</a>
     <form method="post" action="/topics/{{ topic.topic_id }}/mine">
@@ -72,6 +73,10 @@
       <button class="btn btn-commit" type="submit">Spend {{ estimate.total_usd|usd(2) }} — run snapshot</button>
     </form>
   </div>
+  {% else %}
+  <p class="storage-notice">{{ read_only_control_note }}</p>
+  <p><a class="link-back" href="/">Back to topics</a></p>
+  {% endif %}
 </section>
 </div>
 {% endblock %}

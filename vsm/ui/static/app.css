@@ -101,12 +101,13 @@ p { margin: 0 0 var(--space-xs); max-width: 72ch; }
 }
 .field-note { display: block; margin: 4px 0 0; }
 
-/* The ephemeral-storage notice (Task: works-on-deploy). Quiet and specific,
-   shown only where the risk is real — the topic-creation form and the
-   screen a user lands on right after creating one — never on every screen,
-   which would train a reader to stop reading it. A bordered box like
-   .empty-state, not the inverted full-width .synthetic-banner: this is a
-   fact about the deployment, not a warning about the data on this page. */
+/* The quiet, per-control line that stands in for a hidden mutating control
+   (Task: read-only mode) — a button or a form this instance cannot honour,
+   replaced in place rather than left an unexplained gap. Deliberately the
+   smallest, least alarming treatment on the page: the one clear statement
+   already ran once, at the top, in .read-only-banner above; this only has
+   to say "and that is why this particular control is missing." A bordered
+   box like .empty-state, not the inverted full-width .synthetic-banner. */
 .storage-notice {
   margin: 0 0 var(--space-md);
   padding: 10px var(--space-sm);
@@ -190,6 +191,25 @@ p { margin: 0 0 var(--space-xs); max-width: 72ch; }
   border-top: var(--border-hairline) solid var(--rule);
 }
 .app-foot span { color: var(--fg2); font-size: var(--t-caption-size); }
+
+/* The read-only banner (Task: read-only mode) — said once, at the top of
+   every page, when storage_is_durable() is false. Same full-width row shape
+   as .synthetic-banner below (so the two read as one family when a demo run
+   happens to show both), but never inverse: this is a quiet fact about the
+   deployment, not an alert about the data on this particular page, so it
+   uses the same subdued surface .storage-notice used before this replaced
+   it — the signal violet dot is the only accent. */
+.read-only-banner {
+  display: flex; align-items: baseline; gap: 10px;
+  background: var(--bg-subtle); color: var(--fg1);
+  padding: 14px 40px;
+  border-bottom: var(--border-hairline) solid var(--rule);
+}
+.read-only-banner-mark {
+  width: 8px; height: 8px; flex: none; background: var(--signal);
+  border-radius: var(--radius-pill); transform: translateY(-2px);
+}
+.read-only-banner p { margin: 0; max-width: none; font-size: var(--t-small-size); line-height: var(--t-small-lh); }
 
 /* The synthetic-data banner (Task: offline demonstration miner) — deliberately
    not a badge. It sits full-width, above the flow rail, on every screen that

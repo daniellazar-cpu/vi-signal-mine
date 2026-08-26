@@ -7,11 +7,13 @@
     <p class="eyebrow">Watched over time</p>
     <h1>Topics</h1>
   </div>
+  {% if storage_is_durable() %}
   <a class="btn btn-primary" href="/topics/new">New topic</a>
+  {% endif %}
 </section>
 <p class="page-caption">{{ explainer('topics') }}</p>
-{% if ephemeral_storage %}
-<p class="storage-notice">{{ ephemeral_storage_notice }}</p>
+{% if not storage_is_durable() %}
+<p class="storage-notice">{{ read_only_control_note }}</p>
 {% endif %}
 
 {% if rows %}
@@ -56,7 +58,9 @@
         {% endif %}
       </td>
       <td class="num">
+        {% if storage_is_durable() %}
         <a class="link-back" href="/topics/{{ row.topic.topic_id }}/edit">Edit</a>
+        {% endif %}
         <a class="btn btn-ghost btn-sm" href="/topics/{{ row.topic.topic_id }}/confirm">Run snapshot</a>
       </td>
     </tr>

@@ -35,9 +35,13 @@
 <div class="page-head page-head-section">
   <h2 id="dual-lens">Dual-lens gap — where clinicians and patients diverge</h2>
   {% if run.status == "complete" %}
-  <form method="post" action="/runs/{{ run.run_id }}/report">
-    <button class="btn btn-primary" type="submit">Generate report</button>
-  </form>
+    {% if storage_is_durable() %}
+    <form method="post" action="/runs/{{ run.run_id }}/report">
+      <button class="btn btn-primary" type="submit">Generate report</button>
+    </form>
+    {% else %}
+    <p class="storage-notice">{{ read_only_control_note }}</p>
+    {% endif %}
   {% endif %}
 </div>
 <div class="forest-plot-wrap">

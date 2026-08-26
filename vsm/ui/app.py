@@ -15,7 +15,6 @@ defaults.
 
 from __future__ import annotations
 
-import os
 import re
 from html import escape as _esc
 from pathlib import Path
@@ -29,7 +28,6 @@ from starlette.responses import PlainTextResponse
 from starlette.templating import Jinja2Templates
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from vsm.backends.dburl import resolve_db_url
 from vsm.config import get_settings
 from vsm.errors import GuardViolation, NoSuchRun, NoSuchTopic, VsmError
 from vsm.guards.cost import estimate_run_usd
@@ -40,7 +38,7 @@ from vsm.mining.venues import kind_of
 from vsm.modes.insight import run_insight
 from vsm.modes.mine import run_mine
 from vsm.modes.report import run_report
-from vsm.platform import assert_serveable
+from vsm.platform import assert_serveable, storage_is_durable
 from vsm.topics.model import BANDS
 from vsm.ui.content import (
     DELIVERABLE_GROUPS,
@@ -51,6 +49,7 @@ from vsm.ui.content import (
     GLOSSARY,
     MODES,
     PLOT_GUIDE,
+    READ_ONLY_CONTROL_NOTE,
     TIERS,
     WHAT_IT_IS,
     explainer,
@@ -291,18 +290,6 @@ def _split_lines(text: str) -> tuple[str, ...]:
     return tuple(ln.strip() for ln in text.splitlines() if ln.strip())
 
 
-def _storage_is_ephemeral() -> bool:
-    """Would a topic created right now outlive this container?
-
-    ``False`` the moment a database URL resolves — the same check
-    ``vsm.storage.open_stores`` itself makes, read fresh at request time
-    rather than cached, so a database added after the process started (or a
-    test's ``monkeypatch.setenv``) is reflected on the very next request
-    rather than requiring a restart to notice.
-    """
-    return resolve_db_url(os.environ) is None
-
-
 def _band_cards() -> list[dict[str, Any]]:
     cards = []
     for name in ("probe", "standard", "deep"):
@@ -490,6 +477,13 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
     env.globals["anomaly_label"] = _anomaly_label
     env.globals["explainer"] = explainer
     env.globals["ephemeral_storage_notice"] = EPHEMERAL_STORAGE_NOTICE
+    env.globals["read_only_control_note"] = READ_ONLY_CONTROL_NOTE
+    # A callable, not a value computed once here: every template that wants
+    # to know whether to render a mutating control calls this itself
+    # (`{% if not storage_is_durable() %}`), so it is read fresh on every
+    # request — the same freshness `resolve_db_url` and `open_stores`
+    # already guarantee — rather than baked in at app-startup time.
+    env.globals["storage_is_durable"] = storage_is_durable
 
     templates = Jinja2Templates(env=env)
 
@@ -504,6 +498,23 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
 
     def error_page(request: Request, status_code: int, title: str, message: str) -> HTMLResponse:
         return render(request, "error.html", status_code=status_code, title=title, message=message)
+
+    def read_only_refusal(request: Request) -> HTMLResponse | None:
+        """``None`` when this instance can honour a write; otherwise the one
+        409 page every mutating route below returns. Centralised so a new
+        mutating route added later starts from a call to this rather than a
+        copy-pasted check that is easy to forget (spec: parametrise the
+        routes in tests for exactly that reason).
+
+        409, not 400 or 500: the request itself is well-formed and would
+        succeed on a durable deployment — it is this *instance* that cannot
+        honour it, which is what 409 Conflict means or nothing does.
+        """
+        if storage_is_durable():
+            return None
+        return error_page(
+            request, 409, "This instance is read-only", EPHEMERAL_STORAGE_NOTICE,
+        )
 
     # ------------------------------------------------------------------ how --
 
@@ -559,7 +570,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         rows = [_topic_row(t) for t in topic_store.list()]
         return render(
             request, "topics.html", rows=rows, first_run_steps=FIRST_RUN_STEPS,
-            active_nav="topics", ephemeral_storage=_storage_is_ephemeral(),
+            active_nav="topics",
         )
 
     _BLANK_TOPIC_VALUES = {
@@ -572,7 +583,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         return render(
             request, "topic_form.html", mode="create", topic=None,
             band_cards=_band_cards(), errors={}, values=dict(_BLANK_TOPIC_VALUES),
-            field_guide=FIELD_GUIDE, ephemeral_storage=_storage_is_ephemeral(),
+            field_guide=FIELD_GUIDE,
         )
 
     @app.get("/topics/{topic_id}/edit", response_class=HTMLResponse)
@@ -594,7 +605,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         return render(
             request, "topic_form.html", mode="edit", topic=topic,
             band_cards=_band_cards(), errors={}, values=values,
-            field_guide=FIELD_GUIDE, ephemeral_storage=_storage_is_ephemeral(),
+            field_guide=FIELD_GUIDE,
         )
 
     @app.get("/topics/{topic_id}", response_class=HTMLResponse)
@@ -666,6 +677,9 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         questions: str = Form(""),
         never_say: str = Form(""),
     ) -> Any:
+        refusal = read_only_refusal(request)
+        if refusal is not None:
+            return refusal
         # Only `name` is required (content.FIELD_GUIDE) — a blank spend band
         # defaults to `probe`, the cheapest, rather than being rejected: a
         # user who skipped every optional field still gets a topic they can
@@ -681,7 +695,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             return render(
                 request, "topic_form.html", status_code=422, mode="create", topic=None,
                 band_cards=_band_cards(), errors=errors, values=values,
-                field_guide=FIELD_GUIDE, ephemeral_storage=_storage_is_ephemeral(),
+                field_guide=FIELD_GUIDE,
             )
         topic_store.create(
             name=name.strip(), therapeutic_area=therapeutic_area.strip(), spend_band=chosen_band,
@@ -704,6 +718,9 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         questions: str = Form(""),
         never_say: str = Form(""),
     ) -> Any:
+        refusal = read_only_refusal(request)
+        if refusal is not None:
+            return refusal
         try:
             topic = topic_store.get(topic_id)
         except NoSuchTopic:
@@ -719,7 +736,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             return render(
                 request, "topic_form.html", status_code=422, mode="edit", topic=topic,
                 band_cards=_band_cards(), errors=errors, values=values,
-                field_guide=FIELD_GUIDE, ephemeral_storage=_storage_is_ephemeral(),
+                field_guide=FIELD_GUIDE,
             )
         topic_store.update(
             topic_id,
@@ -752,6 +769,9 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
 
     @app.post("/topics/{topic_id}/mine")
     def topic_mine(request: Request, topic_id: str, band: str = Form("")) -> Any:
+        refusal = read_only_refusal(request)
+        if refusal is not None:
+            return refusal
         try:
             topic = topic_store.get(topic_id)
         except NoSuchTopic:
@@ -900,6 +920,9 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
 
     @app.post("/runs/{run_id}/insight")
     def insight_create(request: Request, run_id: str) -> Any:
+        refusal = read_only_refusal(request)
+        if refusal is not None:
+            return refusal
         try:
             mine_run = run_store.get(run_id)
         except NoSuchRun:
@@ -1034,6 +1057,9 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
 
     @app.post("/runs/{run_id}/report")
     def report_create(request: Request, run_id: str) -> Any:
+        refusal = read_only_refusal(request)
+        if refusal is not None:
+            return refusal
         try:
             insight_run = run_store.get(run_id)
         except NoSuchRun:
