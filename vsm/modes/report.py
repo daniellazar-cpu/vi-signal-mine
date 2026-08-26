@@ -51,6 +51,7 @@ from vsm.guards.corroboration import assert_body_is_corroborated
 from vsm.guards.terms import assert_no_banned_terms
 from vsm.llm.prompts import REPORT_SYSTEM
 from vsm.llm.schema import REPORT_SCHEMA
+from vsm.mining.signals import any_synthetic
 from vsm.runs.model import Run
 from vsm.runs.store import RunStore
 from vsm.topics.model import Topic
@@ -62,6 +63,17 @@ __all__ = ["run_report"]
 _AE_SCOPE_SENTENCE = (
     "This report is not screened for adverse events and is not a "
     "pharmacovigilance input."
+)
+
+#: The safety rail's REPORT-facing sentence (Task: offline demonstration
+#: miner). Stated once here so the wording is identical everywhere it
+#: appears — the pulse report banner, the methodology scope section and the
+#: worth-considering note all cite this exact string, never a paraphrase.
+_SYNTHETIC_NOTICE = (
+    "Every signal behind this document was fabricated by the offline "
+    "demonstration miner, not collected from the web. Do not treat any "
+    "figure, excerpt or citation here as real, and do not share this as a "
+    "client deliverable."
 )
 
 _INDEPENDENT_SOURCE_DEFINITION = (
@@ -118,6 +130,9 @@ def run_report(
 
     signals = store.read_artifact(mine_run_id, "signals.json")
     ledger: dict[str, Mapping[str, Any]] = {str(s["signal_id"]): s for s in signals}
+    # The safety rail. One fabricated row is enough to mark every artifact
+    # this call writes — see vsm.mining.signals.any_synthetic.
+    synthetic = any_synthetic(signals)
 
     raw_findings = store.read_artifact(insight_run_id, "findings.json")
     findings = [_finding_from_dict(d) for d in raw_findings]
@@ -257,8 +272,12 @@ def run_report(
     else:
         lens_block = ""
 
-    pulse_parts = [
-        f"# Pulse Report — {topic.name}",
+    pulse_parts = [f"# Pulse Report — {topic.name}"]
+    if synthetic:
+        pulse_parts.append(
+            guard_only(f"**Synthetic demonstration run.** {_SYNTHETIC_NOTICE}", where="pulse_report.md")
+        )
+    pulse_parts += [
         "## Themes observed",
         themes_block,
         "## Corroborated findings",
@@ -316,6 +335,8 @@ def run_report(
 
     # ---------------------------------------------------- worth_considering --
     considering_lines = ["# Worth considering", "", "Suggestions, not decisions."]
+    if synthetic:
+        considering_lines.append(guard_only(_SYNTHETIC_NOTICE, where="worth_considering.md"))
     for theme, finding in emerging:
         sentence = (
             f"One option is to keep watching **{theme['name']}** for a third "
@@ -406,6 +427,12 @@ def run_report(
         "## Scope",
         _AE_SCOPE_SENTENCE,
     ]
+    if synthetic:
+        # Stated once, in the scope section, beside the other limits this
+        # report carries — the safety rail for the offline demonstration
+        # miner (Task: get_miner). Same sentence everywhere it appears; see
+        # _SYNTHETIC_NOTICE.
+        methodology_lines.append(_SYNTHETIC_NOTICE)
     methodology_text = guard_only("\n".join(methodology_lines), where="methodology.md") + "\n"
 
     # ------------------------------------------------------------ appendix --
@@ -413,6 +440,10 @@ def run_report(
         "# Provenance appendix",
         "",
         "One row per cited signal.",
+    ]
+    if synthetic:
+        appendix_lines.append(f"**{_SYNTHETIC_NOTICE}**")
+    appendix_lines += [
         "",
         "| signal_id | venue | venue kind | captured_at | collection method | URL |",
         "|---|---|---|---|---|---|",

@@ -32,6 +32,8 @@ from vsm.config import get_settings
 from vsm.errors import GuardViolation, NoSuchRun, NoSuchTopic, VsmError
 from vsm.guards.cost import estimate_run_usd
 from vsm.llm.client import get_client
+from vsm.mining import get_miner
+from vsm.mining.signals import any_synthetic
 from vsm.mining.venues import kind_of
 from vsm.modes.insight import run_insight
 from vsm.modes.mine import run_mine
@@ -431,6 +433,21 @@ def _flow_runs(run_store: Any, run: Any) -> dict[str, Any]:
     }
 
 
+def _mine_run_is_synthetic(run_store: Any, mine_run_id: str | None) -> bool:
+    """Did the snapshot at ``mine_run_id`` come from the offline demonstration
+    miner? The banner and every screen it appears on read this, not a run
+    field — the marker lives in the data (``signals.json``, and every
+    artifact derived from it), never in run metadata alone, so a downloaded
+    artifact carries the same fact this page shows."""
+    if not mine_run_id:
+        return False
+    try:
+        rows = run_store.read_artifact(mine_run_id, "signals.json")
+    except FileNotFoundError:
+        return False
+    return any_synthetic(rows)
+
+
 def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> FastAPI:
     if topic_store is None or run_store is None:
         from vsm.storage import open_stores
@@ -734,7 +751,10 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         settings = get_settings()
         try:
             client = get_client(settings)
-            run = run_mine(topic, run_store, client=client, cap_usd=settings.run_cost_cap_usd)
+            miner = get_miner(settings, band=topic.band())
+            run = run_mine(
+                topic, run_store, client=client, miner=miner, cap_usd=settings.run_cost_cap_usd
+            )
         except VsmError as exc:
             return error_page(request, 400, "The sweep could not run", str(exc))
         return RedirectResponse(url=f"/runs/{run.run_id}", status_code=303)
@@ -777,6 +797,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             cost_detail=cost_detail, next_snapshot_run_id=next_snapshot_run_id,
             next_insight_run_id=next_insight_run_id,
             flow=fr["flow"], current_step=current_step, deliv_groups=deliv_groups,
+            synthetic=_mine_run_is_synthetic(run_store, fr["flow"]["mine_run_id"]),
         )
 
     @app.get("/runs/{run_id}/events")
@@ -858,6 +879,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             options={"venues": venues, "kinds": kinds, "tiers": tiers, "dates": dates},
             any_filter_active=bool(venue or kind or tier or date),
             flow=fr["flow"], deliv_groups=deliv_groups,
+            synthetic=any_synthetic(raw_rows),
         )
 
     @app.post("/runs/{run_id}/insight")
@@ -991,6 +1013,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             stance_rows=stance_rows, entity_rows=entity_rows,
             unmapped_count=len(entities.get("unmapped_mentions", [])),
             flow=fr["flow"], deliv_groups=deliv_groups,
+            synthetic=_mine_run_is_synthetic(run_store, mine_run_id),
         )
 
     @app.post("/runs/{run_id}/report")
@@ -1085,6 +1108,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             considering_html=_markdown_lite_to_html(considering_text) if considering_text else None,
             has_pulse=pulse_text is not None,
             flow=fr["flow"], deliv_groups=deliv_groups,
+            synthetic=_mine_run_is_synthetic(run_store, mine_run_id),
         )
 
     @app.get("/runs/{run_id}/artifact/{name:path}")

@@ -174,6 +174,25 @@ p { margin: 0 0 var(--space-xs); max-width: 72ch; }
 }
 .app-foot span { color: var(--fg2); font-size: var(--t-caption-size); }
 
+/* The synthetic-data banner (Task: offline demonstration miner) — deliberately
+   not a badge. It sits full-width, above the flow rail, on every screen that
+   is showing a run, snapshot, insight or report built over a fabricated
+   sweep, so it is the first thing read rather than a corner detail someone
+   has to notice. Inverse (black/white) rather than a new alert color: this
+   design system reserves every other hue for the signal violet, and inverse
+   is the strongest contrast the palette actually has. */
+.synthetic-banner {
+  display: flex; align-items: baseline; gap: 10px;
+  background: var(--bg-inverse); color: var(--fg-on-dark);
+  padding: 14px 40px;
+}
+.synthetic-banner-mark {
+  width: 8px; height: 8px; flex: none; background: var(--vi-violet-on-dark);
+  border-radius: var(--radius-pill); transform: translateY(-2px);
+}
+.synthetic-banner p { margin: 0; max-width: none; font-size: var(--t-small-size); line-height: var(--t-small-lh); }
+.synthetic-banner strong { font-weight: var(--w-medium); }
+
 .page-head {
   display: flex; align-items: flex-end; justify-content: space-between;
   gap: var(--space-md); flex-wrap: wrap;
@@ -641,7 +660,7 @@ details[open] summary { margin-bottom: 8px; }
 
 @media (max-width: 860px) {
   .field-row-pair, .band-cards, .mode-cards { grid-template-columns: 1fr; }
-  .app-top, .flow-rail { padding-left: 20px; padding-right: 20px; }
+  .app-top, .flow-rail, .synthetic-banner { padding-left: 20px; padding-right: 20px; }
   .app-main { padding-left: 20px; padding-right: 20px; }
   .page { padding-top: 32px; }
   .deliv-grid { grid-template-columns: 1fr; }

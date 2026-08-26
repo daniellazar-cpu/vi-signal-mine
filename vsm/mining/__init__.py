@@ -41,6 +41,10 @@ there is no Bright Data key in the build environment. See ``tests/test_mining.py
 
 from __future__ import annotations
 
+from typing import Any
+
+from vsm.config import Settings, get_settings
+from vsm.errors import ConfigError
 from vsm.mining.budget import (
     DISCOVER_COST_PER_RESULT_USD,
     FREE_TIER_RESULTS_PER_MONTH,
@@ -64,6 +68,7 @@ from vsm.mining.denylist import (
     partition,
 )
 from vsm.mining.discover import DiscoverClient, DiscoverResult
+from vsm.mining.fake import DeterministicMiner
 from vsm.mining.miner import LiveSignalMining, MiningConfig, MiningOutcome
 from vsm.mining.queries import (
     PlannedQuery,
@@ -165,4 +170,75 @@ __all__ = [
     "parse_posted_at",
     "supersession_flag",
     "DEFAULT_RECENCY_DAYS",
+    "DeterministicMiner",
+    "get_miner",
 ]
+
+
+def _robots_fetch(url: str) -> str | None:
+    """Fetch one robots.txt directly — it is public, and never through the
+    Bright Data proxy. Returns ``None`` when it cannot be read;
+    :class:`RobotsCache` treats that as *disallow*, because absence of
+    evidence is not permission.
+    """
+    import httpx
+
+    from vsm.mining.client import USER_AGENT
+
+    try:
+        with httpx.Client(timeout=15.0, follow_redirects=True, headers={"User-Agent": USER_AGENT}) as client:
+            response = client.get(url)
+    except Exception:  # noqa: BLE001 - unreachable robots.txt is not this call's failure
+        return None
+    return response.text if response.status_code == 200 else None
+
+
+def get_miner(settings: Settings | None = None, *, band: Any = None) -> Any:
+    """The deterministic fake offline, a configured :class:`LiveSignalMining` live.
+
+    ``band`` (a :class:`vsm.topics.model.SpendBand`) decides the query volume
+    *both* paths spend for this run — ``MiningConfig`` for the live miner via
+    :func:`vsm.modes.mine.config_for`, ``queries_per_cluster`` for the fake —
+    so a demonstration run at the deep band rehearses a deep-band live sweep,
+    never a probe-band one wearing a deep label. Falls back to the cheapest
+    band (``probe``) if none is given, so a bare ``get_miner(settings)`` still
+    returns something usable.
+
+    **Live with no Bright Data key raises, never falls back.** A run that
+    quietly stopped collecting looks identical, from the outside, to one that
+    collected — the same rule :func:`vsm.llm.client.get_client` holds for the
+    model client, and softening it here would reopen exactly the failure this
+    module's docstring on ``VSM_ENFORCE_TIER_C`` warns against: a decision
+    that stops being visible.
+    """
+    # Deferred imports: vsm.topics.model and vsm.modes.mine both import
+    # submodules of vsm.mining (SpendBand is unrelated; config_for imports
+    # vsm.mining.miner.MiningConfig), so importing them at module scope here
+    # risks a needless import-time cycle for no benefit — this function is
+    # the only caller.
+    from vsm.modes.mine import config_for
+    from vsm.topics.model import BANDS
+
+    s = settings or get_settings()
+    chosen_band = band or BANDS["probe"]
+    mode = s.effective_miner_mode()
+
+    if mode == "fake":
+        return DeterministicMiner(queries_per_cluster=chosen_band.queries_per_cluster)
+
+    if not (s.brightdata_api_key or "").strip():
+        raise ConfigError(
+            "VSM_MINER=live but BRIGHTDATA_API_KEY is unset — export it, or run with "
+            "VSM_OFFLINE=1 / VSM_MINER=fake to use the deterministic miner",
+            rule="mining",
+        )
+
+    bright_data = BrightDataClient(s)
+    return LiveSignalMining(
+        serp=SerpClient(bright_data, zone=s.brightdata_serp_zone),
+        discover=DiscoverClient(bright_data),
+        unlocker=UnlockerClient(bright_data, zone=s.brightdata_unlocker_zone),
+        robots=RobotsCache(fetch=_robots_fetch),
+        catalogue=catalogue_entries(),
+        config=config_for(chosen_band),
+    )

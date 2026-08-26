@@ -38,6 +38,7 @@ __all__ = [
     "normalise_url",
     "derive_theme",
     "short_excerpt",
+    "any_synthetic",
     "AUTHOR_RATIONALE",
     "PATIENT_AUTHOR_RATIONALE",
     "MAX_EXCERPT_WORDS",
@@ -158,6 +159,7 @@ def build_row(
     brand_terms: Mapping[str, str] | None = None,
     topic_id: str | None = None,
     snapshot_at: str | None = None,
+    synthetic: bool = False,
 ) -> dict[str, Any]:
     """One mined hit → one ledger-shaped row. Same keys as ``DeterministicMiner``."""
     patient = bool(hit.patient_generated)
@@ -209,6 +211,16 @@ def build_row(
         row["topic_id"] = topic_id
     if snapshot_at is not None:
         row["snapshot_at"] = snapshot_at
+    # The safety rail (Task: offline demonstration miner). Same pattern as
+    # topic_id/snapshot_at above: defaulted keyword-only, absent from the row
+    # unless a caller actually asks for it, so a live row — and every parity
+    # fixture above, which never passes this kwarg — is byte-identical to
+    # before. Only vsm.mining.fake.DeterministicMiner ever passes ``True``.
+    # The marker rides on the data, not the chrome: a fabricated row must
+    # say so from inside the artifact itself, not merely in a UI badge that
+    # a downloaded JSON or Markdown file does not carry with it.
+    if synthetic:
+        row["synthetic"] = True
     return _strip_author_identifiers(row)
 
 
@@ -233,6 +245,18 @@ def _strip_author_identifiers(row: dict[str, Any]) -> dict[str, Any]:
     if row.get("author_type") == "patient":
         row["excerpt"] = None
     return row
+
+
+def any_synthetic(rows: Iterable[Mapping[str, Any]]) -> bool:
+    """``True`` when at least one row in ``rows`` was fabricated for rehearsal.
+
+    The single source of truth every downstream writer (coverage.json,
+    cost.json, every INSIGHT and REPORT artifact) calls to decide whether it
+    must carry the marker too. One row is enough: a snapshot is not
+    partially trustworthy, and a report built over a mixed snapshot is a
+    demonstration report, full stop.
+    """
+    return any(bool(row.get("synthetic")) for row in rows)
 
 
 def dedupe_rows(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:

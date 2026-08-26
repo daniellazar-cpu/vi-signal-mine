@@ -26,6 +26,7 @@ from vsm.guards.cost import CostCap, estimate_run_usd
 from vsm.llm.prompts import LEXICON_SYSTEM
 from vsm.llm.schema import LEXICON_SCHEMA
 from vsm.mining.miner import MiningConfig
+from vsm.mining.signals import any_synthetic
 from vsm.platform import assert_band_allowed
 from vsm.runs.model import Run
 from vsm.runs.store import RunStore
@@ -196,6 +197,12 @@ def run_mine(
             enriched["snapshot_at"] = run.started_at
             rows.append(enriched)
 
+    # The safety rail. One row fabricated by the offline miner is enough to
+    # mark the whole snapshot — a snapshot is not partially trustworthy — and
+    # this is the single computation every other artifact below reads rather
+    # than re-deriving its own opinion of what "synthetic" means.
+    synthetic = any_synthetic(rows)
+
     store.write_artifact(run.run_id, "signals.json", rows)
     store.write_artifact(
         run.run_id,
@@ -241,6 +248,7 @@ def run_mine(
             # "recorded per host in coverage" is simply unmet.
             "hosts": list(outcome.coverage) if outcome is not None else [],
             "notes": notes,
+            "synthetic": synthetic,
         },
     )
     # Both figures are real, never invented, and neither is zeroed out just
@@ -269,6 +277,7 @@ def run_mine(
             "spent_usd": cap.spent(),
             "stopped": stopped,
             "reason": reason,
+            "synthetic": synthetic,
         },
     )
     store.write_artifact(

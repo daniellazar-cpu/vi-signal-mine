@@ -31,6 +31,12 @@ not extended.
       <a href="/how"{% if active_nav is defined and active_nav == "how" %} class="current" aria-current="page"{% endif %}>How this works</a>
     </nav>
   </header>
+  {% if synthetic is defined and synthetic %}
+  <div class="synthetic-banner" role="alert">
+    <span class="synthetic-banner-mark" aria-hidden="true"></span>
+    <p><strong>Demonstration data.</strong> This run used the offline synthetic miner — every signal below was fabricated for rehearsal, not collected from the web. Do not treat any figure, excerpt or citation on this page as real, and never hand it to a client.</p>
+  </div>
+  {% endif %}
   {% block top_rail %}{% endblock %}
   <main class="app-main">
     {% block content %}{% endblock %}

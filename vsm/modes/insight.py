@@ -52,6 +52,7 @@ from vsm.analysis.duallens import dual_lens
 from vsm.analysis.momentum import momentum
 from vsm.analysis.resolve import build_lexicon, resolve_signals
 from vsm.analysis.stance import ThemeStance, stance_for_themes
+from vsm.mining.signals import any_synthetic
 from vsm.runs.model import Run
 from vsm.runs.store import RunStore
 from vsm.topics.model import Topic
@@ -90,6 +91,21 @@ def _stance_from_dict(d: dict[str, Any]) -> ThemeStance:
     return ThemeStance(
         theme_id=d["theme_id"], by_class=dict(d["by_class"]), basis=d["basis"]
     )
+
+
+def _tagged(rows: list[dict[str, Any]], synthetic: bool) -> list[dict[str, Any]]:
+    """The safety rail, propagated: every item in an INSIGHT list-artifact
+    carries ``synthetic: True`` when any signal in the snapshot it was built
+    from is fabricated. Additive only — every existing key and value is
+    untouched, so ``_theme_from_dict``/``_stance_from_dict`` (which read only
+    the keys they name) are unaffected on a resumed run — and absent
+    entirely when ``synthetic`` is ``False``, the same "present only when
+    true" shape :func:`vsm.mining.signals.build_row` uses: the marker must
+    not be permanently on.
+    """
+    if not synthetic:
+        return rows
+    return [{**row, "synthetic": True} for row in rows]
 
 
 def _existing_insight_run(
@@ -162,6 +178,10 @@ def run_insight(
         topic.topic_id, "insight", parent_run_id=snapshot_run_id
     )
     signals = store.read_artifact(snapshot_run_id, "signals.json")
+    # The safety rail. Computed once, from the snapshot this INSIGHT run
+    # analyses, and threaded into every artifact written below — see
+    # _tagged() and vsm.mining.signals.any_synthetic.
+    synthetic = any_synthetic(signals)
 
     def _existing(name: str) -> Any | None:
         return _existing_artifact(store, run.run_id, name) if resume else None
@@ -169,7 +189,10 @@ def run_insight(
     # --- entities: standalone, nothing downstream reads it back -----------
     if _existing("entities.json") is None:
         entities = build_lexicon(topic)
-        store.write_artifact(run.run_id, "entities.json", resolve_signals(signals, entities))
+        payload = resolve_signals(signals, entities)
+        if synthetic:
+            payload = {**payload, "synthetic": True}
+        store.write_artifact(run.run_id, "entities.json", payload)
 
     # --- themes: needed in memory by every pass below ----------------------
     existing_themes = _existing("themes.json")
@@ -177,7 +200,9 @@ def run_insight(
         themes = [_theme_from_dict(d) for d in existing_themes]
     else:
         themes = cluster_themes(signals, client=client)
-        store.write_artifact(run.run_id, "themes.json", [asdict(t) for t in themes])
+        store.write_artifact(
+            run.run_id, "themes.json", _tagged([asdict(t) for t in themes], synthetic)
+        )
 
     # --- stance: needed in memory by dual-lens ------------------------------
     existing_stances = _existing("stance.json")
@@ -185,12 +210,15 @@ def run_insight(
         stances = [_stance_from_dict(d) for d in existing_stances]
     else:
         stances = stance_for_themes(themes, signals, resolver, client=client)
-        store.write_artifact(run.run_id, "stance.json", [asdict(s) for s in stances])
+        store.write_artifact(
+            run.run_id, "stance.json", _tagged([asdict(s) for s in stances], synthetic)
+        )
 
     # --- dual-lens: standalone ----------------------------------------------
     if _existing("duallens.json") is None:
         store.write_artifact(
-            run.run_id, "duallens.json", [asdict(g) for g in dual_lens(themes, stances)]
+            run.run_id, "duallens.json",
+            _tagged([asdict(g) for g in dual_lens(themes, stances)], synthetic),
         )
 
     # --- momentum & anomaly: share `priors`, computed at most once ---------
@@ -205,12 +233,15 @@ def run_insight(
 
     if need_momentum:
         store.write_artifact(
-            run.run_id, "momentum.json", [asdict(m) for m in momentum(themes, priors)]
+            run.run_id, "momentum.json",
+            _tagged([asdict(m) for m in momentum(themes, priors)], synthetic),
         )
 
     if need_anomaly:
         anomalies = narrate(detect_anomalies(themes, priors), client=client)
-        store.write_artifact(run.run_id, "anomaly.json", [asdict(a) for a in anomalies])
+        store.write_artifact(
+            run.run_id, "anomaly.json", _tagged([asdict(a) for a in anomalies], synthetic)
+        )
 
     # --- corroboration: standalone -----------------------------------------
     # Per-theme corroboration strength, recorded as INFORMATION (spec D18).
@@ -223,7 +254,9 @@ def run_insight(
         findings = corroborate(
             [{"statement": t.name, "signal_ids": list(t.signal_ids)} for t in themes], by_id
         )
-        store.write_artifact(run.run_id, "findings.json", [asdict(f) for f in findings])
+        store.write_artifact(
+            run.run_id, "findings.json", _tagged([asdict(f) for f in findings], synthetic)
+        )
 
     # Charge THIS RUN's model spend, which is a delta, not the client's total.
     # `client.spend` is a cumulative ledger for the client's whole life, so a
