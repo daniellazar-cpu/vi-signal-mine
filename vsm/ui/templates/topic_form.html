@@ -1,51 +1,78 @@
 {% extends "_base.html" %}
 {% block title %}{% if mode == "edit" %}Edit {{ topic.name }}{% else %}New topic{% endif %} — Vi Signal Mine{% endblock %}
 {% block content %}
+<div class="page page-narrow">
+<p class="eyebrow">Topic</p>
 <section class="page-head">
   <h1>{% if mode == "edit" %}Edit {{ topic.name }}{% else %}New topic{% endif %}</h1>
 </section>
 <p class="page-caption">{{ explainer('topic_form') }}</p>
 
 <form class="form-stack" method="post" action="{% if mode == 'edit' %}/topics/{{ topic.topic_id }}{% else %}/topics{% endif %}">
-  <div class="field-row">
-    <label for="f-name">Name</label>
-    <input id="f-name" type="text" name="name" value="{{ values.name }}" required>
+
+  <div class="field-row field-row-required">
+    <div class="field-head">
+      <label for="f-name">{{ field_guide.name.label }}</label>
+      <span class="field-required-tag">Required</span>
+    </div>
+    <input id="f-name" type="text" name="name" value="{{ values.name }}" placeholder="{{ field_guide.name.placeholder }}" required autofocus>
+    <p class="field-note">{{ field_guide.name.help }}</p>
     {% if errors.name is defined %}<p class="field-error">{{ errors.name }}</p>{% endif %}
   </div>
 
   <div class="field-row">
-    <label for="f-area">Therapeutic area</label>
-    <input id="f-area" type="text" name="therapeutic_area" value="{{ values.therapeutic_area }}" required>
-    <p class="field-note">Routes the venue registry — decides which gold-list venues a sweep queries first.</p>
-    {% if errors.therapeutic_area is defined %}<p class="field-error">{{ errors.therapeutic_area }}</p>{% endif %}
-  </div>
-
-  <div class="field-row field-row-pair">
-    <div>
-      <label for="f-brand">Brand</label>
-      <input id="f-brand" type="text" name="brand" value="{{ values.brand }}">
+    <div class="field-head">
+      <label for="f-area">{{ field_guide.therapeutic_area.label }}</label>
+      <span class="field-optional-tag">Optional</span>
     </div>
-    <div>
-      <label for="f-molecule">Molecule (INN)</label>
-      <input id="f-molecule" type="text" name="molecule" value="{{ values.molecule }}">
+    <input id="f-area" type="text" name="therapeutic_area" value="{{ values.therapeutic_area }}" placeholder="{{ field_guide.therapeutic_area.placeholder }}">
+    <p class="field-note">{{ field_guide.therapeutic_area.help }} If left blank: {{ field_guide.therapeutic_area.when_blank|lower }}</p>
+  </div>
+
+  <div class="field-row-pair">
+    <div class="field-row">
+      <div class="field-head">
+        <label for="f-brand">{{ field_guide.brand.label }}</label>
+        <span class="field-optional-tag">Optional</span>
+      </div>
+      <input id="f-brand" type="text" name="brand" value="{{ values.brand }}" placeholder="{{ field_guide.brand.placeholder }}">
+      <p class="field-note">{{ field_guide.brand.help }} If left blank: {{ field_guide.brand.when_blank|lower }}</p>
+    </div>
+    <div class="field-row">
+      <div class="field-head">
+        <label for="f-molecule">{{ field_guide.molecule.label }}</label>
+        <span class="field-optional-tag">Optional</span>
+      </div>
+      <input id="f-molecule" type="text" name="molecule" value="{{ values.molecule }}" placeholder="{{ field_guide.molecule.placeholder }}">
+      <p class="field-note">{{ field_guide.molecule.help }} If left blank: {{ field_guide.molecule.when_blank|lower }}</p>
     </div>
   </div>
-  <p class="field-note">Brand and molecule resolve to the same entity — they name the same product.</p>
 
   <div class="field-row">
-    <label for="f-competitors">Competitors</label>
-    <textarea id="f-competitors" name="competitors" rows="3" placeholder="one per line">{{ values.competitors }}</textarea>
+    <div class="field-head">
+      <label for="f-competitors">{{ field_guide.competitors.label }}</label>
+      <span class="field-optional-tag">Optional</span>
+    </div>
+    <textarea id="f-competitors" name="competitors" rows="3" placeholder="{{ field_guide.competitors.placeholder }} — one per line">{{ values.competitors }}</textarea>
+    <p class="field-note">{{ field_guide.competitors.help }} If left blank: {{ field_guide.competitors.when_blank|lower }}</p>
   </div>
 
   <div class="field-row">
-    <label for="f-questions">Questions this topic should answer</label>
-    <textarea id="f-questions" name="questions" rows="3" placeholder="one per line">{{ values.questions }}</textarea>
+    <div class="field-head">
+      <label for="f-questions">{{ field_guide.questions.label }}</label>
+      <span class="field-optional-tag">Optional</span>
+    </div>
+    <textarea id="f-questions" name="questions" rows="3" placeholder="{{ field_guide.questions.placeholder }} — one per line">{{ values.questions }}</textarea>
+    <p class="field-note">{{ field_guide.questions.help }} If left blank: {{ field_guide.questions.when_blank|lower }}</p>
   </div>
 
   <div class="field-row">
-    <label for="f-never-say">Never-say terms</label>
+    <div class="field-head">
+      <label for="f-never-say">Never-say terms</label>
+      <span class="field-optional-tag">Optional</span>
+    </div>
     <textarea id="f-never-say" name="never_say" rows="2" placeholder="one per line">{{ values.never_say }}</textarea>
-    <p class="field-note">G4. A report may never contain these terms, checked on every generated string.</p>
+    <p class="field-note">A report may never contain these terms — checked on every generated string. If left blank: nothing is blocked.</p>
   </div>
 
   <fieldset class="band-fieldset">
@@ -74,4 +101,5 @@
     <button class="btn btn-primary" type="submit">{% if mode == "edit" %}Save changes{% else %}Create topic{% endif %}</button>
   </div>
 </form>
+</div>
 {% endblock %}

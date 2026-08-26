@@ -1,7 +1,7 @@
-{# The draughtsman's title block: a bordered frame carrying a run's own
-   metadata (topic, dated frame, run id, spend band, cost) as cells rather
-   than a paragraph. Values are plain text — Jinja's autoescape covers them,
-   same as everywhere else in this app. #}
+{# The detail strip: a run's own metadata (topic, dated frame, run id, spend
+   band, cost) as plain label/value pairs in a row — the canvas's own
+   pattern, not a title block sitting on top of the page. Values are plain
+   text; Jinja's autoescape covers them, same as everywhere else. #}
 {% macro title_block(items) %}
 <div class="title-block" role="group" aria-label="run metadata">
   {% for label, value in items %}
@@ -9,6 +9,89 @@
     <span class="title-label">{{ label }}</span>
     <span class="title-value">{{ value }}</span>
   </div>
+  {% endfor %}
+</div>
+{% endmacro %}
+
+{# The in-flow rail: Topics / topic name / band, then the three stages —
+   Snapshot, Insight, Report — each a link when that stage exists for this
+   topic's current run chain, plain text when it does not yet. `flow` is
+   the dict app.py's `_flow_chain` returns; `current` is one of
+   "snapshot" | "insight" | "report". #}
+{% macro flow_rail(topic, flow, current) %}
+<div class="flow-rail" role="navigation" aria-label="topic stages">
+  <div class="flow-rail-crumb">
+    <a href="/">Topics</a>
+    <span class="flow-rail-sep" aria-hidden="true">/</span>
+    {% if topic is not none %}
+    <a href="/topics/{{ topic.topic_id }}" class="flow-rail-topic">{{ topic.name }}</a>
+    <span class="flow-rail-band">{{ topic.spend_band }} band</span>
+    {% else %}
+    <span class="flow-rail-topic">topic no longer exists</span>
+    {% endif %}
+  </div>
+  <div class="flow-steps">
+    {% if flow.mine_run_id %}
+    <a class="flow-step {% if current == 'snapshot' %}flow-step-current{% endif %}" href="/runs/{{ flow.mine_run_id }}/snapshot"><span class="flow-step-num">01</span>Snapshot</a>
+    {% else %}
+    <span class="flow-step flow-step-disabled"><span class="flow-step-num">01</span>Snapshot</span>
+    {% endif %}
+    <span class="flow-sep" aria-hidden="true">—</span>
+    {% if flow.insight_run_id %}
+    <a class="flow-step {% if current == 'insight' %}flow-step-current{% endif %}" href="/runs/{{ flow.insight_run_id }}/insight"><span class="flow-step-num">02</span>Insight</a>
+    {% else %}
+    <span class="flow-step flow-step-disabled"><span class="flow-step-num">02</span>Insight</span>
+    {% endif %}
+    <span class="flow-sep" aria-hidden="true">—</span>
+    {% if flow.report_run_id %}
+    <a class="flow-step {% if current == 'report' %}flow-step-current{% endif %}" href="/runs/{{ flow.report_run_id }}/report"><span class="flow-step-num">03</span>Report</a>
+    {% else %}
+    <span class="flow-step flow-step-disabled"><span class="flow-step-num">03</span>Report</span>
+    {% endif %}
+  </div>
+</div>
+{% endmacro %}
+
+{# One deliverable, in the one card language used before a run exists and
+   after one has: `d.available` switches between "here is a sample of what
+   this looks like" and "here is the real thing, download it." Same
+   component either way — the empty state is a state, not a different
+   design. `show_more_link` is off on the /deliverables catalog itself,
+   where a self-link would be a no-op. #}
+{% macro deliverable_card(d, show_more_link=True) %}
+<article id="deliv-{{ d.key }}" class="deliv-card {% if d.available %}deliv-card-available{% else %}deliv-card-pending{% endif %}">
+  <div class="deliv-card-head">
+    <span class="deliv-name">{{ d.name }}</span>
+    <span class="deliv-file">{{ d.file }}</span>
+  </div>
+  <p class="deliv-headline">{{ d.headline }}</p>
+  <p class="deliv-body">{{ d.body }}</p>
+  <p class="deliv-for">For — <b>{{ d.for_whom }}</b></p>
+  {% if d.available %}
+    {% if d.preview %}<p class="deliv-sample">{{ d.preview }}</p>{% endif %}
+    <div class="deliv-actions">
+      <a class="deliv-download" href="{{ d.href }}">Download {{ d.file }} ↓</a>
+      {% if show_more_link %}<a class="deliv-download" href="/deliverables#deliv-{{ d.key }}">What this is ↗</a>{% endif %}
+    </div>
+  {% else %}
+    {% if d.sample %}<p class="deliv-sample">{{ d.sample }}</p>{% endif %}
+    <p class="deliv-status">Not run yet</p>
+  {% endif %}
+</article>
+{% endmacro %}
+
+{% macro deliverable_groups(groups, show_more_link=True) %}
+<div class="deliv-groups">
+  {% for g in groups %}
+  <section class="deliv-group">
+    <div class="deliv-group-head">
+      <p class="deliv-group-label">{{ g.label }}</p>
+      <p class="deliv-group-desc">{{ g.description }}</p>
+    </div>
+    <div class="deliv-grid">
+      {% for d in g.cards %}{{ deliverable_card(d, show_more_link) }}{% endfor %}
+    </div>
+  </section>
   {% endfor %}
 </div>
 {% endmacro %}

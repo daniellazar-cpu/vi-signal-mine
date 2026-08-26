@@ -1,6 +1,8 @@
 {% extends "_base.html" %}
 {% block title %}How this works — Vi Signal Mine{% endblock %}
 {% block content %}
+<div class="page">
+<p class="eyebrow">About two minutes of reading</p>
 <section class="page-head">
   <h1>How this works</h1>
 </section>
@@ -12,7 +14,7 @@
 <div class="mode-cards">
   {% for m in modes %}
   <article class="mode-card">
-    <h3>{{ m.name }}</h3>
+    <p class="mode-card-eyebrow">{{ "%02d"|format(loop.index) }} — {{ m.name }}</p>
     <p class="mode-one-liner">{{ m.one_liner }}</p>
     <dl class="mode-meta">
       <div><dt>Produces</dt><dd>{{ m.produces }}</dd></div>
@@ -39,4 +41,7 @@
   <div><dt>{{ term }}</dt><dd>{{ desc }}</dd></div>
   {% endfor %}
 </dl>
+
+<p class="body-text field-note">Want to see the shape of the output before any of this runs? <a href="/deliverables">See what you get →</a></p>
+</div>
 {% endblock %}

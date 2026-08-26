@@ -1,19 +1,21 @@
 {% extends "_base.html" %}
-{% from "_macros.html" import title_block %}
+{% from "_macros.html" import title_block, deliverable_groups %}
 {% block title %}Confirm spend — {{ topic.name }} — Vi Signal Mine{% endblock %}
 {% block content %}
+<div class="page page-narrow">
+<p class="eyebrow">The only screen that spends money</p>
 <section class="page-head">
   <h1>Confirm spend</h1>
 </section>
 <p class="page-caption">{{ explainer('confirm') }}</p>
 {{ title_block([
-  ("TOPIC", topic.name),
-  ("THERAPEUTIC AREA", topic.therapeutic_area),
-  ("SPEND BAND", band.name),
-  ("ESTIMATED COST", estimate.total_usd|usd(2)),
+  ("Topic", topic.name),
+  ("Therapeutic area", topic.therapeutic_area if topic.therapeutic_area else "not set — a general venue set"),
+  ("Spend band", band.name),
+  ("Run cost cap", cap_usd|usd(2)),
 ]) }}
 
-<section class="panel confirm-panel">
+<section class="confirm-panel">
   <p class="body-text">
     Running a <strong>{{ band.name }}</strong> snapshot of <strong>{{ topic.name }}</strong>
     spends real money on a shared Bright Data account. Nothing is bought until
@@ -34,7 +36,7 @@
   <div class="table-scroll">
   <table class="data-table breakdown-table">
     <thead>
-      <tr><th scope="col">Item</th><th scope="col">Cost</th><th scope="col">Basis</th></tr>
+      <tr><th scope="col">Item</th><th scope="col" class="num">Cost</th><th scope="col">Basis</th></tr>
     </thead>
     <tbody>
       {% for item in estimate.breakdown %}
@@ -55,6 +57,14 @@
     the mine.
   </p>
 
+  <h2>What lands when this finishes</h2>
+  <p class="body-text field-note">
+    Nothing has run yet, so nothing below is real — this is the same list,
+    in the same shape, that fills in once the snapshot, insight and report
+    stages complete.
+  </p>
+  {{ deliverable_groups(groups) }}
+
   <div class="confirm-actions">
     <a class="link-back" href="/topics/{{ topic.topic_id }}/edit">Change band or cancel</a>
     <form method="post" action="/topics/{{ topic.topic_id }}/mine">
@@ -63,4 +73,5 @@
     </form>
   </div>
 </section>
+</div>
 {% endblock %}

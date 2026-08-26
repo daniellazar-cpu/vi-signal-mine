@@ -1,8 +1,9 @@
 {% extends "_base.html" %}
-{% from "_macros.html" import title_block %}
+{% from "_macros.html" import title_block, flow_rail, deliverable_groups %}
 {% block title %}Insight — Vi Signal Mine{% endblock %}
 
 {% block top_rail %}
+{{ flow_rail(topic, flow, "insight") }}
 {% if topic is not none and snapshot_rail %}
 <div class="dated-strip" role="navigation" aria-label="topic snapshots">
   {% for frame in snapshot_rail %}
@@ -14,32 +15,33 @@
 {% endblock %}
 
 {% block content %}
+<div class="page page-wide">
 <section class="page-head">
   <h1>{% if topic is not none %}{{ topic.name }} — {% endif %}Insight</h1>
 </section>
 <p class="page-caption">{{ explainer('insight') }}</p>
 
 {{ title_block([
-  ("TOPIC", topic.name if topic is not none else "—"),
-  ("DATE", run.started_at|dt),
-  ("RUN ID", run.run_id),
-  ("SPEND BAND", topic.spend_band if topic is not none else "—"),
-  ("COST", run.cost_usd|usd(4)),
+  ("Topic", topic.name if topic is not none else "—"),
+  ("Date", run.started_at|dt),
+  ("Run id", run.run_id),
+  ("Spend band", topic.spend_band if topic is not none else "—"),
+  ("Cost", run.cost_usd|usd(4)),
 ]) }}
 {% if mine_run_id %}
 <p class="cell-sub"><a href="/runs/{{ mine_run_id }}/snapshot">based on the snapshot captured {{ run.started_at|dt }}</a></p>
 {% endif %}
 
-<h2 id="dual-lens">Dual-lens gap — where clinicians and patients diverge</h2>
-<div class="forest-plot-wrap">
-  {{ forest_svg|safe }}
-</div>
-<div class="forest-plot-baseline-action">
+<div class="page-head page-head-section">
+  <h2 id="dual-lens">Dual-lens gap — where clinicians and patients diverge</h2>
   {% if run.status == "complete" %}
   <form method="post" action="/runs/{{ run.run_id }}/report">
     <button class="btn btn-primary" type="submit">Generate report</button>
   </form>
   {% endif %}
+</div>
+<div class="forest-plot-wrap">
+  {{ forest_svg|safe }}
 </div>
 <div class="plot-guide">
   <p class="plot-guide-lede">{{ plot_guide.lede }}</p>
@@ -54,134 +56,159 @@
   </details>
 </div>
 
-<h2>Momentum</h2>
-{% if not has_baseline %}
-<p class="empty-state">No prior snapshot exists for this topic yet, so momentum has nothing to compare against.</p>
-{% elif momentum_rows %}
-<div class="table-scroll">
-<table class="data-table">
-  <thead><tr><th scope="col">Theme</th><th scope="col">Volume now</th><th scope="col">Volume prior</th><th scope="col">Delta</th><th scope="col">Delta %</th><th scope="col">Note</th></tr></thead>
-  <tbody>
-    {% for m in momentum_rows %}
-    <tr>
-      <td class="cell-title">{{ m.theme_name }}</td>
-      <td class="num">{{ m.volume_now }}</td>
-      <td class="num">{% if m.volume_prior is none %}—{% else %}{{ m.volume_prior }}{% endif %}</td>
-      <td class="num">{% if m.delta is none %}—{% else %}{{ m.delta }}{% endif %}</td>
-      <td class="num">{{ m.delta_pct|pct }}</td>
-      <td class="cell-sub">{{ m.reason if m.reason else "—" }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-</div>
-{% else %}
-<p class="empty-state">No themes in this snapshot to compare.</p>
-{% endif %}
+<div class="tabs">
+  <input class="tab-input" type="radio" name="insight-view" id="tab-momentum" checked>
+  <input class="tab-input" type="radio" name="insight-view" id="tab-anomalies">
+  <input class="tab-input" type="radio" name="insight-view" id="tab-themes">
+  <input class="tab-input" type="radio" name="insight-view" id="tab-stance">
+  <input class="tab-input" type="radio" name="insight-view" id="tab-entities">
+  <div class="tabbar" role="group" aria-label="insight view">
+    <label for="tab-momentum">Momentum</label>
+    <label for="tab-anomalies">Anomalies</label>
+    <label for="tab-themes">Themes</label>
+    <label for="tab-stance">Stance by author class</label>
+    <label for="tab-entities">Entities</label>
+  </div>
 
-<h2>Anomalies</h2>
-{% if not has_baseline %}
-<p class="empty-state">No prior snapshot exists to compare against, so no anomalies can be detected yet.</p>
-{% elif anomaly_rows %}
-<div class="table-scroll">
-<table class="data-table">
-  <thead><tr><th scope="col">Theme</th><th scope="col">Kind</th><th scope="col">Observed</th><th scope="col">Baseline</th><th scope="col">Detail</th><th scope="col">Note</th></tr></thead>
-  <tbody>
-    {% for a in anomaly_rows %}
-    <tr>
-      <td class="cell-title">{{ a.theme_name }}</td>
-      <td>{{ anomaly_label(a.kind) }}</td>
-      <td class="num">{{ a.observed }}</td>
-      <td class="num">{% if a.baseline is none %}—{% else %}{{ a.baseline }}{% endif %}</td>
-      <td class="cell-sub">{{ a.detail }}</td>
-      <td class="cell-sub">{{ a.note if a.note else "—" }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-</div>
-{% else %}
-<p class="empty-state">No anomalies were detected against the prior baseline.</p>
-{% endif %}
-
-<h2>Themes</h2>
-{% if theme_rows %}
-<div class="table-scroll">
-<table class="data-table">
-  <thead><tr><th scope="col">Theme</th><th scope="col">Volume</th><th scope="col">Venue mix</th><th scope="col">Kind mix</th><th scope="col">Tier</th><th scope="col">Independent sources</th></tr></thead>
-  <tbody>
-    {% for tr in theme_rows %}
-    <tr>
-      <td class="cell-title">{{ tr.theme.name }}</td>
-      <td class="num">{{ tr.theme.volume }}</td>
-      <td class="cell-sub">{% for v, n in tr.venue_mix %}{{ v }} ({{ n }}){% if not loop.last %}, {% endif %}{% else %}—{% endfor %}</td>
-      <td class="cell-sub">{% for k, n in tr.kind_mix %}{{ kind_label(k) }} ({{ n }}){% if not loop.last %}, {% endif %}{% else %}—{% endfor %}</td>
-      <td title="{{ tier_note(tr.tier) }}">{{ tier_label(tr.tier) }}</td>
-      <td class="num">{{ tr.sources }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-</div>
-{% else %}
-<p class="empty-state">No themes in this snapshot.</p>
-{% endif %}
-
-<h2>Stance by author class</h2>
-<p class="body-text">
-  Split by who is speaking. There is no blended figure across HCP and
-  patient — a single number over both would be a patient-sentiment number
-  wearing a clinical label.
-</p>
-{% if stance_rows %}
-<div class="table-scroll">
-<table class="data-table">
-  <thead><tr><th scope="col">Theme</th><th scope="col">Author class</th><th scope="col">Stance counts</th><th scope="col">Basis</th></tr></thead>
-  <tbody>
-    {% for sr in stance_rows %}
-      {% if sr.by_class %}
-        {% for cls, counts in sr.by_class %}
+  <div class="tab-panel panel-momentum">
+    {% if not has_baseline %}
+    <p class="empty-state">No prior snapshot exists for this topic yet, so momentum has nothing to compare against.</p>
+    {% elif momentum_rows %}
+    <div class="table-scroll">
+    <table class="data-table">
+      <thead><tr><th scope="col">Theme</th><th scope="col" class="num">Volume now</th><th scope="col" class="num">Volume prior</th><th scope="col" class="num">Delta</th><th scope="col" class="num">Delta %</th><th scope="col">Note</th></tr></thead>
+      <tbody>
+        {% for m in momentum_rows %}
         <tr>
-          {% if loop.first %}<td class="cell-title" rowspan="{{ sr.by_class|length }}">{{ sr.name }}</td>{% endif %}
-          <td>{{ class_label(cls) }}</td>
-          <td class="cell-sub">{% for stance, n in counts.items() %}{{ stance_label(stance) }} {{ n }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
-          {% if loop.first %}<td class="cell-sub" rowspan="{{ sr.by_class|length }}">{{ sr.basis }}</td>{% endif %}
+          <td class="cell-title">{{ m.theme_name }}</td>
+          <td class="num">{{ m.volume_now }}</td>
+          <td class="num">{% if m.volume_prior is none %}—{% else %}{{ m.volume_prior }}{% endif %}</td>
+          <td class="num">{% if m.delta is none %}—{% else %}{{ m.delta }}{% endif %}</td>
+          <td class="num">{{ m.delta_pct|pct }}</td>
+          <td class="cell-sub">{{ m.reason if m.reason else "—" }}</td>
         </tr>
         {% endfor %}
-      {% else %}
-      <tr>
-        <td class="cell-title">{{ sr.name }}</td>
-        <td colspan="2" class="muted">no signals resolved to an author class</td>
-        <td class="cell-sub">{{ sr.basis }}</td>
-      </tr>
-      {% endif %}
-    {% endfor %}
-  </tbody>
-</table>
-</div>
-{% else %}
-<p class="empty-state">No stance data for this snapshot.</p>
-{% endif %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="empty-state">No themes in this snapshot to compare.</p>
+    {% endif %}
+  </div>
 
-<h2>Entities</h2>
-{% if entity_rows %}
-<div class="table-scroll">
-<table class="data-table">
-  <thead><tr><th scope="col">Entity</th><th scope="col">Role</th><th scope="col">Aliases</th><th scope="col">Signals mentioning it</th></tr></thead>
-  <tbody>
-    {% for e in entity_rows %}
-    <tr>
-      <td class="cell-title">{{ e.canonical }}</td>
-      <td>{{ e.role }}</td>
-      <td class="cell-sub">{{ e.aliases|join(", ") }}</td>
-      <td class="num">{{ e.signal_count }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+  <div class="tab-panel panel-anomalies">
+    {% if not has_baseline %}
+    <p class="empty-state">No prior snapshot exists to compare against, so no anomalies can be detected yet.</p>
+    {% elif anomaly_rows %}
+    <div class="table-scroll">
+    <table class="data-table">
+      <thead><tr><th scope="col">Theme</th><th scope="col">Kind</th><th scope="col" class="num">Observed</th><th scope="col" class="num">Baseline</th><th scope="col">Detail</th><th scope="col">Note</th></tr></thead>
+      <tbody>
+        {% for a in anomaly_rows %}
+        <tr>
+          <td class="cell-title">{{ a.theme_name }}</td>
+          <td>{{ anomaly_label(a.kind) }}</td>
+          <td class="num">{{ a.observed }}</td>
+          <td class="num">{% if a.baseline is none %}—{% else %}{{ a.baseline }}{% endif %}</td>
+          <td class="cell-sub">{{ a.detail }}</td>
+          <td class="cell-sub">{{ a.note if a.note else "—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="empty-state">No anomalies were detected against the prior baseline.</p>
+    {% endif %}
+  </div>
+
+  <div class="tab-panel panel-themes">
+    {% if theme_rows %}
+    <div class="table-scroll">
+    <table class="data-table">
+      <thead><tr><th scope="col">Theme</th><th scope="col" class="num">Volume</th><th scope="col">Venue mix</th><th scope="col">Kind mix</th><th scope="col">Tier</th><th scope="col" class="num">Independent sources</th></tr></thead>
+      <tbody>
+        {% for tr in theme_rows %}
+        <tr>
+          <td class="cell-title">{{ tr.theme.name }}</td>
+          <td class="num">{{ tr.theme.volume }}</td>
+          <td class="cell-sub">{% for v, n in tr.venue_mix %}{{ v }} ({{ n }}){% if not loop.last %}, {% endif %}{% else %}—{% endfor %}</td>
+          <td class="cell-sub">{% for k, n in tr.kind_mix %}{{ kind_label(k) }} ({{ n }}){% if not loop.last %}, {% endif %}{% else %}—{% endfor %}</td>
+          <td title="{{ tier_note(tr.tier) }}">{{ tier_label(tr.tier) }}</td>
+          <td class="num">{{ tr.sources }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="empty-state">No themes in this snapshot.</p>
+    {% endif %}
+  </div>
+
+  <div class="tab-panel panel-stance">
+    <p class="body-text">
+      Split by who is speaking. There is no blended figure across HCP and
+      patient — a single number over both would be a patient-sentiment number
+      wearing a clinical label.
+    </p>
+    {% if stance_rows %}
+    <div class="table-scroll">
+    <table class="data-table">
+      <thead><tr><th scope="col">Theme</th><th scope="col">Author class</th><th scope="col">Stance counts</th><th scope="col">Basis</th></tr></thead>
+      <tbody>
+        {% for sr in stance_rows %}
+          {% if sr.by_class %}
+            {% for cls, counts in sr.by_class %}
+            <tr>
+              {% if loop.first %}<td class="cell-title" rowspan="{{ sr.by_class|length }}">{{ sr.name }}</td>{% endif %}
+              <td>{{ class_label(cls) }}</td>
+              <td class="cell-sub">{% for stance, n in counts.items() %}{{ stance_label(stance) }} {{ n }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
+              {% if loop.first %}<td class="cell-sub" rowspan="{{ sr.by_class|length }}">{{ sr.basis }}</td>{% endif %}
+            </tr>
+            {% endfor %}
+          {% else %}
+          <tr>
+            <td class="cell-title">{{ sr.name }}</td>
+            <td colspan="2" class="muted">no signals resolved to an author class</td>
+            <td class="cell-sub">{{ sr.basis }}</td>
+          </tr>
+          {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="empty-state">No stance data for this snapshot.</p>
+    {% endif %}
+  </div>
+
+  <div class="tab-panel panel-entities">
+    {% if entity_rows %}
+    <div class="table-scroll">
+    <table class="data-table">
+      <thead><tr><th scope="col">Entity</th><th scope="col">Role</th><th scope="col">Aliases</th><th scope="col" class="num">Signals mentioning it</th></tr></thead>
+      <tbody>
+        {% for e in entity_rows %}
+        <tr>
+          <td class="cell-title">{{ e.canonical }}</td>
+          <td>{{ e.role }}</td>
+          <td class="cell-sub">{{ e.aliases|join(", ") }}</td>
+          <td class="num">{{ e.signal_count }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="empty-state">No entities to resolve — the topic has no brand, molecule or competitor names set.</p>
+    {% endif %}
+    <p class="cell-sub">{{ unmapped_count }} signal(s) matched none of these entities.</p>
+  </div>
 </div>
-{% else %}
-<p class="empty-state">No entities to resolve — the topic has no brand, molecule or competitor names set.</p>
-{% endif %}
-<p class="cell-sub">{{ unmapped_count }} signal(s) matched none of these entities.</p>
+
+<h2>Deliverables</h2>
+<p class="body-text field-note">The findings above, as the artifacts they land in — the analysis group is real; the report becomes real once you generate it.</p>
+{{ deliverable_groups(deliv_groups) }}
+</div>
 {% endblock %}

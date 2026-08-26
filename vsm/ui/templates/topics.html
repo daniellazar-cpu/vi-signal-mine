@@ -1,8 +1,12 @@
 {% extends "_base.html" %}
 {% block title %}Topics — Vi Signal Mine{% endblock %}
 {% block content %}
+<div class="page page-wide">
 <section class="page-head">
-  <h1>Topics</h1>
+  <div>
+    <p class="eyebrow">Watched over time</p>
+    <h1>Topics</h1>
+  </div>
   <a class="btn btn-primary" href="/topics/new">New topic</a>
 </section>
 <p class="page-caption">{{ explainer('topics') }}</p>
@@ -14,8 +18,8 @@
     <tr>
       <th scope="col">Topic</th>
       <th scope="col">Last snapshot</th>
-      <th scope="col">Snapshots</th>
-      <th scope="col">Spend to date</th>
+      <th scope="col" class="num">Snapshots</th>
+      <th scope="col" class="num">Spend to date</th>
       <th scope="col">Volume</th>
       <th scope="col"></th>
     </tr>
@@ -24,8 +28,10 @@
     {% for row in rows %}
     <tr>
       <td>
-        <div class="cell-title">{{ row.topic.name }}</div>
-        <div class="cell-sub">{{ row.topic.therapeutic_area }} — {{ row.topic.spend_band }} band</div>
+        <a class="topic-name-link" href="/topics/{{ row.topic.topic_id }}">{{ row.topic.name }}</a>
+        <div class="cell-sub">
+          {% if row.topic.therapeutic_area %}{{ row.topic.therapeutic_area }} — {% endif %}{{ row.topic.spend_band }} band
+        </div>
       </td>
       <td class="num">
         {% if row.last_snapshot_run_id is not none %}
@@ -36,7 +42,7 @@
       </td>
       <td class="num">{{ row.snapshot_count }}</td>
       <td class="num">{{ row.spend_to_date|usd(2) }}</td>
-      <td class="num">
+      <td>
         {% if row.sparkline %}
         {{ row.sparkline|safe }}
         <span class="cell-sub">{{ row.latest_volume }} signals now</span>
@@ -47,8 +53,8 @@
         {% endif %}
       </td>
       <td class="num">
-        <a href="/topics/{{ row.topic.topic_id }}/edit">Edit</a>
-        <a href="/topics/{{ row.topic.topic_id }}/confirm">Run snapshot</a>
+        <a class="link-back" href="/topics/{{ row.topic.topic_id }}/edit">Edit</a>
+        <a class="btn btn-ghost btn-sm" href="/topics/{{ row.topic.topic_id }}/confirm">Run snapshot</a>
       </td>
     </tr>
     {% endfor %}
@@ -74,4 +80,5 @@
   </ol>
 </div>
 {% endif %}
+</div>
 {% endblock %}

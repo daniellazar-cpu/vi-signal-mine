@@ -59,7 +59,8 @@ def test_every_page_renders_with_strictundefined(client):
     """StrictUndefined turns a typo'd variable into a 500. Walk every GET."""
     c, ts, _ = client
     t = ts.create(name="OIC", therapeutic_area="gi", spend_band="probe")
-    for path in ("/", "/how", "/topics/new", f"/topics/{t.topic_id}/edit",
+    for path in ("/", "/how", "/deliverables", "/topics/new",
+                 f"/topics/{t.topic_id}", f"/topics/{t.topic_id}/edit",
                  f"/topics/{t.topic_id}/confirm?band=probe"):
         assert c.get(path).status_code == 200, path
 
@@ -98,3 +99,66 @@ def test_the_page_requests_nothing_from_the_network(client):
     assert "//fonts.googleapis" not in body
     assert "https://cdn" not in body
     assert "http://" not in body.replace("http://www.w3.org", "")
+
+
+# --- The deliverables surface (the moat, made visible) ----------------------
+
+
+def test_deliverables_page_renders_every_group_and_an_artifact_filename(client):
+    """/deliverables is the page someone reads to decide whether the tool is
+    worth running — every DELIVERABLE_GROUPS label must actually render, and
+    at least one real filename must be on the page, not just a route that
+    returns 200."""
+    from vsm.ui.content import DELIVERABLE_GROUPS, DELIVERABLES
+
+    c, _, _ = client
+    body = c.get("/deliverables").text
+    for _key, label, _desc in DELIVERABLE_GROUPS:
+        assert label in body, f"group label missing from /deliverables: {label}"
+    assert DELIVERABLES[0]["file"] in body
+
+
+def test_a_never_run_topic_lists_the_deliverables_pending(client):
+    """The owner asked for this explicitly: a topic that has never been run
+    must show the same deliverables list with nothing filled in yet, so a
+    user can see the shape of the output before spending money."""
+    from vsm.ui.content import DELIVERABLES
+
+    c, ts, _ = client
+    t = ts.create(name="Never run", therapeutic_area="gi", spend_band="probe")
+    body = c.get(f"/topics/{t.topic_id}").text
+    assert "Not run yet" in body
+    assert DELIVERABLES[0]["name"] in body
+
+
+def test_confirm_screen_shows_the_pre_run_deliverables_too(client):
+    """Same requirement, the other place the owner named: confirm-spend, the
+    screen right before money is spent."""
+    c, ts, _ = client
+    t = ts.create(name="OIC", therapeutic_area="gi", spend_band="probe")
+    body = c.get(f"/topics/{t.topic_id}/confirm?band=probe").text
+    assert "Not run yet" in body
+
+
+# --- Only the topic name is required -----------------------------------
+
+
+def test_posting_only_a_name_creates_a_topic(client):
+    """A molecule is not always relevant, and neither is anything else on
+    the form — only `name` may be required."""
+    c, ts, _ = client
+    r = c.post("/topics", data={"name": "Bare topic"}, follow_redirects=False)
+    assert r.status_code in (302, 303)
+    created = ts.list()
+    assert [t.name for t in created] == ["Bare topic"]
+    assert created[0].spend_band in ("probe", "standard", "deep")
+
+
+def test_the_topic_form_marks_exactly_one_field_required(client):
+    """A molecule is not always relevant, and the form must not imply
+    otherwise — `name` is the only required field, visually distinct from
+    every optional one."""
+    c, _, _ = client
+    body = c.get("/topics/new").text
+    assert body.count("Required") == 1
+    assert "Optional" in body

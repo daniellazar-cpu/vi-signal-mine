@@ -1,7 +1,13 @@
 {% extends "_base.html" %}
-{% from "_macros.html" import title_block %}
+{% from "_macros.html" import title_block, flow_rail, deliverable_groups %}
 {% block title %}{{ run.mode|capitalize }} run — Vi Signal Mine{% endblock %}
+
+{% block top_rail %}
+{{ flow_rail(topic, flow, current_step) }}
+{% endblock %}
+
 {% block content %}
+<div class="page">
 <section class="page-head">
   <h1>{{ run.mode|capitalize }} run</h1>
   <span class="status-badge status-{{ run.status }}">{{ run.status|replace("_", " ") }}</span>
@@ -9,12 +15,12 @@
 <p class="page-caption">{{ explainer('run') }}</p>
 
 {{ title_block([
-  ("TOPIC", topic.name if topic is not none else "—"),
-  ("DATE", run.started_at|dt),
-  ("RUN ID", run.run_id),
-  ("SPEND BAND", topic.spend_band if topic is not none else "—"),
-  ("COST", run.cost_usd|usd(4)),
-  ("FINISHED", run.finished_at|dt if run.finished_at else "not yet"),
+  ("Topic", topic.name if topic is not none else "—"),
+  ("Date", run.started_at|dt),
+  ("Run id", run.run_id),
+  ("Spend band", topic.spend_band if topic is not none else "—"),
+  ("Cost", run.cost_usd|usd(4)),
+  ("Finished", run.finished_at|dt if run.finished_at else "not yet"),
 ]) }}
 
 {% if run.note %}
@@ -25,9 +31,10 @@
 <ol class="stage-list">
   {% for stage in stages %}
   <li class="stage-item {% if stage.done %}stage-done{% else %}stage-pending{% endif %}">
-    <span class="stage-mark">{% if stage.done %}done{% else %}pending{% endif %}</span>
+    <span class="stage-num">{{ "%02d"|format(loop.index) }}</span>
+    <span class="stage-mark" aria-hidden="true"></span>
     <span class="stage-label">{{ stage.label }}</span>
-    {% if stage.done %}<a class="stage-download" href="/runs/{{ run.run_id }}/artifact/{{ stage.file }}">download {{ stage.file }}</a>{% endif %}
+    {% if stage.done %}<a class="stage-download" href="/runs/{{ run.run_id }}/artifact/{{ stage.file }}">{{ stage.file }} ↓</a>{% else %}<span class="cell-sub">pending</span>{% endif %}
   </li>
   {% endfor %}
 </ol>
@@ -44,23 +51,28 @@
 </dl>
 {% endif %}
 
+<h2>Deliverables</h2>
+<p class="body-text field-note">The full set this topic can produce — real where this flow has reached that stage, pending where it has not yet.</p>
+{{ deliverable_groups(deliv_groups) }}
+
 <div class="form-actions">
   {% if run.mode == "mine" %}
-  <a class="link-back" href="/runs/{{ run.run_id }}/snapshot">View snapshot</a>
+  <a class="btn btn-ghost" href="/runs/{{ run.run_id }}/snapshot">View snapshot</a>
   {% if run.status in ("complete", "stopped_on_budget") %}
   <form method="post" action="/runs/{{ run.run_id }}/insight">
     <button class="btn btn-primary" type="submit">Run insight on this snapshot</button>
   </form>
   {% endif %}
   {% elif run.mode == "insight" %}
-  <a class="link-back" href="/runs/{{ run.run_id }}/insight">View insight</a>
+  <a class="btn btn-ghost" href="/runs/{{ run.run_id }}/insight">View insight</a>
   {% if run.status == "complete" %}
   <form method="post" action="/runs/{{ run.run_id }}/report">
     <button class="btn btn-primary" type="submit">Generate report</button>
   </form>
   {% endif %}
   {% elif run.mode == "report" %}
-  <a class="link-back" href="/runs/{{ run.run_id }}/report">View report</a>
+  <a class="btn btn-ghost" href="/runs/{{ run.run_id }}/report">View report</a>
   {% endif %}
+</div>
 </div>
 {% endblock %}

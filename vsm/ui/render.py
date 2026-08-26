@@ -7,12 +7,14 @@ into the markup, because a theme name can come from an LLM's naming pass (or,
 offline, straight from a page title) and this string is trusted by the
 browser as markup the moment the template marks it ``|safe``.
 
-The forest plot is the direction contract's centrepiece (see
-``.superpowers/sdd/2026-08-25-vi-signal-mine/DIRECTION.md``): box area is
+The forest plot is a concept kept from the previous direction because it is
+the right encoding for the dual-lens gap, but it is drawn in the pinned Vi
+system's palette (``vsm/ui/static/ds/colors_and_type.css``): box area is
 volume, the whisker spans the signed gap between the patient and clinician
 net-stance readings, and a null line at zero divergence is shared by every
-row. A theme only one side discussed prints ``NE`` on that null line, in the
-one colour this app reserves for exactly two things.
+row. A theme only one side discussed prints ``NE`` on that null line, dashed
+in ink rather than in a warning colour — the Vi palette has no red reserved
+for "not estimable"; black structure and a dashed stroke say it instead.
 """
 
 from __future__ import annotations
@@ -25,13 +27,15 @@ from vsm.ui.content import TIERS
 
 __all__ = ["forest_plot_svg", "sparkline_svg", "usd", "pct", "net_stance_text", "fmt_dt"]
 
-# The closed, five-ink set named in DIRECTION.md. No sixth colour anywhere
-# in generated SVG.
-INK = "#14181B"
-CYAN = "#8FC4D8"
-BLUE = "#1B4E7E"
-RED = "#B2372A"
-GROUND = "#F2F4F3"
+# Vi's palette (see ds/colors_and_type.css): black rules and structure, Vi
+# Violet for the one measured signal — here, the whisker and box that ARE
+# the finding — and cool gray for supporting structure (the null line, the
+# baseline, axis labels). No red: "not estimable" is drawn dashed in ink,
+# not in a warning colour this system doesn't have.
+INK = "#000000"
+STRUCTURE = "rgba(0, 0, 0, 0.18)"
+VIOLET = "#4F31F5"
+NE_INK = "#140923"
 
 _TIER_LABEL = {
     "corroborated": "Corroborated",
@@ -119,10 +123,10 @@ def sparkline_svg(values: Sequence[int], *, width: int = 108, height: int = 30) 
         f'preserveAspectRatio="none" role="img" aria-label="volume across '
         f'{n} snapshots, {lo} to {hi}">'
         f'<line x1="{pad}" y1="{baseline_y}" x2="{width - pad}" y2="{baseline_y}" '
-        f'stroke="{CYAN}" stroke-width="1" />'
-        f'<polyline points="{points_attr}" fill="none" stroke="{BLUE}" '
+        f'stroke="{STRUCTURE}" stroke-width="1" />'
+        f'<polyline points="{points_attr}" fill="none" stroke="{VIOLET}" '
         f'stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" />'
-        f'<circle cx="{last_x}" cy="{last_y}" r="2.2" fill="{BLUE}" />'
+        f'<circle cx="{last_x}" cy="{last_y}" r="2.2" fill="{VIOLET}" />'
         f"</svg>"
     )
 
@@ -190,7 +194,7 @@ def forest_plot_svg(rows: Sequence[Mapping[str, Any]]) -> str:
     # ---- the null line, shared by every row --------------------------------
     parts.append(
         f'<line x1="{x_of(0):.1f}" y1="{top_y}" x2="{x_of(0):.1f}" y2="{bottom_y}" '
-        f'stroke="{CYAN}" stroke-width="1.25" />'
+        f'stroke="{STRUCTURE}" stroke-width="1.25" />'
     )
 
     for i, row in enumerate(rows):
@@ -216,10 +220,10 @@ def forest_plot_svg(rows: Sequence[Mapping[str, Any]]) -> str:
             parts.append(
                 f'<g aria-label="not estimable: {reason}">'
                 f'<line x1="{cx - half_span:.1f}" y1="{y:.1f}" x2="{cx + half_span:.1f}" y2="{y:.1f}" '
-                f'stroke="{RED}" stroke-width="2.25" stroke-dasharray="4,4" />'
+                f'stroke="{NE_INK}" stroke-width="2.25" stroke-dasharray="4,4" />'
                 f'<rect x="{cx - side / 2:.1f}" y="{y - side / 2:.1f}" '
                 f'width="{side:.1f}" height="{side:.1f}" fill="none" '
-                f'stroke="{RED}" stroke-width="2.25" />'
+                f'stroke="{NE_INK}" stroke-width="2.25" />'
                 f'<text x="{cx:.1f}" y="{y - side / 2 - 10:.1f}" text-anchor="middle" '
                 f'class="plot-ne-label">NE</text>'
                 f"</g>"
@@ -231,9 +235,9 @@ def forest_plot_svg(rows: Sequence[Mapping[str, Any]]) -> str:
             parts.append(
                 f'<g aria-label="{name}: divergence {gap:.2f}">'
                 f'<line x1="{x0:.1f}" y1="{y:.1f}" x2="{x1:.1f}" y2="{y:.1f}" '
-                f'stroke="{BLUE}" stroke-width="2.75" />'
+                f'stroke="{VIOLET}" stroke-width="2.75" />'
                 f'<rect x="{x1 - side / 2:.1f}" y="{y - side / 2:.1f}" '
-                f'width="{side:.1f}" height="{side:.1f}" fill="{BLUE}" '
+                f'width="{side:.1f}" height="{side:.1f}" fill="{VIOLET}" '
                 f'fill-opacity="0.82" stroke="{INK}" stroke-width="1" />'
                 f"</g>"
             )
@@ -251,7 +255,7 @@ def forest_plot_svg(rows: Sequence[Mapping[str, Any]]) -> str:
     # ---- baseline + axis end labels ----------------------------------------
     parts.append(
         f'<line x1="{left_w}" y1="{bottom_y}" x2="{left_w + plot_w}" y2="{bottom_y}" '
-        f'stroke="{CYAN}" stroke-width="1.25" />'
+        f'stroke="{STRUCTURE}" stroke-width="1.25" />'
         f'<text x="{left_w}" y="{bottom_y + 22}" class="plot-axis-end">'
         f"PATIENTS MORE NEGATIVE</text>"
         f'<text x="{left_w + plot_w}" y="{bottom_y + 22}" text-anchor="end" '

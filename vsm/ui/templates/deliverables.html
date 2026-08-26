@@ -1,0 +1,26 @@
+{% extends "_base.html" %}
+{% from "_macros.html" import deliverable_groups %}
+{% block title %}What you get — Vi Signal Mine{% endblock %}
+{% block content %}
+<div class="page page-wide">
+<p class="eyebrow">The moat, not the tool</p>
+<section class="page-head">
+  <h1>What you get</h1>
+</section>
+<p class="page-caption">{{ explainer('deliverables') }}</p>
+<p class="body-text">
+  Ten artifacts come out of one topic watched to completion — four written to
+  be handed to a client as-is, four that back every claim in them, and two
+  raw collections underneath both. Every sample line below is real: a
+  quoted-out sentence from an actual run, not a mockup of one. This is the
+  page to read before you spend anything running one.
+</p>
+
+{{ deliverable_groups(groups, false) }}
+
+<p class="body-text field-note">
+  Ready to see this fill in for real? <a href="/">Start from a topic</a> — only
+  its name is required.
+</p>
+</div>
+{% endblock %}

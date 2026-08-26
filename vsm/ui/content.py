@@ -250,6 +250,10 @@ _EXPLAINERS = {
         "is refused rather than printed."
     ),
     "how": "The whole process, start to finish, in about two minutes of reading.",
+    "deliverables": (
+        "What lands when a run finishes — before you spend anything on one. "
+        "Ten artifacts, grouped by who they are for."
+    ),
 }
 
 

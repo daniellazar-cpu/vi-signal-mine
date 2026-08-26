@@ -1,7 +1,13 @@
 {% extends "_base.html" %}
-{% from "_macros.html" import title_block %}
+{% from "_macros.html" import title_block, flow_rail, deliverable_groups %}
 {% block title %}Snapshot — Vi Signal Mine{% endblock %}
+
+{% block top_rail %}
+{{ flow_rail(topic, flow, "snapshot") }}
+{% endblock %}
+
 {% block content %}
+<div class="page page-wide">
 <section class="page-head">
   <h1>Snapshot</h1>
   <span class="status-badge status-{{ run.status }}">{{ run.status|replace("_", " ") }}</span>
@@ -9,13 +15,13 @@
 <p class="page-caption">{{ explainer('snapshot') }}</p>
 
 {{ title_block([
-  ("TOPIC", topic.name if topic is not none else "—"),
-  ("DATE", run.started_at|dt),
-  ("RUN ID", run.run_id),
-  ("SPEND BAND", topic.spend_band if topic is not none else "—"),
-  ("COST", run.cost_usd|usd(4)),
+  ("Topic", topic.name if topic is not none else "—"),
+  ("Date", run.started_at|dt),
+  ("Run id", run.run_id),
+  ("Spend band", topic.spend_band if topic is not none else "—"),
+  ("Cost", run.cost_usd|usd(4)),
 ]) }}
-<p class="cell-sub"><a href="/runs/{{ run.run_id }}">view run</a></p>
+<p class="cell-sub"><a href="/runs/{{ run.run_id }}">view run</a>{% if topic is not none %} — <a href="/topics/{{ topic.topic_id }}">view topic</a>{% endif %}</p>
 
 {% if coverage is not none %}
 <h2>Coverage</h2>
@@ -91,7 +97,7 @@
       {% endfor %}
     </select>
   </div>
-  <button class="btn btn-primary" type="submit">Apply filters</button>
+  <button class="btn btn-ghost" type="submit">Apply filters</button>
   {% if any_filter_active %}
   <a class="link-back" href="/runs/{{ run.run_id }}/snapshot">Clear filters</a>
   {% endif %}
@@ -114,9 +120,9 @@
   <tbody>
     {% for row in rows %}
     <tr>
-      <td>{{ row.venue }}</td>
+      <td class="cell-title">{{ row.venue }}</td>
       <td>{{ kind_label(row.venue_kind) if row.venue_kind else "not on the gold-list registry" }}</td>
-      <td>{% if row.collection_tier is defined and row.collection_tier %}{{ row.collection_tier }}{% else %}not recorded{% endif %}</td>
+      <td class="cell-sub">{% if row.collection_tier is defined and row.collection_tier %}{{ row.collection_tier }}{% else %}not recorded{% endif %}</td>
       <td>{{ row.captured_at|dt }}</td>
       <td>{{ row.theme if row.theme else "—" }}</td>
       <td>
@@ -124,7 +130,7 @@
         {% elif row.author_type is defined and row.author_type == "patient" %}<span class="muted">patient-generated — themes only, no excerpt kept</span>
         {% else %}<span class="muted">no excerpt kept</span>{% endif %}
       </td>
-      <td>{% if row.url %}<a href="{{ row.url }}">{{ row.collection_method if row.collection_method else "link" }}</a>{% else %}<span class="muted">no url</span>{% endif %}</td>
+      <td>{% if row.url %}<a href="{{ row.url }}">{{ row.collection_method if row.collection_method else "link" }} ↗</a>{% else %}<span class="muted">no url</span>{% endif %}</td>
     </tr>
     {% endfor %}
   </tbody>
@@ -139,4 +145,15 @@
   {% endif %}
 </p>
 {% endif %}
+
+<h2>Deliverables</h2>
+<p class="body-text field-note">What this topic can produce, from here on — the signal ledger and coverage are already real; the rest fills in as insight and report run.</p>
+{{ deliverable_groups(deliv_groups) }}
+
+<div class="form-actions form-actions-end">
+  <form method="post" action="/runs/{{ run.run_id }}/insight">
+    <button class="btn btn-primary" type="submit">Run insight on this snapshot</button>
+  </form>
+</div>
+</div>
 {% endblock %}

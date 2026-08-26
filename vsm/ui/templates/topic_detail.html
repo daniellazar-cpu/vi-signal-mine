@@ -1,0 +1,46 @@
+{% extends "_base.html" %}
+{% from "_macros.html" import deliverable_groups %}
+{% block title %}{{ topic.name }} — Vi Signal Mine{% endblock %}
+{% block content %}
+<div class="page page-wide">
+<p class="eyebrow">Topic</p>
+<section class="page-head">
+  <h1>{{ topic.name }}</h1>
+  <a class="btn btn-primary" href="/topics/{{ topic.topic_id }}/confirm">{% if has_run %}Run new snapshot{% else %}Run snapshot{% endif %}</a>
+</section>
+<p class="page-caption">
+  {% if topic.therapeutic_area %}{{ topic.therapeutic_area }} — {% endif %}{{ topic.spend_band }} band
+  · <a class="link-back" href="/topics/{{ topic.topic_id }}/edit">Edit topic</a>
+</p>
+
+<h2>Runs</h2>
+{% if history %}
+<ul class="run-history">
+  {% for run in history %}
+  <li>
+    <span class="run-mode">{{ run.mode }}</span>
+    <span class="status-badge status-{{ run.status }}">{{ run.status|replace("_", " ") }}</span>
+    <span class="run-date">{{ run.started_at|dt }}</span>
+    <span class="cell-sub">{{ run.cost_usd|usd(4) }}</span>
+    <span class="run-links">
+      <a href="/runs/{{ run.run_id }}">run</a>
+      {% if run.mode == "mine" %}<a href="/runs/{{ run.run_id }}/snapshot">snapshot</a>{% endif %}
+      {% if run.mode == "insight" %}<a href="/runs/{{ run.run_id }}/insight">insight</a>{% endif %}
+      {% if run.mode == "report" %}<a href="/runs/{{ run.run_id }}/report">report</a>{% endif %}
+    </span>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="empty-state">This topic has never been run — nothing has been collected yet.</p>
+{% endif %}
+
+<h2>What you get</h2>
+{% if has_run %}
+<p class="body-text field-note">Real where the latest complete run reached that stage, pending where it has not yet.</p>
+{% else %}
+<p class="body-text field-note">This topic has never been run, so nothing below is real yet — this is exactly what lands, in this shape, once a snapshot, insight and report complete. See it before you spend anything.</p>
+{% endif %}
+{{ deliverable_groups(groups) }}
+</div>
+{% endblock %}

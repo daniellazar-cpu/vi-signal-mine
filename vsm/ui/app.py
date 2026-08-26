@@ -39,6 +39,9 @@ from vsm.modes.report import run_report
 from vsm.platform import assert_serveable
 from vsm.topics.model import BANDS
 from vsm.ui.content import (
+    DELIVERABLE_GROUPS,
+    DELIVERABLES,
+    FIELD_GUIDE,
     FIRST_RUN_STEPS,
     GLOSSARY,
     MODES,
@@ -291,6 +294,143 @@ def _band_cards() -> list[dict[str, Any]]:
     return cards
 
 
+# --------------------------------------------------------------------- #
+# The deliverables surface — the moat, rendered.                        #
+# --------------------------------------------------------------------- #
+#
+# One shared shape feeds three places: the standalone /deliverables
+# catalog, the pre-run empty state (a topic never run, and confirm-spend),
+# and the real, produced-artifact cards on the run/insight/report screens.
+# Only `available`/`href`/`preview` change between them — same ten items,
+# same groups, same card. That sameness is the point: a user should
+# recognise the thing they previewed before spending money as the exact
+# thing that lands after.
+
+
+def _md_preview(text: str, limit: int = 220) -> str:
+    """A short, honest excerpt of a produced markdown artifact.
+
+    Skips headings and table rows — neither reads as prose — and stops on
+    the first real paragraph line, trimmed to a whole word. Not a general
+    Markdown summarizer: just enough to make a produced report feel real
+    on a card, without re-rendering the whole document there.
+    """
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("#", "|", "-")):
+            continue
+        cleaned = stripped.replace("**", "").replace("__", "")
+        if len(cleaned) > limit:
+            head = cleaned[:limit].rsplit(" ", 1)[0]
+            cleaned = (head or cleaned[:limit]) + "…"
+        return cleaned
+    return ""
+
+
+def _empty_deliverable_cards() -> list[dict[str, Any]]:
+    """Every deliverable, nothing filled in — the pre-run state."""
+    return [{**d, "available": False, "href": None, "preview": None} for d in DELIVERABLES]
+
+
+def _deliverable_cards(
+    run_store: Any, *, mine_run: Any = None, insight_run: Any = None, report_run: Any = None
+) -> list[dict[str, Any]]:
+    """Every deliverable, real where a producing run exists and has written it."""
+    run_by_group = {"data": mine_run, "analysis": insight_run, "report": report_run}
+    cards: list[dict[str, Any]] = []
+    for d in DELIVERABLES:
+        run = run_by_group.get(d["group"])
+        available, href, preview = False, None, None
+        if run is not None:
+            try:
+                content = run_store.read_artifact(run.run_id, d["file"])
+            except FileNotFoundError:
+                content = None
+            if content is not None:
+                available = True
+                href = f"/runs/{run.run_id}/artifact/{d['file']}"
+                if d["file"].endswith(".md") and isinstance(content, str):
+                    preview = _md_preview(content)
+        cards.append({**d, "available": available, "href": href, "preview": preview})
+    return cards
+
+
+def _deliverable_groups_ctx(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    # `cards`, never `items`: a plain dict's real `.items()` method wins over
+    # a same-named key under Jinja's attribute lookup (`g.items` resolves to
+    # the builtin before it falls back to `g["items"]`), so a key called
+    # "items" silently returns a bound method instead of the list.
+    return [
+        {"key": key, "label": label, "description": desc,
+         "cards": [c for c in cards if c["group"] == key]}
+        for key, label, desc in DELIVERABLE_GROUPS
+    ]
+
+
+def _flow_chain(run_store: Any, topic_id: str, run: Any) -> dict[str, str | None]:
+    """The mine/insight/report run ids of one flow, found from any run in it.
+
+    The store has no "children of this run" index — a run only records its
+    own parent — so the forward direction (mine -> insight -> report) is
+    found by scanning this topic's runs of the next mode for one whose
+    parent is the id we already have, taking the most recent if more than
+    one insight or report was ever generated from the same snapshot.
+    """
+
+    def child(mode: str, parent_id: str | None) -> Any | None:
+        if not parent_id:
+            return None
+        matches = [r for r in run_store.for_topic(topic_id, mode) if r.parent_run_id == parent_id]
+        return matches[-1] if matches else None
+
+    mine_run_id = insight_run_id = report_run_id = None
+    if run.mode == "mine":
+        mine_run_id = run.run_id
+        ins = child("insight", mine_run_id)
+        insight_run_id = ins.run_id if ins else None
+        rep = child("report", insight_run_id) if insight_run_id else None
+        report_run_id = rep.run_id if rep else None
+    elif run.mode == "insight":
+        insight_run_id = run.run_id
+        mine_run_id = run.parent_run_id
+        rep = child("report", insight_run_id)
+        report_run_id = rep.run_id if rep else None
+    else:  # report
+        report_run_id = run.run_id
+        insight_run_id = run.parent_run_id
+        if insight_run_id:
+            try:
+                mine_run_id = run_store.get(insight_run_id).parent_run_id
+            except NoSuchRun:
+                mine_run_id = None
+    return {"mine_run_id": mine_run_id, "insight_run_id": insight_run_id, "report_run_id": report_run_id}
+
+
+def _flow_runs(run_store: Any, run: Any) -> dict[str, Any]:
+    """`_flow_chain`'s ids, resolved to the `Run`s themselves (or `None`).
+
+    Fetches whichever of mine/insight/report this ``run`` is not — the run
+    passed in is reused rather than re-fetched, so a run mid-flight (no
+    finished_at yet) is never masked by a stale re-read.
+    """
+    flow = _flow_chain(run_store, run.topic_id, run)
+
+    def get(run_id: str | None) -> Any | None:
+        if not run_id:
+            return None
+        try:
+            return run_store.get(run_id)
+        except NoSuchRun:
+            return None
+
+    return {
+        "flow": flow,
+        "mine_run": run if run.mode == "mine" else get(flow["mine_run_id"]),
+        "insight_run": run if run.mode == "insight" else get(flow["insight_run_id"]),
+        "report_run": run if run.mode == "report" else get(flow["report_run_id"]),
+    }
+
+
 def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> FastAPI:
     if topic_store is None or run_store is None:
         from vsm.storage import open_stores
@@ -339,6 +479,23 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         return render(
             request, "how.html",
             what_it_is=WHAT_IT_IS, modes=MODES, tiers=TIERS, glossary=GLOSSARY,
+            active_nav="how",
+        )
+
+    # ------------------------------------------------------------- deliverables --
+
+    @app.get("/deliverables", response_class=HTMLResponse)
+    def deliverables_catalog(request: Request) -> HTMLResponse:
+        """"What you get" — the moat, on its own screen.
+
+        Every deliverable content.py knows about, grouped by who it is for,
+        with nothing filled in — this is not tied to any run, so there is
+        nothing to fill in. This is the page someone reads to decide whether
+        the tool is worth running at all.
+        """
+        groups = _deliverable_groups_ctx(_empty_deliverable_cards())
+        return render(
+            request, "deliverables.html", groups=groups, active_nav="deliverables",
         )
 
     # --------------------------------------------------------------- topics --
@@ -367,7 +524,10 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
     @app.get("/", response_class=HTMLResponse)
     def topics_index(request: Request) -> HTMLResponse:
         rows = [_topic_row(t) for t in topic_store.list()]
-        return render(request, "topics.html", rows=rows, first_run_steps=FIRST_RUN_STEPS)
+        return render(
+            request, "topics.html", rows=rows, first_run_steps=FIRST_RUN_STEPS,
+            active_nav="topics",
+        )
 
     _BLANK_TOPIC_VALUES = {
         "name": "", "therapeutic_area": "", "spend_band": "probe", "brand": "",
@@ -379,6 +539,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         return render(
             request, "topic_form.html", mode="create", topic=None,
             band_cards=_band_cards(), errors={}, values=dict(_BLANK_TOPIC_VALUES),
+            field_guide=FIELD_GUIDE,
         )
 
     @app.get("/topics/{topic_id}/edit", response_class=HTMLResponse)
@@ -400,14 +561,62 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         return render(
             request, "topic_form.html", mode="edit", topic=topic,
             band_cards=_band_cards(), errors={}, values=values,
+            field_guide=FIELD_GUIDE,
         )
 
-    def _validate_topic_form(name: str, therapeutic_area: str, spend_band: str) -> dict[str, str]:
+    @app.get("/topics/{topic_id}", response_class=HTMLResponse)
+    def topic_detail(request: Request, topic_id: str) -> HTMLResponse:
+        """A topic on its own: its run history, and — crucially — what it
+        will produce. On a topic that has never been run this is exactly
+        the pre-run empty state the owner asked for: the deliverables list,
+        nothing filled in, reachable one click from the topic itself."""
+        try:
+            topic = topic_store.get(topic_id)
+        except NoSuchTopic:
+            return error_page(request, 404, "Topic not found", f"No topic with id {topic_id!r}.")
+
+        all_runs = list(reversed(run_store.for_topic(topic_id)))
+        snapshots = run_store.snapshots(topic_id)
+        latest_mine = snapshots[-1] if snapshots else None
+
+        latest_insight = None
+        if latest_mine is not None:
+            candidates = [
+                r for r in run_store.for_topic(topic_id, "insight")
+                if r.parent_run_id == latest_mine.run_id and r.status == "complete"
+            ]
+            latest_insight = candidates[-1] if candidates else None
+
+        latest_report = None
+        if latest_insight is not None:
+            candidates = [
+                r for r in run_store.for_topic(topic_id, "report")
+                if r.parent_run_id == latest_insight.run_id and r.status == "complete"
+            ]
+            latest_report = candidates[-1] if candidates else None
+
+        if all_runs:
+            cards = _deliverable_cards(
+                run_store, mine_run=latest_mine, insight_run=latest_insight, report_run=latest_report,
+            )
+        else:
+            cards = _empty_deliverable_cards()
+
+        return render(
+            request, "topic_detail.html", topic=topic, history=all_runs,
+            has_run=bool(all_runs), groups=_deliverable_groups_ctx(cards),
+            latest_mine=latest_mine, latest_insight=latest_insight, latest_report=latest_report,
+        )
+
+    def _validate_topic_form(name: str, spend_band: str) -> dict[str, str]:
+        """Only the topic's name is required (see content.FIELD_GUIDE) —
+        every other field narrows or widens what the sweep finds, and a
+        user must be free to skip it rather than guess at a value. A blank
+        spend band cannot come from the form itself (each band card always
+        submits a value); it is checked here anyway for a direct POST."""
         errors: dict[str, str] = {}
         if not name.strip():
-            errors["name"] = "A topic needs a name."
-        if not therapeutic_area.strip():
-            errors["therapeutic_area"] = "A therapeutic area is required — it routes the venue registry."
+            errors["name"] = FIELD_GUIDE["name"]["help"]
         if spend_band not in BANDS:
             errors["spend_band"] = "Choose one of the three spend bands."
         return errors
@@ -424,9 +633,14 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         questions: str = Form(""),
         never_say: str = Form(""),
     ) -> Any:
-        errors = _validate_topic_form(name, therapeutic_area, spend_band)
+        # Only `name` is required (content.FIELD_GUIDE) — a blank spend band
+        # defaults to `probe`, the cheapest, rather than being rejected: a
+        # user who skipped every optional field still gets a topic they can
+        # run, not a form bounced back at them for a choice they didn't make.
+        chosen_band = spend_band or "probe"
+        errors = _validate_topic_form(name, chosen_band)
         values = {
-            "name": name, "therapeutic_area": therapeutic_area, "spend_band": spend_band,
+            "name": name, "therapeutic_area": therapeutic_area, "spend_band": chosen_band,
             "brand": brand, "molecule": molecule, "competitors": competitors,
             "questions": questions, "never_say": never_say,
         }
@@ -434,9 +648,10 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             return render(
                 request, "topic_form.html", status_code=422, mode="create", topic=None,
                 band_cards=_band_cards(), errors=errors, values=values,
+                field_guide=FIELD_GUIDE,
             )
         topic_store.create(
-            name=name.strip(), therapeutic_area=therapeutic_area.strip(), spend_band=spend_band,
+            name=name.strip(), therapeutic_area=therapeutic_area.strip(), spend_band=chosen_band,
             brand=(brand.strip() or None), molecule=(molecule.strip() or None),
             competitors=_split_lines(competitors), questions=_split_lines(questions),
             never_say=_split_lines(never_say),
@@ -460,9 +675,10 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             topic = topic_store.get(topic_id)
         except NoSuchTopic:
             return error_page(request, 404, "Topic not found", f"No topic with id {topic_id!r}.")
-        errors = _validate_topic_form(name, therapeutic_area, spend_band)
+        chosen_band = spend_band or topic.spend_band
+        errors = _validate_topic_form(name, chosen_band)
         values = {
-            "name": name, "therapeutic_area": therapeutic_area, "spend_band": spend_band,
+            "name": name, "therapeutic_area": therapeutic_area, "spend_band": chosen_band,
             "brand": brand, "molecule": molecule, "competitors": competitors,
             "questions": questions, "never_say": never_say,
         }
@@ -470,10 +686,11 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             return render(
                 request, "topic_form.html", status_code=422, mode="edit", topic=topic,
                 band_cards=_band_cards(), errors=errors, values=values,
+                field_guide=FIELD_GUIDE,
             )
         topic_store.update(
             topic_id,
-            name=name.strip(), therapeutic_area=therapeutic_area.strip(), spend_band=spend_band,
+            name=name.strip(), therapeutic_area=therapeutic_area.strip(), spend_band=chosen_band,
             brand=(brand.strip() or None), molecule=(molecule.strip() or None),
             competitors=_split_lines(competitors), questions=_split_lines(questions),
             never_say=_split_lines(never_say),
@@ -497,6 +714,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         return render(
             request, "confirm.html", topic=topic, band=BANDS[chosen], estimate=estimate,
             cap_usd=settings.run_cost_cap_usd, changes_band=(chosen != topic.spend_band),
+            groups=_deliverable_groups_ctx(_empty_deliverable_cards()),
         )
 
     @app.post("/topics/{topic_id}/mine")
@@ -546,10 +764,19 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
                 cost_detail = None
         next_snapshot_run_id = run.run_id if run.mode == "mine" else None
         next_insight_run_id = run.run_id if run.mode == "insight" else None
+        fr = _flow_runs(run_store, run)
+        deliv_groups = _deliverable_groups_ctx(
+            _deliverable_cards(
+                run_store, mine_run=fr["mine_run"], insight_run=fr["insight_run"],
+                report_run=fr["report_run"],
+            )
+        )
+        current_step = {"mine": "snapshot", "insight": "insight", "report": "report"}[run.mode]
         return render(
             request, "run.html", run=run, topic=topic, stages=stages,
             cost_detail=cost_detail, next_snapshot_run_id=next_snapshot_run_id,
             next_insight_run_id=next_insight_run_id,
+            flow=fr["flow"], current_step=current_step, deliv_groups=deliv_groups,
         )
 
     @app.get("/runs/{run_id}/events")
@@ -617,12 +844,20 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             for label, c in sorted(mix_counts.items(), key=lambda kv: -kv[1])
         ]
 
+        fr = _flow_runs(run_store, run)
+        deliv_groups = _deliverable_groups_ctx(
+            _deliverable_cards(
+                run_store, mine_run=fr["mine_run"], insight_run=fr["insight_run"],
+                report_run=fr["report_run"],
+            )
+        )
         return render(
             request, "snapshot.html", run=run, topic=topic, rows=filtered,
             total_rows=len(enriched), coverage=coverage, mix=mix,
             filters={"venue": venue, "kind": kind, "tier": tier, "date": date},
             options={"venues": venues, "kinds": kinds, "tiers": tiers, "dates": dates},
             any_filter_active=bool(venue or kind or tier or date),
+            flow=fr["flow"], deliv_groups=deliv_groups,
         )
 
     @app.post("/runs/{run_id}/insight")
@@ -740,6 +975,13 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             for e in entities.get("entities", [])
         ]
 
+        fr = _flow_runs(run_store, run)
+        deliv_groups = _deliverable_groups_ctx(
+            _deliverable_cards(
+                run_store, mine_run=fr["mine_run"], insight_run=fr["insight_run"],
+                report_run=fr["report_run"],
+            )
+        )
         return render(
             request, "insight.html", run=run, topic=topic, mine_run_id=mine_run_id,
             snapshot_rail=snapshot_rail, plot_guide=PLOT_GUIDE,
@@ -748,6 +990,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             anomaly_rows=anomaly_rows, theme_rows=theme_rows,
             stance_rows=stance_rows, entity_rows=entity_rows,
             unmapped_count=len(entities.get("unmapped_mentions", [])),
+            flow=fr["flow"], deliv_groups=deliv_groups,
         )
 
     @app.post("/runs/{run_id}/report")
@@ -826,6 +1069,13 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
                 "signal_ids": sids,
             })
 
+        fr = _flow_runs(run_store, run)
+        deliv_groups = _deliverable_groups_ctx(
+            _deliverable_cards(
+                run_store, mine_run=fr["mine_run"], insight_run=fr["insight_run"],
+                report_run=fr["report_run"],
+            )
+        )
         return render(
             request, "report.html", run=run, topic=topic,
             insight_run_id=insight_run_id, mine_run_id=mine_run_id,
@@ -834,6 +1084,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             methodology_html=_markdown_lite_to_html(methodology_text) if methodology_text else None,
             considering_html=_markdown_lite_to_html(considering_text) if considering_text else None,
             has_pulse=pulse_text is not None,
+            flow=fr["flow"], deliv_groups=deliv_groups,
         )
 
     @app.get("/runs/{run_id}/artifact/{name:path}")

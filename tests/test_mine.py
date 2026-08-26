@@ -4,7 +4,7 @@ import pytest
 
 from vsm.errors import GuardViolation
 from vsm.guards.cost import estimate_run_usd
-from vsm.modes.mine import run_mine
+from vsm.modes.mine import build_clusters, run_mine
 from vsm.runs.store import RunStore
 from vsm.topics.store import TopicStore
 
@@ -228,3 +228,30 @@ def test_the_probe_band_still_runs_on_vercel(stores, monkeypatch):
     topic = _topic(ts, band="probe")
     run = run_mine(topic, rs, miner=_FakeMiner(), cluster_count=1)
     assert run.status == "complete"
+
+
+# --- Only the topic name is required (content.FIELD_GUIDE) ------------------
+
+
+def test_build_clusters_falls_back_to_the_topic_name_with_nothing_else_set(stores):
+    """A molecule is not always relevant, and neither is a brand, a
+    competitor list, or an area — the topic form only requires a name, so
+    the offline cluster fallback must produce something usable from the
+    name alone rather than an empty terms list."""
+    ts, _rs = stores
+    topic = ts.create(name="Bare topic", therapeutic_area="", spend_band="probe")
+    clusters = build_clusters(topic, client=None)
+    assert len(clusters) == 1
+    assert clusters[0]["terms"] == ["Bare topic"]
+    assert clusters[0]["label"] == "Bare topic"
+
+
+def test_run_mine_completes_from_a_topic_with_only_a_name(stores):
+    """The full MINE pipeline — lexicon, sweep, coverage, cost — must not
+    break on a topic that skipped every optional field."""
+    ts, rs = stores
+    topic = ts.create(name="Bare topic", therapeutic_area="", spend_band="probe")
+    run = run_mine(topic, rs, miner=_FakeMiner(), cluster_count=1)
+    assert run.status == "complete"
+    signals = rs.read_artifact(run.run_id, "signals.json")
+    assert len(signals) == 2

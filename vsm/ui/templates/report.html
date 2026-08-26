@@ -1,28 +1,34 @@
 {% extends "_base.html" %}
-{% from "_macros.html" import title_block %}
+{% from "_macros.html" import title_block, flow_rail, deliverable_groups %}
 {% block title %}Report — {% if topic is not none %}{{ topic.name }} — {% endif %}Vi Signal Mine{% endblock %}
+
+{% block top_rail %}
+{{ flow_rail(topic, flow, "report") }}
+{% endblock %}
+
 {% block content %}
+<div class="page">
 <section class="page-head">
   <h1>Report preview{% if topic is not none %} — {{ topic.name }}{% endif %}</h1>
 </section>
 <p class="page-caption">{{ explainer('report') }}</p>
 
 {{ title_block([
-  ("TOPIC", topic.name if topic is not none else "—"),
-  ("DATE", run.started_at|dt),
-  ("RUN ID", run.run_id),
-  ("SPEND BAND", topic.spend_band if topic is not none else "—"),
-  ("COST", run.cost_usd|usd(4)),
+  ("Topic", topic.name if topic is not none else "—"),
+  ("Date", run.started_at|dt),
+  ("Run id", run.run_id),
+  ("Spend band", topic.spend_band if topic is not none else "—"),
+  ("Cost", run.cost_usd|usd(4)),
 ]) }}
 <p class="cell-sub">
-  {% if mine_run_id %}<a href="/runs/{{ mine_run_id }}/snapshot">snapshot</a> — {% endif %}{% if insight_run_id %}<a href="/runs/{{ insight_run_id }}/insight">insight</a>{% endif %}
+  {% if mine_run_id %}<a href="/runs/{{ mine_run_id }}/snapshot">snapshot</a> — {% endif %}{% if insight_run_id %}<a href="/runs/{{ insight_run_id }}/insight">insight</a>{% endif %}{% if topic is not none %} — <a href="/topics/{{ topic.topic_id }}">topic</a>{% endif %}
 </p>
 
 <h2>Themes at a glance</h2>
 {% if theme_vms %}
 <div class="table-scroll">
 <table class="data-table">
-  <thead><tr><th scope="col">Theme</th><th scope="col">Volume</th><th scope="col">Tier</th><th scope="col">Independent sources</th><th scope="col">Citations</th></tr></thead>
+  <thead><tr><th scope="col">Theme</th><th scope="col" class="num">Volume</th><th scope="col">Tier</th><th scope="col" class="num">Independent sources</th><th scope="col">Citations</th></tr></thead>
   <tbody>
     {% for t in theme_vms %}
     <tr>
@@ -86,11 +92,8 @@
 <p class="empty-state">No citations recorded on this report.</p>
 {% endif %}
 
-<h2>Export</h2>
-<ul class="export-list">
-  <li><a href="/runs/{{ run.run_id }}/artifact/pulse_report.md">pulse_report.md</a></li>
-  <li><a href="/runs/{{ run.run_id }}/artifact/provenance_appendix.md">provenance_appendix.md</a></li>
-  <li><a href="/runs/{{ run.run_id }}/artifact/methodology.md">methodology.md</a></li>
-  <li><a href="/runs/{{ run.run_id }}/artifact/worth_considering.md">worth_considering.md</a></li>
-</ul>
+<h2>Deliverables</h2>
+<p class="body-text field-note">The four client-ready files this run produced — each is exactly what downloads below.</p>
+{{ deliverable_groups(deliv_groups) }}
+</div>
 {% endblock %}
