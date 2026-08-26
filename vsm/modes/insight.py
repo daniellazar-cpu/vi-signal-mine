@@ -166,8 +166,21 @@ def run_insight(
     client: Any | None = None,
     resolver: Any | None = None,
     resume: bool = True,
+    run_id: str | None = None,
+    started_at: str | None = None,
+    finished_at: str | None = None,
 ) -> Run:
     resolver = resolver or VenueResolver()
+    # See vsm.modes.mine.run_mine's identical comment: these three overrides
+    # exist only for vsm.demo.seed_demo_topic, are `None` for every real
+    # caller, and are spread in as an empty dict in that case so this still
+    # works against a backend (PostgresRunStore) whose start()/finish() have
+    # no such parameters at all.
+    start_overrides = {
+        k: v for k, v in {"run_id": run_id, "started_at": started_at}.items()
+        if v is not None
+    }
+    finish_overrides = {"finished_at": finished_at} if finished_at is not None else {}
     # Snapshot the client's cumulative total before any pass runs, so the cost
     # recorded against this run is its own and not the client's whole history.
     # A resumed run only pays for the passes it actually recomputes: spend
@@ -175,7 +188,7 @@ def run_insight(
     # this call also produced the artifact set.
     spend_before = client.spend.usd if client is not None else 0.0
     run = _existing_insight_run(store, topic.topic_id, snapshot_run_id) or store.start(
-        topic.topic_id, "insight", parent_run_id=snapshot_run_id
+        topic.topic_id, "insight", parent_run_id=snapshot_run_id, **start_overrides
     )
     signals = store.read_artifact(snapshot_run_id, "signals.json")
     # The safety rail. Computed once, from the snapshot this INSIGHT run
@@ -268,4 +281,4 @@ def run_insight(
     # genuinely spent nothing, and this is the number an operator trusts to
     # know what they spent. A rename must raise, not round to zero.
     spend = round(client.spend.usd - spend_before, 6) if client is not None else 0.0
-    return store.finish(run.run_id, "complete", cost_usd=spend)
+    return store.finish(run.run_id, "complete", cost_usd=spend, **finish_overrides)

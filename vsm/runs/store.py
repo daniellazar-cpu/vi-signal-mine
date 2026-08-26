@@ -76,15 +76,33 @@ class RunStore:
         data.pop("seq", None)
         return Run(**data)
 
-    def start(self, topic_id: str, mode: str, parent_run_id: str | None = None) -> Run:
+    def start(
+        self,
+        topic_id: str,
+        mode: str,
+        parent_run_id: str | None = None,
+        *,
+        run_id: str | None = None,
+        started_at: str | None = None,
+    ) -> Run:
+        """``run_id``/``started_at`` are overrides, not the normal path: every
+        real caller leaves them ``None`` and gets a random id plus the actual
+        wall clock, exactly as before. The only caller that ever supplies
+        them is ``vsm.demo.seed_demo_topic``, which needs the seeded
+        worked-example topic to land on the *same* run id and the same
+        ``snapshot_at`` (derived from this timestamp — see ``run_mine``) on
+        every cold-started serverless container, not a fresh ``uuid4`` and
+        clock reading per container. See that module's docstring for why a
+        link one container mints must resolve on every other one.
+        """
         if mode not in RUN_MODES:
             raise KeyError(f"unknown run mode: {mode!r}")
         run = Run(
-            run_id=f"{mode[:3]}-{uuid.uuid4().hex[:10]}",
+            run_id=run_id or f"{mode[:3]}-{uuid.uuid4().hex[:10]}",
             topic_id=topic_id,
             mode=mode,  # type: ignore[arg-type]
             status="running",
-            started_at=_now(),
+            started_at=started_at or _now(),
             parent_run_id=parent_run_id,
         )
         with self._conn() as c:
@@ -99,14 +117,25 @@ class RunStore:
         self.artifacts_dir(run.run_id).mkdir(parents=True, exist_ok=True)
         return run
 
-    def finish(self, run_id: str, status: str, cost_usd: float, note: str = "") -> Run:
+    def finish(
+        self,
+        run_id: str,
+        status: str,
+        cost_usd: float,
+        note: str = "",
+        *,
+        finished_at: str | None = None,
+    ) -> Run:
+        """``finished_at`` is the same kind of override as ``start()``'s
+        ``run_id``/``started_at`` — left ``None`` by every real caller, set
+        only by the deterministic demo seed."""
         if status not in RUN_STATUSES:
             raise KeyError(f"unknown run status: {status!r}")
         with self._conn() as c:
             c.execute(
                 "UPDATE runs SET status=?, finished_at=?, cost_usd=?, note=? "
                 "WHERE run_id=?",
-                (status, _now(), float(cost_usd), note, run_id),
+                (status, finished_at or _now(), float(cost_usd), note, run_id),
             )
             c.commit()
         return self.get(run_id)

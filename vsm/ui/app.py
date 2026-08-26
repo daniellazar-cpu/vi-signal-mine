@@ -1051,6 +1051,21 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
                 request, 422, "A guard blocked the report",
                 f"{exc} — nothing was written; a blocked report leaves no partial artifacts.",
             )
+        except FileNotFoundError:
+            # The insight run's own artifacts exist (this route only reached
+            # `run_report` because `run_id` resolved), but `run_report` also
+            # re-reads the *snapshot's* `signals.json` (vsm/modes/report.py)
+            # to rebuild the citation ledger — and on ephemeral storage
+            # (vsm/storage.py) that file can simply be gone by the time this
+            # POST arrives. Caught here, the same way `insight_create` above
+            # already catches the identical failure one step earlier in the
+            # chain, rather than surfacing as an unhandled 500.
+            return error_page(
+                request, 400, "No snapshot to report on",
+                f"The snapshot run_report {run_id!r} was going to report on has "
+                "lost its signals.json on disk — the report cannot be rebuilt "
+                "from it. Mine a fresh snapshot and generate insight again.",
+            )
         return RedirectResponse(url=f"/runs/{rep.run_id}/report", status_code=303)
 
     @app.get("/runs/{run_id}/report", response_class=HTMLResponse)
@@ -1097,8 +1112,23 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         ]
         cited_ids = {c["signal_id"] for c in citations}
 
-        raw_themes = run_store.read_artifact(insight_run_id, "themes.json") if insight_run_id else []
-        raw_findings = run_store.read_artifact(insight_run_id, "findings.json") if insight_run_id else []
+        def _read_json(run_id_for_read: str | None, name: str) -> Any:
+            # A REPORT run's own four markdown files can be intact while the
+            # INSIGHT run it was built from has since lost the artifacts this
+            # view re-reads to build the citations table — the same
+            # ephemeral-storage failure mode `_read_md` above already guards
+            # against for this run's own files. Unguarded, this used to raise
+            # `FileNotFoundError` straight through to a 500 on an otherwise
+            # perfectly viewable report.
+            if not run_id_for_read:
+                return []
+            try:
+                return run_store.read_artifact(run_id_for_read, name)
+            except FileNotFoundError:
+                return []
+
+        raw_themes = _read_json(insight_run_id, "themes.json")
+        raw_findings = _read_json(insight_run_id, "findings.json")
         theme_vms = []
         for t, f in zip(raw_themes, raw_findings):
             sids = [sid for sid in f.get("signal_ids", []) if sid in cited_ids]

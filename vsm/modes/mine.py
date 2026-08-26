@@ -92,7 +92,24 @@ def run_mine(
     miner: Any | None = None,
     cluster_count: int | None = None,
     cap_usd: float | None = None,
+    run_id: str | None = None,
+    started_at: str | None = None,
+    finished_at: str | None = None,
 ) -> Run:
+    # `run_id`/`started_at`/`finished_at`: overrides for the deterministic
+    # demo seed only (vsm.demo.seed_demo_topic) — every real caller leaves
+    # these `None` and gets `store.start()`'s normal random id plus the
+    # actual wall clock. Built as a plain dict, spread into `store.start()`,
+    # rather than passed as keywords directly: an empty dict makes the call
+    # below identical to `store.start(topic.topic_id, "mine")`, which is what
+    # keeps this working against `PostgresRunStore` (vsm/backends/postgres.py)
+    # too — that backend's `start()` has no `run_id`/`started_at` parameters
+    # at all, so passing them as literal `None` keywords would raise
+    # `TypeError` for every real, database-backed run, not just the demo one.
+    start_overrides = {
+        k: v for k, v in {"run_id": run_id, "started_at": started_at}.items()
+        if v is not None
+    }
     # Spec D14, checked before anything else in this function — before the
     # estimate, before the lexicon call, before a run row even exists.
     # Refusing here means a disallowed band on Vercel spends nothing and
@@ -101,7 +118,7 @@ def run_mine(
     assert_band_allowed(topic.spend_band)
 
     band = topic.band()
-    run = store.start(topic.topic_id, "mine")
+    run = store.start(topic.topic_id, "mine", **start_overrides)
     cap = CostCap(cap_usd if cap_usd is not None else 5.0)
 
     # Read the model's cumulative spend directly as `client.spend.usd` — never
@@ -285,6 +302,7 @@ def run_mine(
         {"clusters": clusters, "plan": list(getattr(outcome, "plan", [])) if outcome else []},
     )
 
+    finish_overrides = {"finished_at": finished_at} if finished_at is not None else {}
     return store.finish(
         run.run_id,
         "stopped_on_budget" if stopped else "complete",
@@ -293,4 +311,5 @@ def run_mine(
         # already been spent regardless of what the cap decided to accept.
         cost_usd=round(lexicon_usd + actual_usd, 6),
         note=reason,
+        **finish_overrides,
     )

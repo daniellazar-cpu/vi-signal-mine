@@ -49,8 +49,10 @@ the test suite builds its own stores directly and never imports
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 
 from vsm.backends.dburl import resolve_db_url
@@ -79,6 +81,71 @@ _QUESTIONS = (
     "What are patients saying about side effects and access?",
 )
 
+# ---------------------------------------------------------------------------
+# Deterministic identity for the seeded topic and its four runs.
+#
+# **The bug this fixes.** ``TopicStore.create``/``RunStore.start`` normally
+# mint ids from ``uuid.uuid4()`` and timestamps from the real wall clock —
+# fine for a real topic, but this function runs once *per cold container*.
+# On a platform with no shared database (the entire reason this module
+# exists — see the module docstring), every container that starts cold calls
+# this with an empty store and seeds its *own* copy of the worked example,
+# with its *own* random ids. A link minted while container A answered one
+# request 404s the instant it is clicked and the request lands on container
+# B, whose seed used different ids — "sometimes it works, sometimes it
+# doesn't", entirely depending on which container happens to answer which
+# request. There is no way to coordinate containers that share no storage,
+# so the only fix is to make every container derive the *same* ids and
+# timestamps from the *same* fixed inputs, with no ``uuid4()`` and no clock
+# read anywhere in this path — a link minted anywhere resolves everywhere.
+#
+# **Scope, precisely.** Nothing here touches ``TopicStore``/``RunStore``'s
+# normal id generation — a real topic or run a visitor creates still gets a
+# fresh ``uuid4()`` id from the unmodified default path (``run_id=None`` is
+# still what every other caller passes), so two genuine runs can never
+# collide with each other or with the seed. Only this module ever passes the
+# ``run_id``/``started_at``/``finished_at`` overrides that ``run_mine``,
+# ``run_insight`` and ``run_report`` accept for exactly this purpose.
+_ID_SEED = "vi-signal-mine/demo-topic/v1"
+
+#: Anchors every seeded timestamp. Deliberately close to (but distinct from)
+#: ``vsm.mining.fake.DeterministicMiner``'s own fixed clock
+#: (2026-07-31) — both exist for the same reason: a re-run must be
+#: byte-identical, so neither may ever read ``datetime.now()``.
+_BASE_CLOCK = datetime(2026, 7, 31, tzinfo=timezone.utc)
+
+
+def _stable_hex(*parts: object) -> str:
+    """A short, deterministic hex id — same shape as ``uuid4().hex[:10]``
+    (10 lowercase hex characters), but a pure function of ``_ID_SEED`` plus
+    ``parts`` rather than of the process's random source. Two different
+    ``parts`` (e.g. the mine-1 vs. mine-2 run) must never collide, which is
+    why every id below passes a distinct discriminator through this."""
+    digest = hashlib.sha256(
+        "|".join((_ID_SEED, *(str(p) for p in parts))).encode("utf-8")
+    ).hexdigest()
+    return digest[:10]
+
+
+def _stable_topic_id() -> str:
+    return f"top-{_stable_hex('topic')}"
+
+
+def _stable_run_id(mode: str, ordinal: int) -> str:
+    # `mode[:3]` matches RunStore.start's own real-id format exactly
+    # ("min-", "ins-", "rep-") so a seeded run id is indistinguishable in
+    # shape from a genuine one.
+    return f"{mode[:3]}-{_stable_hex('run', mode, ordinal)}"
+
+
+def _stable_ts(offset_seconds: int) -> str:
+    """A fixed point in time, ``offset_seconds`` after ``_BASE_CLOCK`` — never
+    ``datetime.now()``. The offsets below are spaced out and strictly
+    increasing in call order purely so a human reading two artifacts'
+    timestamps sees a sensible before/after story; nothing downstream
+    depends on the actual gaps."""
+    return (_BASE_CLOCK + timedelta(seconds=offset_seconds)).isoformat()
+
 
 def seed_demo_topic(
     topic_store: Any, run_store: Any, *, env: Mapping[str, str] | None = None
@@ -98,6 +165,12 @@ def seed_demo_topic(
     offline = Settings(offline=True)
 
     topic = topic_store.create(
+        # Deterministic, not `uuid.uuid4()`: see the module-level comment
+        # above `_ID_SEED` for why every id and timestamp in this function
+        # must be a pure function of a fixed seed rather than of this
+        # process's random source or its wall clock.
+        topic_id=_stable_topic_id(),
+        created_at=_stable_ts(0),
         name=_TOPIC_NAME,
         therapeutic_area=_THERAPEUTIC_AREA,
         # "probe" is the only band Vercel's own guard (vsm.platform.assert_band_allowed)
@@ -121,17 +194,40 @@ def seed_demo_topic(
     # configuration already proven to produce a measured, non-"NE" dual-lens
     # divergence for the forest plot (see
     # tests/test_synthetic.py::test_produces_a_measurable_dual_lens_divergence).
+    #
+    # `run_id`/`started_at`/`finished_at` are the same kind of override as
+    # `topic_id`/`created_at` above. `started_at` matters beyond the run row
+    # itself: `run_mine` stamps it onto every signal row as `snapshot_at`
+    # (vsm/modes/mine.py), so leaving it to the real clock would make
+    # `signals.json` itself come out different bytes on every container —
+    # the artifact, not just the link to it.
     first = run_mine(
         topic, run_store, client=None,
         miner=get_miner(offline, band=BANDS["probe"]),
+        run_id=_stable_run_id("mine", 1),
+        started_at=_stable_ts(10),
+        finished_at=_stable_ts(11),
     )
     second = run_mine(
         topic, run_store, client=None,
         miner=get_miner(offline, band=BANDS["standard"]),
+        run_id=_stable_run_id("mine", 2),
+        started_at=_stable_ts(20),
+        finished_at=_stable_ts(21),
     )
 
-    insight = run_insight(topic, second.run_id, run_store, client=None)
-    run_report(topic, insight.run_id, run_store, client=None)
+    insight = run_insight(
+        topic, second.run_id, run_store, client=None,
+        run_id=_stable_run_id("insight", 1),
+        started_at=_stable_ts(30),
+        finished_at=_stable_ts(31),
+    )
+    run_report(
+        topic, insight.run_id, run_store, client=None,
+        run_id=_stable_run_id("report", 1),
+        started_at=_stable_ts(40),
+        finished_at=_stable_ts(41),
+    )
 
     _log.info(
         "seeded a demonstration topic (%s) on a cold, empty store — two "

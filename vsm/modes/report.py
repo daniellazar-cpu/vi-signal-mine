@@ -120,7 +120,20 @@ def run_report(
     store: RunStore,
     *,
     client: Any | None = None,
+    run_id: str | None = None,
+    started_at: str | None = None,
+    finished_at: str | None = None,
 ) -> Run:
+    # See vsm.modes.mine.run_mine's identical comment: these overrides exist
+    # only for vsm.demo.seed_demo_topic, are `None` for every real caller, and
+    # are spread in as an empty dict in that case so this still works against
+    # a backend (PostgresRunStore) whose start()/finish() take no such
+    # parameters at all.
+    start_overrides = {
+        k: v for k, v in {"run_id": run_id, "started_at": started_at}.items()
+        if v is not None
+    }
+    finish_overrides = {"finished_at": finished_at} if finished_at is not None else {}
     insight_run = store.get(insight_run_id)
     mine_run_id = insight_run.parent_run_id
     if not mine_run_id:
@@ -459,13 +472,17 @@ def run_report(
     # -------------------------------------------------- nothing written yet
     # Every guard above has already passed by this point, or this function
     # has already raised. Only now does a run row and any artifact exist.
-    run = store.start(topic.topic_id, "report", parent_run_id=insight_run_id)
+    run = store.start(
+        topic.topic_id, "report", parent_run_id=insight_run_id, **start_overrides
+    )
     store.write_artifact(run.run_id, "pulse_report.md", pulse_text)
     store.write_artifact(run.run_id, "provenance_appendix.md", appendix_text)
     store.write_artifact(run.run_id, "methodology.md", methodology_text)
     store.write_artifact(run.run_id, "worth_considering.md", considering_text)
 
-    return store.finish(run.run_id, "complete", cost_usd=model_cost_usd)
+    return store.finish(
+        run.run_id, "complete", cost_usd=model_cost_usd, **finish_overrides
+    )
 
 
 def _report_user_prompt(topic: Topic, paired: Sequence[tuple[Mapping[str, Any], Finding]]) -> str:

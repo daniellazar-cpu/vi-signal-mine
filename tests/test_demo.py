@@ -147,3 +147,99 @@ def test_the_seeded_topics_own_spend_band_is_probe(tmp_path):
     ts, rs = _stores(tmp_path)
     seed_demo_topic(ts, rs, env={})
     assert ts.list()[0].spend_band == "probe"
+
+
+def test_seeding_is_deterministic_across_two_independent_cold_starts(tmp_path):
+    """The actual fix for "sometimes it works, sometimes it's a dead end":
+    on a platform with no shared database, every serverless container that
+    starts cold seeds its own copy of this worked example into storage no
+    other container can see. If seeding drew ids from ``uuid4()`` or
+    timestamps from the real clock (as it used to), a link minted by
+    container A would name an id container B never produced — "No run with
+    id ..." on whichever container happens to answer the next click.
+
+    Proven here by seeding into two *entirely separate* store directories
+    (nothing shared, no coordination possible — the same relationship two
+    real serverless containers have to each other) and asserting the topic
+    id, every run id, every timestamp and every artifact's exact bytes come
+    out identical. Before the fix this failed on every single run — two
+    calls to ``seed_demo_topic`` never produced the same topic id twice, let
+    alone the same run ids or artifact bytes.
+    """
+    ts_a, rs_a = _stores(tmp_path / "container-a")
+    ts_b, rs_b = _stores(tmp_path / "container-b")
+    seed_demo_topic(ts_a, rs_a, env={})
+    seed_demo_topic(ts_b, rs_b, env={})
+
+    topic_a, topic_b = ts_a.list()[0], ts_b.list()[0]
+    assert topic_a.topic_id == topic_b.topic_id
+    assert topic_a.created_at == topic_b.created_at
+
+    def run_ids(rs, topic_id):
+        return {
+            mode: [r.run_id for r in rs.for_topic(topic_id, mode)]
+            for mode in ("mine", "insight", "report")
+        }
+
+    ids_a, ids_b = run_ids(rs_a, topic_a.topic_id), run_ids(rs_b, topic_b.topic_id)
+    assert ids_a == ids_b
+    # A test that only checked equality across the two seeds could pass
+    # vacuously if a bug made every run id collapse to the same constant —
+    # that would be deterministic too, just wrong. The two MINE runs within
+    # *one* seed must still be two distinct runs.
+    assert ids_a["mine"][0] != ids_a["mine"][1]
+
+    mine_a, mine_b = rs_a.snapshots(topic_a.topic_id), rs_b.snapshots(topic_b.topic_id)
+    mine_artifacts = ("signals.json", "provenance.json", "coverage.json", "cost.json", "plan.json")
+    for run_a, run_b in zip(mine_a, mine_b):
+        assert run_a.run_id == run_b.run_id
+        assert run_a.started_at == run_b.started_at
+        assert run_a.finished_at == run_b.finished_at
+        for name in mine_artifacts:
+            assert rs_a.read_artifact(run_a.run_id, name) == rs_b.read_artifact(run_b.run_id, name), name
+
+    insight_a = rs_a.for_topic(topic_a.topic_id, "insight")[0]
+    insight_b = rs_b.for_topic(topic_b.topic_id, "insight")[0]
+    assert insight_a.started_at == insight_b.started_at
+    assert insight_a.finished_at == insight_b.finished_at
+    insight_artifacts = (
+        "entities.json", "themes.json", "stance.json", "duallens.json",
+        "momentum.json", "anomaly.json", "findings.json",
+    )
+    for name in insight_artifacts:
+        assert rs_a.read_artifact(insight_a.run_id, name) == rs_b.read_artifact(insight_b.run_id, name), name
+
+    report_a = rs_a.for_topic(topic_a.topic_id, "report")[0]
+    report_b = rs_b.for_topic(topic_b.topic_id, "report")[0]
+    assert report_a.started_at == report_b.started_at
+    assert report_a.finished_at == report_b.finished_at
+    report_artifacts = (
+        "pulse_report.md", "provenance_appendix.md", "methodology.md", "worth_considering.md",
+    )
+    for name in report_artifacts:
+        assert rs_a.read_artifact(report_a.run_id, name) == rs_b.read_artifact(report_b.run_id, name), name
+
+
+def test_seeding_still_gives_real_topics_and_runs_random_ids(tmp_path):
+    """The guard on the other side of the fix: only the demo seed's own
+    topic and runs may be deterministic. A topic — and its own runs — a real
+    visitor creates afterwards must still get genuinely random ids each
+    time, proven by creating the same real topic twice and getting two
+    different ids both times: the override parameters ``run_mine`` /
+    ``run_insight`` / ``run_report`` gained for the seed default to ``None``
+    and must never leak into an ordinary call.
+    """
+    ts, rs = _stores(tmp_path)
+    seed_demo_topic(ts, rs, env={})  # occupies the store, exactly as production does
+
+    real_1 = ts.create(name="Real topic", therapeutic_area="gi", spend_band="probe")
+    real_2 = ts.create(name="Real topic", therapeutic_area="gi", spend_band="probe")
+    assert real_1.topic_id != real_2.topic_id
+
+    from vsm.demo import _stable_topic_id
+    assert real_1.topic_id != _stable_topic_id()
+    assert real_2.topic_id != _stable_topic_id()
+
+    run_1 = rs.start(real_1.topic_id, "mine")
+    run_2 = rs.start(real_1.topic_id, "mine")
+    assert run_1.run_id != run_2.run_id
