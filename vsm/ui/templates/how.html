@@ -1,0 +1,42 @@
+{% extends "_base.html" %}
+{% block title %}How this works — Vi Signal Mine{% endblock %}
+{% block content %}
+<section class="page-head">
+  <h1>How this works</h1>
+</section>
+<p class="page-caption">{{ explainer('how') }}</p>
+
+<p class="body-text">{{ what_it_is }}</p>
+
+<h2>The three passes</h2>
+<div class="mode-cards">
+  {% for m in modes %}
+  <article class="mode-card">
+    <h3>{{ m.name }}</h3>
+    <p class="mode-one-liner">{{ m.one_liner }}</p>
+    <dl class="mode-meta">
+      <div><dt>Produces</dt><dd>{{ m.produces }}</dd></div>
+      <div><dt>Cost</dt><dd>{{ m.cost }}</dd></div>
+    </dl>
+    <details>
+      <summary>More detail</summary>
+      <p>{{ m.detail }}</p>
+    </details>
+  </article>
+  {% endfor %}
+</div>
+
+<h2>Confidence tiers</h2>
+<dl class="key-list">
+  {% for name, desc in tiers %}
+  <div><dt>{{ name|capitalize }}</dt><dd>{{ desc }}</dd></div>
+  {% endfor %}
+</dl>
+
+<h2>Glossary</h2>
+<dl class="key-list">
+  {% for term, desc in glossary %}
+  <div><dt>{{ term }}</dt><dd>{{ desc }}</dd></div>
+  {% endfor %}
+</dl>
+{% endblock %}

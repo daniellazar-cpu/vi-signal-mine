@@ -1,21 +1,21 @@
 {% extends "_base.html" %}
+{% from "_macros.html" import title_block %}
 {% block title %}{{ run.mode|capitalize }} run — Vi Signal Mine{% endblock %}
 {% block content %}
 <section class="page-head">
   <h1>{{ run.mode|capitalize }} run</h1>
   <span class="status-badge status-{{ run.status }}">{{ run.status|replace("_", " ") }}</span>
 </section>
+<p class="page-caption">{{ explainer('run') }}</p>
 
-{% if topic is not none %}
-<p class="cell-sub"><a href="/">{{ topic.name }}</a> — {{ topic.therapeutic_area }}</p>
-{% endif %}
-
-<dl class="meta-grid">
-  <div><dt>Run id</dt><dd>{{ run.run_id }}</dd></div>
-  <div><dt>Started</dt><dd>{{ run.started_at|dt }}</dd></div>
-  <div><dt>Finished</dt><dd>{% if run.finished_at %}{{ run.finished_at|dt }}{% else %}not yet{% endif %}</dd></div>
-  <div><dt>Cost</dt><dd>{{ run.cost_usd|usd(4) }}</dd></div>
-</dl>
+{{ title_block([
+  ("TOPIC", topic.name if topic is not none else "—"),
+  ("DATE", run.started_at|dt),
+  ("RUN ID", run.run_id),
+  ("SPEND BAND", topic.spend_band if topic is not none else "—"),
+  ("COST", run.cost_usd|usd(4)),
+  ("FINISHED", run.finished_at|dt if run.finished_at else "not yet"),
+]) }}
 
 {% if run.note %}
 <p class="body-text field-note">{{ run.note }}</p>
@@ -35,12 +35,12 @@
 {% if run.mode == "mine" and cost_detail is not none %}
 <h2>Cost accounting</h2>
 <dl class="meta-grid">
-  <div><dt>Estimated</dt><dd>{{ cost_detail.estimate_usd|usd(4) }}</dd></div>
-  <div><dt>Actual (sweep)</dt><dd>{{ cost_detail.actual_usd|usd(4) }}</dd></div>
-  <div><dt>Model (lexicon)</dt><dd>{{ cost_detail.model_usd|usd(4) }}</dd></div>
-  <div><dt>Cap</dt><dd>{{ cost_detail.cap_usd|usd(2) }}</dd></div>
-  <div><dt>Spent against cap</dt><dd>{{ cost_detail.spent_usd|usd(4) }}</dd></div>
-  <div><dt>Stopped on budget</dt><dd>{{ "yes" if cost_detail.stopped else "no" }}</dd></div>
+  <div><dt>Estimated</dt><dd>{% if cost_detail.estimate_usd is defined %}{{ cost_detail.estimate_usd|usd(4) }}{% else %}not recorded{% endif %}</dd></div>
+  <div><dt>Actual (sweep)</dt><dd>{% if cost_detail.actual_usd is defined %}{{ cost_detail.actual_usd|usd(4) }}{% else %}not recorded{% endif %}</dd></div>
+  <div><dt>Model (lexicon)</dt><dd>{% if cost_detail.model_usd is defined %}{{ cost_detail.model_usd|usd(4) }}{% else %}not recorded{% endif %}</dd></div>
+  <div><dt>Cap</dt><dd>{% if cost_detail.cap_usd is defined %}{{ cost_detail.cap_usd|usd(2) }}{% else %}not recorded{% endif %}</dd></div>
+  <div><dt>Spent against cap</dt><dd>{% if cost_detail.spent_usd is defined %}{{ cost_detail.spent_usd|usd(4) }}{% else %}not recorded{% endif %}</dd></div>
+  <div><dt>Stopped on budget</dt><dd>{% if cost_detail.stopped is defined %}{{ "yes" if cost_detail.stopped else "no" }}{% else %}not recorded{% endif %}</dd></div>
 </dl>
 {% endif %}
 

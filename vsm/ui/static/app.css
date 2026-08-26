@@ -28,9 +28,26 @@
   --blue: #1B4E7E;
   --red: #B2372A;
 
-  --border: rgba(20, 24, 27, 0.16);
-  --border-soft: rgba(20, 24, 27, 0.09);
-  --stripe: rgba(20, 24, 27, 0.035);
+  /* Rules are hairlines in cyan, not grey borders (DIRECTION.md) — these
+     two are alpha blends of --cyan, the same ink used for the drafting
+     grid and the plot's axes, so a table border and a plotted null line
+     read as the same material. */
+  --border: rgba(143, 196, 216, 0.55);
+  --border-soft: rgba(143, 196, 216, 0.32);
+  --stripe: rgba(143, 196, 216, 0.07);
+
+  /* The non-repro drafting grid the whole page sits on: a fine 8px pitch
+     and a bolder 64px pitch, both cyan at low alpha so structure is
+     visible without ever competing with ink. */
+  --grid-minor: rgba(143, 196, 216, 0.16);
+  --grid-major: rgba(143, 196, 216, 0.30);
+  /* A translucent wash of --ground, used on content surfaces (the plot,
+     panels, the markdown preview) instead of a solid fill — the grid is
+     drawn on the page's own background-image, so an opaque panel color
+     would punch a blank rectangular hole through the sheet. The title
+     block is the deliberate exception: a real title block is an opaque
+     card sitting on top of the vellum, not part of it. */
+  --ground-wash: rgba(242, 244, 243, 0.6);
 
   --font-body: -apple-system, "Segoe UI", ui-sans-serif, Roboto, Helvetica, Arial, sans-serif;
   /* Condensed uppercase legends: DIRECTION calls for a condensed face, but
@@ -56,7 +73,15 @@ html { color-scheme: light; }
 
 body {
   margin: 0;
-  background: var(--ground);
+  background-color: var(--ground);
+  /* The drafting sheet the whole app sits on: a fine 8px grid and a
+     bolder 64px grid, both non-repro cyan. Structure, never ink — it
+     must read as texture on the page, not as a table underneath it. */
+  background-image:
+    repeating-linear-gradient(to right, var(--grid-minor), var(--grid-minor) 1px, transparent 1px, transparent 8px),
+    repeating-linear-gradient(to bottom, var(--grid-minor), var(--grid-minor) 1px, transparent 1px, transparent 8px),
+    repeating-linear-gradient(to right, var(--grid-major), var(--grid-major) 1px, transparent 1px, transparent 64px),
+    repeating-linear-gradient(to bottom, var(--grid-major), var(--grid-major) 1px, transparent 1px, transparent 64px);
   color: var(--ink);
   font-family: var(--font-body);
   font-size: 15px;
@@ -66,6 +91,26 @@ body {
 }
 
 ::selection { background: var(--cyan-tint-strong); color: var(--ink); }
+
+/* Registration marks at the sheet corners — small, cyan, quiet. Fixed to
+   the viewport rather than the document, so they read as marks on the
+   sheet you're looking at, not artifacts that scroll away with row 40. */
+.reg-mark {
+  position: fixed;
+  width: 15px;
+  height: 15px;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.55;
+}
+.reg-mark::before, .reg-mark::after { content: ""; position: absolute; background: var(--cyan); }
+.reg-mark::before { top: 50%; left: 0; width: 100%; height: 1px; transform: translateY(-50%); }
+.reg-mark::after { left: 50%; top: 0; height: 100%; width: 1px; transform: translateX(-50%); }
+.reg-mark-tl { top: 10px; left: 10px; }
+.reg-mark-tr { top: 10px; right: 10px; }
+.reg-mark-bl { bottom: 10px; left: 10px; }
+.reg-mark-br { bottom: 10px; right: 10px; }
+@media (max-width: 480px) { .reg-mark { display: none; } }
 
 /* Browser surfaces carry the design too, not just what we drew by hand. */
 :focus-visible {
@@ -81,14 +126,38 @@ a:visited { color: var(--blue); }
 ::-webkit-scrollbar-thumb { background: var(--cyan); border: 3px solid var(--cyan-tint); border-radius: 8px; }
 * { scrollbar-color: var(--cyan) var(--cyan-tint); scrollbar-width: thin; }
 
-h1, h2, h3 { font-weight: 700; letter-spacing: -0.01em; margin: 0 0 var(--space-3); }
+h1, h3 { font-weight: 700; letter-spacing: -0.01em; margin: 0 0 var(--space-3); }
 h1 { font-size: 1.6rem; }
-h2 { font-size: 1.15rem; margin-top: var(--space-6); border-top: 1px solid var(--border-soft); padding-top: var(--space-5); }
-h2:first-of-type { border-top: none; padding-top: 0; margin-top: var(--space-5); }
 h3 { font-size: 1rem; }
+
+/* Section heads read as field legends, not blog headings — condensed
+   uppercase with wide tracking, the same voice as every axis label and
+   column head, so the page reads as one drawn instrument. */
+h2 {
+  font-family: var(--font-label);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  font-size: 1rem;
+  margin: 0 0 var(--space-3);
+  margin-top: var(--space-6);
+  border-top: 1px solid var(--cyan);
+  padding-top: var(--space-4);
+}
+h2:first-of-type { border-top: none; padding-top: 0; margin-top: var(--space-5); }
 
 p { margin: 0 0 var(--space-3); max-width: 72ch; }
 .body-text { max-width: 68ch; }
+
+/* The one-line note under a page heading — quiet, the register of a
+   printed figure caption, never competing with the heading above it. */
+.page-caption {
+  font-style: italic;
+  color: var(--muted);
+  font-size: 0.86rem;
+  max-width: 68ch;
+  margin: 0 0 var(--space-5);
+}
 
 .legend-label, .field-note, .cell-sub, .muted, .hint-text, .empty-state, dt {
   font-family: var(--font-label);
@@ -169,7 +238,7 @@ p { margin: 0 0 var(--space-3); max-width: 72ch; }
   border: 1px solid var(--border);
   padding: var(--space-5);
   margin-top: var(--space-4);
-  background: color-mix(in srgb, var(--ground) 100%, transparent);
+  background: var(--ground-wash);
 }
 .panel-error { border-color: var(--ink); }
 
@@ -391,31 +460,50 @@ legend {
 
 /* ---------------------------------------------------------- forest plot- */
 
-.forest-plot-wrap { border: 1px solid var(--border); padding: var(--space-3) var(--space-3) 0; background: var(--ground); }
+/* The plot is the hero of the insight screen (DIRECTION.md's FIRST
+   VIEWPORT) — full content width, generous row height, readable at a
+   glance. Instrument scale: row_h 64 in render.py, type sized to match. */
+.forest-plot-wrap { border: 1px solid var(--ink); padding: var(--space-4) var(--space-4) 0; background: var(--ground-wash); }
 .forest-plot-wrap svg { display: block; width: 100%; height: auto; }
 .plot-legend-text, .plot-axis-end, .plot-theme-sub, .plot-num, .plot-tier { font-family: var(--font-label); }
-.plot-legend-text { fill: var(--muted); font-size: 8px; letter-spacing: 0.05em; text-transform: uppercase; }
-.plot-axis-end { fill: var(--muted); font-size: 8px; letter-spacing: 0.06em; text-transform: uppercase; }
-.plot-theme-name { fill: var(--ink); font-size: 12px; font-weight: 600; font-family: var(--font-body); }
-.plot-theme-sub { fill: var(--muted); font-size: 8px; letter-spacing: 0.03em; }
-.plot-num { fill: var(--ink); font-size: 12px; }
-.plot-tier { fill: var(--ink); font-size: 10px; letter-spacing: 0.03em; text-transform: uppercase; }
+.plot-legend-text { fill: var(--muted); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
+.plot-axis-end { fill: var(--muted); font-size: 10px; letter-spacing: 0.07em; text-transform: uppercase; }
+.plot-theme-name { fill: var(--ink); font-size: 15px; font-weight: 600; font-family: var(--font-body); }
+.plot-theme-sub { fill: var(--muted); font-size: 10px; letter-spacing: 0.03em; }
+.plot-num { fill: var(--ink); font-size: 15px; }
+.plot-tier { fill: var(--ink); font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; }
 .plot-tier-single_source { fill: var(--muted); }
-.plot-ne-label { fill: var(--red); font-size: 9px; font-weight: 700; letter-spacing: 0.05em; font-family: var(--font-label); }
+.plot-ne-label { fill: var(--red); font-size: 11px; font-weight: 700; letter-spacing: 0.06em; font-family: var(--font-label); }
 
 .forest-plot-baseline-action {
   display: flex; justify-content: flex-end;
   border-top: 1px solid var(--cyan);
-  padding: var(--space-3) var(--space-3);
+  padding: var(--space-3) var(--space-4);
   margin-top: -1px;
-  background: var(--ground);
-  border-left: 1px solid var(--border); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
+  background: var(--ground-wash);
+  border-left: 1px solid var(--ink); border-right: 1px solid var(--ink); border-bottom: 1px solid var(--ink);
 }
-.plot-legend { font-size: 0.78rem; color: var(--muted); margin-top: var(--space-3); max-width: 68ch; }
+
+/* ------------------------------------------------------------ plot key -- */
+
+.plot-guide { margin: var(--space-4) 0 var(--space-6); max-width: 72ch; }
+.plot-guide-lede { color: var(--muted); font-size: 0.88rem; margin: 0 0 var(--space-3); }
+.plot-legend-key {
+  display: grid; grid-template-columns: auto 1fr; gap: var(--space-1) var(--space-4);
+  margin: 0 0 var(--space-3);
+}
+.plot-legend-key div { display: contents; }
+.plot-legend-key dt {
+  font-family: var(--font-label); text-transform: uppercase; letter-spacing: 0.06em;
+  font-size: 0.7rem; color: var(--ink); white-space: nowrap;
+}
+.plot-legend-key dd { margin: 0; font-size: 0.82rem; color: var(--muted); }
+.plot-why-ne summary { color: var(--blue); }
+.plot-why-ne p { margin: var(--space-2) 0 0; font-size: 0.85rem; color: var(--muted); }
 
 /* -------------------------------------------------------- md preview --- */
 
-.md-preview { border: 1px solid var(--border-soft); padding: var(--space-4); background: var(--ground); }
+.md-preview { border: 1px solid var(--border-soft); padding: var(--space-4); background: var(--ground-wash); }
 .md-preview h1 { font-size: 1.3rem; }
 .md-preview h2 { font-size: 1.05rem; border-top: none; padding-top: 0; margin-top: var(--space-4); }
 .md-preview table.md-table { width: 100%; border-collapse: collapse; margin: var(--space-3) 0; font-size: 0.88rem; }
@@ -432,7 +520,98 @@ legend {
 
 .sparkline { display: inline-block; width: 108px; height: 30px; vertical-align: middle; }
 
+/* -------------------------------------------------------- title block -- */
+
+/* The draughtsman's title block: a run's own metadata — topic, dated
+   frame, run id, spend band, cost — as a bordered frame of cells, not a
+   paragraph. Outer frame in ink (a drawn line, like the sheet border);
+   the cell dividers are cyan hairlines, same material as the grid. */
+.title-block {
+  display: flex; flex-wrap: wrap;
+  border: 1.5px solid var(--ink);
+  margin: var(--space-3) 0 var(--space-5);
+  background: var(--ground);
+  width: fit-content;
+  max-width: 100%;
+}
+.title-cell {
+  display: flex; flex-direction: column; justify-content: center;
+  padding: var(--space-2) var(--space-4);
+  border-right: 1px solid var(--cyan);
+  min-width: 8rem;
+}
+.title-cell:last-child { border-right: none; }
+.title-label {
+  font-family: var(--font-label); text-transform: uppercase; letter-spacing: 0.07em;
+  font-size: 0.62rem; color: var(--muted);
+}
+.title-value {
+  font-weight: 700; font-variant-numeric: tabular-nums; font-size: 0.92rem; color: var(--ink);
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
 @media (max-width: 720px) {
-  .field-row-pair, .band-cards { grid-template-columns: 1fr; }
+  .title-block { width: auto; }
+  .title-cell { border-right: none; border-bottom: 1px solid var(--cyan); flex: 1 1 45%; }
+  .title-cell:last-child { border-bottom: none; }
+}
+
+/* ---------------------------------------------------------- first run -- */
+
+.first-run { margin-top: var(--space-4); max-width: 68ch; }
+.first-run > .hint-text { margin-bottom: var(--space-4); }
+.first-run-steps { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+.first-run-steps li {
+  display: flex; gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  align-items: baseline;
+}
+.step-num {
+  font-family: var(--font-label); font-weight: 700; font-size: 1.4rem;
+  color: var(--blue); flex: none; width: 1.6rem;
+}
+.step-copy { display: flex; flex-direction: column; gap: 2px; }
+.step-title {
+  font-family: var(--font-label); text-transform: uppercase; letter-spacing: 0.06em;
+  font-weight: 700; font-size: 0.82rem; color: var(--ink);
+}
+.step-body { font-size: 0.86rem; color: var(--muted); }
+
+/* -------------------------------------------------------------- /how -- */
+
+.mode-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-4); margin: var(--space-3) 0 var(--space-5); }
+.mode-card { border: 1px solid var(--border); padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-2); }
+.mode-card h3 {
+  font-family: var(--font-label); text-transform: uppercase; letter-spacing: 0.07em;
+  font-size: 0.95rem; margin: 0;
+}
+.mode-one-liner { margin: 0; font-size: 0.88rem; color: var(--ink); }
+.mode-meta { margin: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.mode-meta dt {
+  font-family: var(--font-label); text-transform: uppercase; letter-spacing: 0.06em;
+  font-size: 0.66rem; color: var(--muted); margin: 0;
+}
+.mode-meta dd { margin: 2px 0 0; font-size: 0.84rem; }
+
+.key-list { margin: var(--space-2) 0 var(--space-5); display: flex; flex-direction: column; gap: var(--space-3); }
+.key-list > div { border-bottom: 1px solid var(--border-soft); padding-bottom: var(--space-2); }
+.key-list dt {
+  font-family: var(--font-label); text-transform: uppercase; letter-spacing: 0.06em;
+  font-weight: 700; font-size: 0.8rem; margin: 0;
+}
+.key-list dd { margin: 2px 0 0; font-size: 0.88rem; color: var(--muted); max-width: 68ch; }
+
+details { margin: var(--space-2) 0; }
+details summary {
+  cursor: pointer;
+  font-family: var(--font-label); text-transform: uppercase; letter-spacing: 0.05em;
+  font-size: 0.74rem; color: var(--blue);
+}
+details summary:hover { color: var(--ink); }
+details[open] summary { margin-bottom: var(--space-2); }
+
+@media (max-width: 720px) {
+  .field-row-pair, .band-cards, .mode-cards { grid-template-columns: 1fr; }
   .app-top { flex-wrap: wrap; }
 }

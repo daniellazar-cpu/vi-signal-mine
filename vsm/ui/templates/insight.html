@@ -1,4 +1,5 @@
 {% extends "_base.html" %}
+{% from "_macros.html" import title_block %}
 {% block title %}Insight — Vi Signal Mine{% endblock %}
 
 {% block top_rail %}
@@ -16,18 +17,20 @@
 <section class="page-head">
   <h1>{% if topic is not none %}{{ topic.name }} — {% endif %}Insight</h1>
 </section>
+<p class="page-caption">{{ explainer('insight') }}</p>
+
+{{ title_block([
+  ("TOPIC", topic.name if topic is not none else "—"),
+  ("DATE", run.started_at|dt),
+  ("RUN ID", run.run_id),
+  ("SPEND BAND", topic.spend_band if topic is not none else "—"),
+  ("COST", run.cost_usd|usd(4)),
+]) }}
 {% if mine_run_id %}
 <p class="cell-sub"><a href="/runs/{{ mine_run_id }}/snapshot">based on the snapshot captured {{ run.started_at|dt }}</a></p>
 {% endif %}
 
 <h2 id="dual-lens">Dual-lens gap — where clinicians and patients diverge</h2>
-<p class="body-text">
-  Each box is one theme. Box area is the theme's volume of signals. The
-  whisker spans the gap between the patient net stance and the clinician net
-  stance, measured from the null line at zero divergence. A theme only one
-  side discussed prints <strong>NE</strong> on the null line — not zero,
-  not comparable.
-</p>
 <div class="forest-plot-wrap">
   {{ forest_svg|safe }}
 </div>
@@ -38,11 +41,18 @@
   </form>
   {% endif %}
 </div>
-<p class="plot-legend">
-  Solid blue: measured divergence. Dashed red square on the null line:
-  not estimable — one lens has no signal for that theme, so silence is
-  never read as agreement.
-</p>
+<div class="plot-guide">
+  <p class="plot-guide-lede">{{ plot_guide.lede }}</p>
+  <dl class="plot-legend-key">
+    {% for mark, desc in plot_guide.marks %}
+    <div><dt>{{ mark }}</dt><dd>{{ desc }}</dd></div>
+    {% endfor %}
+  </dl>
+  <details class="plot-why-ne">
+    <summary>Why some rows say NE</summary>
+    <p>{{ plot_guide.why_ne }}</p>
+  </details>
+</div>
 
 <h2>Momentum</h2>
 {% if not has_baseline %}
@@ -106,7 +116,7 @@
       <td class="num">{{ tr.theme.volume }}</td>
       <td class="cell-sub">{% for v, n in tr.venue_mix %}{{ v }} ({{ n }}){% if not loop.last %}, {% endif %}{% else %}—{% endfor %}</td>
       <td class="cell-sub">{% for k, n in tr.kind_mix %}{{ kind_label(k) }} ({{ n }}){% if not loop.last %}, {% endif %}{% else %}—{% endfor %}</td>
-      <td>{{ tier_label(tr.tier) }}</td>
+      <td title="{{ tier_note(tr.tier) }}">{{ tier_label(tr.tier) }}</td>
       <td class="num">{{ tr.sources }}</td>
     </tr>
     {% endfor %}

@@ -1,11 +1,21 @@
 {% extends "_base.html" %}
+{% from "_macros.html" import title_block %}
 {% block title %}Report — {% if topic is not none %}{{ topic.name }} — {% endif %}Vi Signal Mine{% endblock %}
 {% block content %}
 <section class="page-head">
   <h1>Report preview{% if topic is not none %} — {{ topic.name }}{% endif %}</h1>
 </section>
+<p class="page-caption">{{ explainer('report') }}</p>
+
+{{ title_block([
+  ("TOPIC", topic.name if topic is not none else "—"),
+  ("DATE", run.started_at|dt),
+  ("RUN ID", run.run_id),
+  ("SPEND BAND", topic.spend_band if topic is not none else "—"),
+  ("COST", run.cost_usd|usd(4)),
+]) }}
 <p class="cell-sub">
-  {% if mine_run_id %}<a href="/runs/{{ mine_run_id }}/snapshot">snapshot</a> — {% endif %}{% if insight_run_id %}<a href="/runs/{{ insight_run_id }}/insight">insight</a> — {% endif %}run {{ run.run_id }}, {{ run.started_at|dt }}
+  {% if mine_run_id %}<a href="/runs/{{ mine_run_id }}/snapshot">snapshot</a> — {% endif %}{% if insight_run_id %}<a href="/runs/{{ insight_run_id }}/insight">insight</a>{% endif %}
 </p>
 
 <h2>Themes at a glance</h2>
@@ -18,7 +28,7 @@
     <tr>
       <td class="cell-title">{{ t.name }}</td>
       <td class="num">{{ t.volume }}</td>
-      <td>{{ tier_label(t.tier) }}</td>
+      <td title="{{ tier_note(t.tier) }}">{{ tier_label(t.tier) }}</td>
       <td class="num">{{ t.sources }}</td>
       <td class="citation-chips">
         {% for sid in t.signal_ids %}<a href="#sig-{{ sid }}">{{ sid }}</a>{% if not loop.last %}, {% endif %}{% else %}<span class="muted">none cited</span>{% endfor %}

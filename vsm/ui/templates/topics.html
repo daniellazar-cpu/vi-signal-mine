@@ -5,13 +5,10 @@
   <h1>Topics</h1>
   <a class="btn btn-primary" href="/topics/new">New topic</a>
 </section>
-
-<p class="hint-text">
-  Momentum and anomaly need a topic watched more than once: the first
-  snapshot never draws a trend line, because one point is not a trend.
-</p>
+<p class="page-caption">{{ explainer('topics') }}</p>
 
 {% if rows %}
+<div class="table-scroll">
 <table class="data-table topics-table">
   <thead>
     <tr>
@@ -57,12 +54,24 @@
     {% endfor %}
   </tbody>
 </table>
+</div>
 {% else %}
-<p class="empty-state">
-  No topics yet. A topic is what Vi Signal Mine watches — brand, molecule,
-  competitors and a spend band. Create one, then run its first snapshot.
-  Momentum and anomaly need a topic watched more than once: the first
-  snapshot never draws a trend line, because one point is not a trend.
-</p>
+<div class="first-run">
+  <p class="hint-text">
+    Momentum and anomaly need a topic watched more than once: the first
+    snapshot never draws a trend line, because one point is not a trend.
+  </p>
+  <ol class="first-run-steps">
+    {% for title, body in first_run_steps %}
+    <li>
+      <span class="step-num">{{ loop.index }}</span>
+      <span class="step-copy">
+        <span class="step-title">{{ title }}</span>
+        <span class="step-body">{{ body }}</span>
+      </span>
+    </li>
+    {% endfor %}
+  </ol>
+</div>
 {% endif %}
 {% endblock %}

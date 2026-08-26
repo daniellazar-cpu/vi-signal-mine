@@ -1,17 +1,21 @@
 {% extends "_base.html" %}
+{% from "_macros.html" import title_block %}
 {% block title %}Snapshot — Vi Signal Mine{% endblock %}
 {% block content %}
 <section class="page-head">
   <h1>Snapshot</h1>
   <span class="status-badge status-{{ run.status }}">{{ run.status|replace("_", " ") }}</span>
 </section>
+<p class="page-caption">{{ explainer('snapshot') }}</p>
 
-{% if topic is not none %}
-<p class="cell-sub">
-  <a href="/">{{ topic.name }}</a> — captured {{ run.started_at|dt }}
-  — <a href="/runs/{{ run.run_id }}">view run</a>
-</p>
-{% endif %}
+{{ title_block([
+  ("TOPIC", topic.name if topic is not none else "—"),
+  ("DATE", run.started_at|dt),
+  ("RUN ID", run.run_id),
+  ("SPEND BAND", topic.spend_band if topic is not none else "—"),
+  ("COST", run.cost_usd|usd(4)),
+]) }}
+<p class="cell-sub"><a href="/runs/{{ run.run_id }}">view run</a></p>
 
 {% if coverage is not none %}
 <h2>Coverage</h2>

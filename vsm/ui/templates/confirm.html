@@ -1,9 +1,17 @@
 {% extends "_base.html" %}
+{% from "_macros.html" import title_block %}
 {% block title %}Confirm spend — {{ topic.name }} — Vi Signal Mine{% endblock %}
 {% block content %}
 <section class="page-head">
   <h1>Confirm spend</h1>
 </section>
+<p class="page-caption">{{ explainer('confirm') }}</p>
+{{ title_block([
+  ("TOPIC", topic.name),
+  ("THERAPEUTIC AREA", topic.therapeutic_area),
+  ("SPEND BAND", band.name),
+  ("ESTIMATED COST", estimate.total_usd|usd(2)),
+]) }}
 
 <section class="panel confirm-panel">
   <p class="body-text">
@@ -23,6 +31,7 @@
     <span class="estimate-total-value">{{ estimate.total_usd|usd(2) }}</span>
   </div>
 
+  <div class="table-scroll">
   <table class="data-table breakdown-table">
     <thead>
       <tr><th scope="col">Item</th><th scope="col">Cost</th><th scope="col">Basis</th></tr>
@@ -37,6 +46,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 
   <p class="body-text">
     Run cost cap: <strong>{{ cap_usd|usd(2) }}</strong>. A run that would pass

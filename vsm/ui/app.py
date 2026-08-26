@@ -38,6 +38,15 @@ from vsm.modes.mine import run_mine
 from vsm.modes.report import run_report
 from vsm.platform import assert_serveable
 from vsm.topics.model import BANDS
+from vsm.ui.content import (
+    FIRST_RUN_STEPS,
+    GLOSSARY,
+    MODES,
+    PLOT_GUIDE,
+    TIERS,
+    WHAT_IT_IS,
+    explainer,
+)
 from vsm.ui.render import forest_plot_svg, fmt_dt, net_stance_text, pct, sparkline_svg, usd
 
 __all__ = ["create_app"]
@@ -142,8 +151,19 @@ _ITALIC_RE = re.compile(r"(?<!\w)_([^_\s][^_]*?)_(?!\w)")
 _PIPE_TABLE_ROW = re.compile(r"^\s*\|")
 
 
+# content.TIERS keys use a space ("single source"); run data uses an
+# underscore ("single_source"). Normalised once so a tier shown anywhere in
+# the templates can carry its own definition as a `title` attribute — the
+# reader should never meet "corroborated" with no way to learn what it means.
+_TIER_NOTES = {key.replace(" ", "_"): note for key, note in TIERS}
+
+
 def _tier_label(tier: str | None) -> str:
     return _TIER_LABELS.get(tier or "", tier or "not scored")
+
+
+def _tier_note(tier: str | None) -> str:
+    return _TIER_NOTES.get(tier or "", "")
 
 
 def _kind_label(kind: str | None) -> str:
@@ -177,7 +197,10 @@ def _render_pipe_table(lines: list[str]) -> str:
         "<tr>" + "".join(f"<td>{_inline_md(c)}</td>" for c in row) + "</tr>"
         for row in rest
     )
-    return f'<table class="md-table"><thead><tr>{thead}</tr></thead><tbody>{tbody}</tbody></table>'
+    return (
+        f'<div class="table-scroll"><table class="md-table"><thead><tr>{thead}</tr></thead>'
+        f"<tbody>{tbody}</tbody></table></div>"
+    )
 
 
 def _markdown_lite_to_html(text: str | None) -> str:
@@ -288,10 +311,12 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
     env.filters["net"] = net_stance_text
     env.filters["dt"] = fmt_dt
     env.globals["tier_label"] = _tier_label
+    env.globals["tier_note"] = _tier_note
     env.globals["kind_label"] = _kind_label
     env.globals["class_label"] = _class_label
     env.globals["stance_label"] = _stance_label
     env.globals["anomaly_label"] = _anomaly_label
+    env.globals["explainer"] = explainer
 
     templates = Jinja2Templates(env=env)
 
@@ -306,6 +331,15 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
 
     def error_page(request: Request, status_code: int, title: str, message: str) -> HTMLResponse:
         return render(request, "error.html", status_code=status_code, title=title, message=message)
+
+    # ------------------------------------------------------------------ how --
+
+    @app.get("/how", response_class=HTMLResponse)
+    def how_it_works(request: Request) -> HTMLResponse:
+        return render(
+            request, "how.html",
+            what_it_is=WHAT_IT_IS, modes=MODES, tiers=TIERS, glossary=GLOSSARY,
+        )
 
     # --------------------------------------------------------------- topics --
 
@@ -333,7 +367,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
     @app.get("/", response_class=HTMLResponse)
     def topics_index(request: Request) -> HTMLResponse:
         rows = [_topic_row(t) for t in topic_store.list()]
-        return render(request, "topics.html", rows=rows)
+        return render(request, "topics.html", rows=rows, first_run_steps=FIRST_RUN_STEPS)
 
     _BLANK_TOPIC_VALUES = {
         "name": "", "therapeutic_area": "", "spend_band": "probe", "brand": "",
@@ -708,7 +742,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
 
         return render(
             request, "insight.html", run=run, topic=topic, mine_run_id=mine_run_id,
-            snapshot_rail=snapshot_rail,
+            snapshot_rail=snapshot_rail, plot_guide=PLOT_GUIDE,
             forest_svg=forest_svg, forest_rows=forest_rows,
             momentum_rows=momentum_rows, has_baseline=has_baseline,
             anomaly_rows=anomaly_rows, theme_rows=theme_rows,

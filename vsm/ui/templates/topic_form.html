@@ -4,6 +4,7 @@
 <section class="page-head">
   <h1>{% if mode == "edit" %}Edit {{ topic.name }}{% else %}New topic{% endif %}</h1>
 </section>
+<p class="page-caption">{{ explainer('topic_form') }}</p>
 
 <form class="form-stack" method="post" action="{% if mode == 'edit' %}/topics/{{ topic.topic_id }}{% else %}/topics{% endif %}">
   <div class="field-row">

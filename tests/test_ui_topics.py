@@ -59,9 +59,29 @@ def test_every_page_renders_with_strictundefined(client):
     """StrictUndefined turns a typo'd variable into a 500. Walk every GET."""
     c, ts, _ = client
     t = ts.create(name="OIC", therapeutic_area="gi", spend_band="probe")
-    for path in ("/", "/topics/new", f"/topics/{t.topic_id}/edit",
+    for path in ("/", "/how", "/topics/new", f"/topics/{t.topic_id}/edit",
                  f"/topics/{t.topic_id}/confirm?band=probe"):
         assert c.get(path).status_code == 200, path
+
+
+def test_how_page_renders_a_glossary_term_and_a_mode_name(client):
+    """content.py's GLOSSARY and MODES are finished copy; /how must actually
+    render them, not just have a route that returns something."""
+    c, _, _ = client
+    body = c.get("/how").text
+    assert "Momentum" in body  # a GLOSSARY term
+    assert "Insight" in body  # a MODES name
+    assert "corroborated" in body.lower()  # a TIERS key
+
+
+def test_the_empty_state_contains_the_three_first_run_steps(client):
+    """FIRST_RUN_STEPS replaces the old empty-state paragraph: three
+    numbered steps that teach, not a paragraph reporting emptiness."""
+    c, _, _ = client
+    body = c.get("/").text
+    assert "Create a topic" in body
+    assert "Run a snapshot" in body
+    assert "Run it again next week" in body
 
 
 def test_the_page_requests_nothing_from_the_network(client):

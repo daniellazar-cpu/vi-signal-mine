@@ -1,0 +1,14 @@
+{# The draughtsman's title block: a bordered frame carrying a run's own
+   metadata (topic, dated frame, run id, spend band, cost) as cells rather
+   than a paragraph. Values are plain text — Jinja's autoescape covers them,
+   same as everywhere else in this app. #}
+{% macro title_block(items) %}
+<div class="title-block" role="group" aria-label="run metadata">
+  {% for label, value in items %}
+  <div class="title-cell">
+    <span class="title-label">{{ label }}</span>
+    <span class="title-value">{{ value }}</span>
+  </div>
+  {% endfor %}
+</div>
+{% endmacro %}

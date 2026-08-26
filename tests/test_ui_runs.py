@@ -70,6 +70,27 @@ def test_a_finished_run_renders_without_scripting(env):
     assert "complete" in body.lower()
 
 
+def test_the_plot_legend_appears_beside_the_forest_plot(env):
+    """PLOT_GUIDE belongs beside the forest plot, not on the help page —
+    lede above it, marks as a compact legend, why_ne inside <details>."""
+    c, ts, rs, topic = env
+    snap = _snapshot(rs, topic, _rows(2, 2))
+    ins = run_insight(topic, snap.run_id, rs)
+    body = c.get(f"/runs/{ins.run_id}/insight").text
+    assert "Box size" in body  # a PLOT_GUIDE mark label
+    assert "Why some rows say NE" in body  # the <details> summary
+
+
+def test_a_tier_key_is_present_where_tiers_are_shown(env):
+    """A reader must never meet 'corroborated' with no way to learn what it
+    means — the tier's own definition rides along as a title attribute."""
+    c, ts, rs, topic = env
+    snap = _snapshot(rs, topic, _rows(2, 2))
+    ins = run_insight(topic, snap.run_id, rs)
+    body = c.get(f"/runs/{ins.run_id}/insight").text
+    assert "Three or more independent sources" in body
+
+
 def test_the_stance_view_never_shows_a_blended_number(env):
     """The type has nowhere to put one; the template must not compute one either."""
     c, ts, rs, topic = env
