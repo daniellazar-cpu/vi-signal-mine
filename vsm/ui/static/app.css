@@ -37,6 +37,32 @@ body {
   border-radius: 2px;
 }
 
+/* Text for assistive technology only. Not `display: none` — that removes it
+   from the accessibility tree too, which defeats the point. Several honest
+   statements on this app live here: a flow stage's "not run yet", a tier
+   badge's definition, a table's caption where a visible heading already
+   carries it. */
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+
+/* The first thing Tab reaches on every page. Without it a keyboard reader
+   passes the mark, three nav links, up to two banners and up to eight rail
+   links before the content, on every page. */
+.skip-link {
+  position: absolute; left: 8px; top: -48px; z-index: 10;
+  padding: 10px 16px; background: var(--fg1); color: var(--fg-on-dark);
+  text-decoration: none; font-size: var(--t-small-size); font-weight: var(--w-medium);
+  transition: top var(--dur-fast) var(--ease-standard);
+}
+.skip-link:focus { top: 8px; color: var(--fg-on-dark); }
+
+.lede-text {
+  max-width: 60ch; font-size: var(--t-body-lg-size); line-height: var(--t-body-lg-lh);
+  margin-bottom: var(--space-md);
+}
+
 a { color: var(--fg1); text-decoration: underline; text-decoration-color: var(--rule-strong); text-underline-offset: 3px; }
 a:hover { color: var(--signal); text-decoration-color: var(--signal); }
 a:visited { color: var(--fg1); }
@@ -169,12 +195,12 @@ p { margin: 0 0 var(--space-xs); max-width: 72ch; }
   font-size: var(--t-caption-size); color: var(--fg2); white-space: nowrap;
 }
 .flow-step-num { letter-spacing: 0.1em; font-size: 10px; color: var(--fg2); margin-right: 6px; }
-.flow-step:hover { color: var(--fg1); }
+.flow-step:hover, .flow-step:focus-visible { color: var(--fg1); text-decoration: underline; text-decoration-color: var(--signal); text-underline-offset: 4px; }
 .flow-step.flow-step-current { color: var(--fg1); font-weight: var(--w-medium); }
 .flow-step.flow-step-current::after {
   content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--signal);
 }
-.flow-step.flow-step-disabled { color: var(--vi-gray-300); pointer-events: none; }
+.flow-step.flow-step-disabled { color: var(--fg2); pointer-events: none; text-decoration: underline dotted var(--rule-strong); text-underline-offset: 3px; }
 .flow-sep { color: var(--vi-gray-300); }
 
 .app-main { padding: 0 40px 96px; }
@@ -281,16 +307,25 @@ input[type="text"], input[type="date"], textarea, select {
   font-variant-numeric: tabular-nums;
   color: var(--fg1);
   background: var(--bg);
-  border: var(--border-hairline) solid var(--rule-strong);
+  border: var(--border-hairline) solid var(--rule-control);
   border-radius: var(--radius-sm);
   padding: 10px 12px;
   transition: border-color var(--dur-base) var(--ease-standard);
 }
 textarea { resize: vertical; }
 input:hover, textarea:hover, select:hover { border-color: var(--fg1); }
-input:focus, textarea:focus, select:focus { border-color: var(--signal); outline: none; box-shadow: 0 0 0 3px var(--vi-violet-12); }
+/* The violet border and the 12%-alpha glow are a *secondary* cue: the glow
+   composites to 1.22:1 on white, a native radio renders neither, and both
+   are dropped entirely in forced-colors mode. `outline: none` here used to
+   win over the global `:focus-visible` rule 250 lines above by specificity,
+   which left the spend-band radios — on the one form that leads to the only
+   screen that spends money — with no visible focus indicator at all. */
+input:focus, textarea:focus, select:focus { border-color: var(--signal); box-shadow: 0 0 0 3px var(--vi-violet-12); }
+input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: 2px solid var(--signal); outline-offset: 2px;
+}
 input:disabled, textarea:disabled, select:disabled { background: var(--bg-subtle); color: var(--fg2); }
-input::placeholder, textarea::placeholder { color: var(--vi-gray-300); }
+input::placeholder, textarea::placeholder { color: var(--fg2); }
 
 .field-error {
   color: var(--fg1);
@@ -368,7 +403,7 @@ legend {
 .btn-primary:disabled { background: var(--vi-gray-300); cursor: not-allowed; }
 
 /* Ghost — every secondary action: white, bordered, ink text. */
-.btn-ghost { background: var(--bg); color: var(--fg1); border-color: var(--rule-strong); }
+.btn-ghost { background: var(--bg); color: var(--fg1); border-color: var(--rule-control); }
 .btn-ghost:hover { background: var(--bg-subtle); border-color: var(--fg1); }
 .btn-ghost:active { background: var(--vi-gray-100); }
 
@@ -380,6 +415,7 @@ legend {
 /* ------------------------------------------------------------- tables -- */
 
 .table-scroll { overflow-x: auto; margin-top: 8px; }
+.table-scroll:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; }
 
 .data-table { width: 100%; border-collapse: collapse; min-width: 560px; }
 .data-table th, .data-table td { text-align: left; padding: 14px 12px; vertical-align: top; }
@@ -396,6 +432,11 @@ legend {
 .data-table tbody tr:hover { background: var(--bg-subtle); }
 .data-table td.num, .data-table th.num, td.num { font-variant-numeric: tabular-nums; text-align: right; }
 .cell-title { font-weight: var(--w-medium); }
+/* A row header is the row's identity, so it is a th with a scope — and it
+   must look exactly as the styled td it replaced, or an accessibility fix
+   becomes a visual regression. */
+.data-table tbody th { text-align: left; padding: 14px 12px; vertical-align: top; font-weight: var(--w-medium); }
+.data-table tbody th:first-child { padding-left: 0; }
 .citation-chips { font-size: var(--t-caption-size); color: var(--fg2); }
 .citation-chips a { font-family: var(--vi-font-mono); }
 
@@ -448,7 +489,15 @@ legend {
 }
 .title-cell { display: flex; flex-direction: column; gap: 4px; }
 .title-label { margin: 0; }
-.title-value { font-family: var(--vi-font-mono); font-size: var(--t-small-size); font-weight: var(--w-medium); color: var(--fg1); overflow-wrap: anywhere; }
+/* Neue Montreal, not the mono stack. The mono stack has no self-hosted face
+   in this app, so a topic name set in it fell back to Courier — a terminal
+   dump, not a value. Mono is kept for opaque machine tokens alone (see
+   `.doc-runid`), where looking like a machine token is the point. */
+.title-value {
+  margin: 0;
+  font-size: var(--t-small-size); font-weight: var(--w-medium); color: var(--fg1);
+  font-variant-numeric: tabular-nums; overflow-wrap: anywhere;
+}
 
 /* The stat grid — Coverage / Cost accounting: a genuine grid of counted
    things, each cell bottom-ruled, values in large tabular mono. */
@@ -621,18 +670,238 @@ details summary {
 details summary:hover { color: var(--signal); text-decoration-color: var(--signal); }
 details[open] summary { margin-bottom: 8px; }
 
-/* -------------------------------------------------------- md preview --- */
+/* ==================================================== the document ====== */
 
-.md-preview { border: var(--border-hairline) solid var(--rule); padding: var(--space-md); }
-.md-preview h1 { font-size: var(--t-h3-size); line-height: var(--t-h3-lh); }
-.md-preview h2 { font-size: var(--t-body-lg-size); margin-top: var(--space-md); }
-.md-preview table.md-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: var(--t-small-size); }
-.md-preview table.md-table th, .md-preview table.md-table td { border-bottom: var(--border-hairline) solid var(--rule); padding: 8px; text-align: left; }
-.md-preview table.md-table th { font-weight: var(--w-medium); font-size: var(--t-caption-size); text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg2); }
-.md-preview ul { padding-left: 1.2em; }
+/* A report is a document, not a page of data. Everything in this block is in
+   service of one idea: authority from typography and restraint. The reference
+   is a pharma commercial review deck or a journal article — the reader should
+   believe it before reading a word.
+
+   What this replaced, and why: the report body used to sit inside
+   `.md-preview`, a hairline box with 24px of padding whose inner `h2` was
+   *smaller* than the app's own `h2` above it. So the document's sections read
+   as subordinate to the chrome that introduced them, every line was optically
+   misaligned from its own heading, and the whole thing looked like an
+   embedded file viewer. The document is the page now; it has no frame. */
+
+.doc { max-width: 820px; }
+
+/* ---- the cover ---- */
+.doc-cover {
+  padding-bottom: var(--space-lg);
+  margin-bottom: var(--space-lg);
+  border-bottom: 1px solid var(--fg1);
+}
+.doc-title {
+  margin: 6px 0 var(--space-sm);
+  font-weight: var(--w-book);
+  font-size: var(--t-headline-size);
+  line-height: var(--t-headline-lh);
+  letter-spacing: var(--t-headline-track);
+  max-width: 22ch;
+}
+.doc-window {
+  margin: 0 0 var(--space-md);
+  font-size: var(--t-body-lg-size);
+  line-height: var(--t-body-lg-lh);
+  color: var(--fg1);
+}
+.doc-window-note, .doc-reason {
+  color: var(--fg2);
+  font-size: var(--t-small-size);
+  line-height: var(--t-small-lh);
+}
+.doc-reason { display: inline-block; max-width: 48ch; }
+.doc-cover-facts {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0;
+  margin: 0 0 var(--space-md);
+  border-top: var(--border-hairline) solid var(--rule);
+}
+.doc-cover-facts > div {
+  padding: 14px 16px 14px 0;
+  border-bottom: var(--border-hairline) solid var(--rule);
+}
+.doc-cover-facts dt { margin: 0 0 4px; }
+.doc-cover-facts dd {
+  margin: 0; font-size: var(--t-small-size); line-height: var(--t-small-lh); color: var(--fg1);
+}
+.doc-cover-rests { margin: 0 0 var(--space-sm); font-size: var(--t-small-size); color: var(--fg1); }
+.doc-provenance {
+  margin: 0; color: var(--fg2);
+  font-size: var(--t-caption-size); line-height: var(--t-caption-lh);
+  max-width: none;
+}
+/* Mono is for opaque machine tokens only — a run id, a signal id. It is not
+   for a topic name, a date, a cost or a filename: the mono stack has no
+   self-hosted face (the Geist Mono @import was removed for the zero-network
+   rule), so every one of those fell back to Courier, and a pharma report
+   whose subject line is set in Courier is a terminal dump. */
+.doc-runid { font-family: var(--vi-font-mono); font-size: 11px; }
+.doc-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: var(--space-md); }
+.doc-print-note { margin: 10px 0 0; color: var(--fg2); font-size: var(--t-caption-size); line-height: var(--t-caption-lh); }
+
+/* ---- sections and prose ---- */
+.doc-section { margin-bottom: var(--space-xl); }
+.doc-h {
+  margin: 0 0 var(--space-xs);
+  font-weight: var(--w-book);
+  font-size: var(--t-h3-size); line-height: var(--t-h3-lh); letter-spacing: var(--t-h3-track);
+  padding-bottom: var(--space-xs);
+  border-bottom: var(--border-hairline) solid var(--rule);
+}
+.doc-section-note {
+  margin: 0 0 var(--space-md);
+  color: var(--fg2); font-size: var(--t-small-size); line-height: var(--t-small-lh);
+  max-width: 68ch;
+}
+.doc-prose { max-width: 68ch; }
+.doc-prose p.doc-p { margin: 0 0 var(--space-sm); font-size: var(--t-body-size); line-height: var(--t-body-lh); }
+.doc-prose .doc-h1, .doc-prose .doc-h2, .doc-prose .doc-h3,
+.doc-prose h3, .doc-prose h4, .doc-prose h5, .doc-prose h6 {
+  margin: var(--space-md) 0 var(--space-xs);
+  font-weight: var(--w-medium);
+}
+.doc-prose h3 { font-size: var(--t-subhead-size); line-height: var(--t-subhead-lh); }
+.doc-prose h4 { font-size: var(--t-body-lg-size); line-height: var(--t-body-lg-lh); }
+.doc-prose h5, .doc-prose h6 { font-size: var(--t-body-size); line-height: var(--t-body-lh); }
+.doc-prose > :first-child { margin-top: 0; }
+.doc-prose strong { font-weight: var(--w-medium); }
+.doc-prose em { font-style: italic; }
+.doc-prose ul.doc-list, .doc-prose ol.doc-list { margin: 0 0 var(--space-sm); padding-left: 1.3em; }
+.doc-prose li { margin-bottom: 6px; }
+.doc-prose li > p.doc-p:last-child { margin-bottom: 0; }
+.doc-prose code {
+  font-family: var(--vi-font-mono); font-size: 0.9em;
+  background: var(--bg-subtle); padding: 1px 4px; border-radius: 3px;
+}
+.doc-prose pre.doc-code {
+  margin: 0 0 var(--space-sm); padding: var(--space-sm);
+  background: var(--bg-subtle); border: var(--border-hairline) solid var(--rule);
+  overflow-x: auto; font-size: var(--t-caption-size);
+}
+.doc-prose pre.doc-code code { background: none; padding: 0; }
+.doc-prose blockquote.doc-quote {
+  margin: 0 0 var(--space-sm); padding: 4px 0 4px var(--space-sm);
+  border-left: 2px solid var(--signal);
+  font-size: var(--t-body-lg-size); line-height: var(--t-body-lg-lh);
+}
+.doc-prose blockquote.doc-quote p.doc-p:last-child { margin-bottom: 0; }
+.doc-prose hr.doc-rule { border: none; border-top: var(--border-hairline) solid var(--rule); margin: var(--space-md) 0; }
+.doc-prose del { color: var(--fg2); }
+.doc-prose-sm p.doc-p, .doc-prose-sm li { font-size: var(--t-small-size); line-height: var(--t-small-lh); }
+.doc-lead { margin-bottom: var(--space-lg); }
+.doc-num { font-variant-numeric: tabular-nums; }
+.doc-ne { font-weight: var(--w-medium); letter-spacing: 0.06em; }
+
+/* ---- a finding: quotable straight off the screen ---- */
+.finding {
+  padding: var(--space-md) 0;
+  border-bottom: var(--border-hairline) solid var(--rule);
+}
+.finding:first-of-type { padding-top: var(--space-xs); }
+.finding-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.finding-meta {
+  font-size: var(--t-caption-size); letter-spacing: 0.02em; color: var(--fg2);
+  font-variant-numeric: tabular-nums;
+}
+.finding-claim {
+  margin: 0;
+  font-size: var(--t-subhead-size); line-height: var(--t-subhead-lh);
+  letter-spacing: var(--t-subhead-track);
+  max-width: 42ch;
+}
+.finding-claim strong { font-weight: var(--w-medium); }
+.finding-emerging .finding-claim { font-size: var(--t-body-lg-size); line-height: var(--t-body-lg-lh); max-width: 54ch; }
+
+/* Confidence as a badge, not a word in a cell whose meaning lived in a
+   `title` tooltip — unreachable by keyboard, invisible on touch, gone in
+   print. Violet fills only `corroborated`: the one tier that has earned a
+   claim in the report body. */
+.tier-badge {
+  display: inline-flex; align-items: center; min-height: 24px;
+  padding: 2px 8px;
+  border: var(--border-hairline) solid var(--rule-control);
+  border-radius: var(--radius-sm);
+  font-weight: var(--w-medium); font-size: var(--t-eyebrow-size);
+  line-height: var(--t-eyebrow-lh); letter-spacing: var(--t-eyebrow-track);
+  text-transform: uppercase; text-decoration: none; color: var(--fg1);
+  white-space: nowrap;
+}
+a.tier-badge:hover { border-color: var(--fg1); color: var(--fg1); }
+.tier-badge-corroborated { background: var(--signal); border-color: var(--signal); color: var(--on-signal); }
+a.tier-badge-corroborated:hover { background: var(--vi-violet-hover); border-color: var(--vi-violet-hover); color: var(--on-signal); }
+.tier-badge-emerging { border-color: var(--fg1); color: var(--fg1); }
+.tier-badge-single_source { border-style: dashed; color: var(--fg2); }
+
+/* ---- reference marks ---- */
+.ref-marks { font-size: 0.58em; line-height: 1; margin-left: 3px; }
+.ref-marks a {
+  font-family: var(--vi-font-family); font-weight: var(--w-medium);
+  text-decoration: none; color: var(--signal);
+  font-variant-numeric: tabular-nums; padding: 0 1px;
+}
+.ref-marks a:hover { text-decoration: underline; }
+
+/* ---- the figure: numbered, captioned, the centrepiece ---- */
+.doc-figure { margin: 0 0 var(--space-xl); }
+.doc-figure-plot { border: var(--border-hairline) solid var(--rule); padding: var(--space-sm) var(--space-sm) 0; }
+.doc-figure-plot svg { display: block; width: 100%; height: auto; }
+.doc-figure figcaption {
+  margin-top: 12px;
+  font-size: var(--t-small-size); line-height: var(--t-small-lh); color: var(--fg2);
+  max-width: 72ch;
+}
+.doc-figure-num {
+  font-weight: var(--w-medium); color: var(--fg1);
+  text-transform: uppercase; letter-spacing: var(--t-eyebrow-track);
+  font-size: var(--t-eyebrow-size); margin-right: 8px;
+}
+.doc-figure-data { margin-top: var(--space-md); }
+
+/* ---- document tables: one language, captioned, no zebra ---- */
+.doc-table { width: 100%; border-collapse: collapse; min-width: 520px; font-variant-numeric: tabular-nums; }
+.doc-table caption {
+  caption-side: top; text-align: left;
+  padding: 0 0 10px;
+  font-size: var(--t-caption-size); line-height: var(--t-caption-lh); color: var(--fg2);
+  /* Sticky to the scroll container's left edge, and capped to the viewport:
+     a caption inherits the table's min-width, so on a narrow screen it would
+     otherwise sit off to the right and have to be scrolled to — a caption
+     you cannot read without scrolling is not a caption. */
+  position: sticky; left: 0;
+  max-width: min(72ch, 84vw);
+}
+.doc-table th, .doc-table td {
+  text-align: left; vertical-align: top;
+  padding: 10px 14px 10px 0;
+  border-bottom: var(--border-hairline) solid var(--rule);
+}
+.doc-table th:last-child, .doc-table td:last-child { padding-right: 0; }
+.doc-table thead th {
+  font-weight: var(--w-medium); font-size: var(--t-eyebrow-size);
+  letter-spacing: var(--t-eyebrow-track); text-transform: uppercase; color: var(--fg2);
+  border-bottom: 1px solid var(--fg1);
+  white-space: nowrap;
+}
+.doc-table tbody th[scope="row"] { font-weight: var(--w-medium); color: var(--fg1); }
+.doc-table td, .doc-table tbody th { font-size: var(--t-small-size); line-height: var(--t-small-lh); }
+.doc-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.doc-table .mid { text-align: center; }
+/* No row hover and no zebra: hover is an app affordance and a document does
+   not have one. */
+.doc-table-appendix, .doc-table-appendix th, .doc-table-appendix td { font-size: var(--t-caption-size); line-height: var(--t-caption-lh); }
+.doc-table-appendix td, .doc-table-appendix tbody th { padding-top: 8px; padding-bottom: 8px; }
+.doc-appendix { margin-bottom: var(--space-sm); }
+
+/* A target of an in-page reference is focusable so following a reference
+   moves focus, not only the viewport — otherwise the next Tab resumes above
+   the appendix, wherever the reader was before they jumped. */
+.finding:target, tr:target { background: var(--vi-violet-06); }
+[tabindex="-1"]:focus { outline: none; }
+[tabindex="-1"]:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
 
 .export-list { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.export-list a { font-family: var(--vi-font-mono); font-size: var(--t-small-size); }
+.export-list a { font-size: var(--t-small-size); }
 
 /* ---------------------------------------------------------- sparkline -- */
 
@@ -655,44 +924,102 @@ details[open] summary { margin-bottom: 8px; }
 .step-title { font-weight: var(--w-medium); font-size: var(--t-small-size); color: var(--fg1); }
 .step-body { font-size: var(--t-small-size); color: var(--fg2); }
 
-/* ---------------------------------------------------------- deliverables- */
+/* ================================================= deliverables ========= */
 
-/* The moat, made visible: the same card language whether nothing has run
-   yet (every card "pending", the sample line standing in for real output)
-   or a run has produced the real thing (a working download, a real
-   preview). Same components; only the affordance changes. */
-.deliv-groups { display: flex; flex-direction: column; gap: var(--space-xl); margin-top: var(--space-sm); margin-bottom: var(--space-xl); }
-.deliv-group-head { margin-bottom: var(--space-sm); }
-.deliv-group-label { font-weight: var(--w-medium); font-size: var(--t-body-lg-size); color: var(--fg1); margin: 0 0 4px; }
-.deliv-group-desc { margin: 0; color: var(--fg2); font-size: var(--t-small-size); }
-/* Cards carry their own hairline rather than a container background peeking
-   through grid gaps — with an incomplete last row (the "Raw collection"
-   group has two, not four), a shared background would show as a solid
-   block behind the empty tracks instead of nothing. */
-.deliv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--space-sm); }
-.deliv-card { background: var(--bg); border: var(--border-hairline) solid var(--rule); border-radius: var(--radius-sm); padding: var(--space-md); display: flex; flex-direction: column; gap: 8px; }
-.deliv-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
-.deliv-name { font-weight: var(--w-medium); font-size: var(--t-body-size); color: var(--fg1); }
-.deliv-file { font-family: var(--vi-font-mono); font-size: 11px; color: var(--fg2); }
-.deliv-headline { margin: 0; font-weight: var(--w-medium); font-size: var(--t-small-size); color: var(--fg1); }
+/* Two tiers of unequal weight, because the four client-ready documents are
+   the offer and the six files behind them are the evidence for it. Ten
+   identical cards in three identical grids said `coverage.json` was worth as
+   much as the report a client is handed, and nothing on the page told the eye
+   otherwise. A filename is never a headline here: it sits beside the download
+   control, at caption weight, as metadata about a file. */
+
+.deliv-tiers { display: flex; flex-direction: column; gap: var(--space-xl); margin: var(--space-md) 0 var(--space-xl); }
+.deliv-tier-head { margin-bottom: var(--space-md); }
+.deliv-tier-label {
+  margin: 0 0 6px; font-weight: var(--w-book);
+  font-size: var(--t-h3-size); line-height: var(--t-h3-lh); letter-spacing: var(--t-h3-track);
+}
+.deliv-tier-lede { margin: 0; color: var(--fg2); font-size: var(--t-small-size); line-height: var(--t-small-lh); max-width: 68ch; }
+.deliv-tier-secondary .deliv-tier-label {
+  font-size: var(--t-subhead-size); line-height: var(--t-subhead-lh); font-weight: var(--w-medium);
+}
+.deliv-tier-secondary { padding-top: var(--space-lg); border-top: var(--border-hairline) solid var(--rule); }
+
+/* ---- the primary tier: presence, and a rendered excerpt ---- */
+.deliv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--space-md); }
+.deliv-card {
+  /* A grid item's automatic minimum size is its min-content width, and a
+     card carrying a sample table or an unbreakable filename has a
+     min-content wider than a 375px screen. Without this the whole grid
+     pushes the page sideways. */
+  min-width: 0;
+  background: var(--bg);
+  border: var(--border-hairline) solid var(--rule-control);
+  border-radius: var(--radius-sm);
+  padding: var(--space-md);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.deliv-card-pending { border-style: dashed; border-color: var(--rule-strong); background: var(--bg-subtle); }
+/* Three type steps per card, not seven. The deliverable's promise is the
+   loudest line after its name; everything else is caption weight. */
+.deliv-name {
+  margin: 0; font-weight: var(--w-medium);
+  font-size: var(--t-body-lg-size); line-height: var(--t-body-lg-lh); color: var(--fg1);
+}
+.deliv-headline { margin: 0; font-size: var(--t-body-size); line-height: var(--t-body-lh); color: var(--fg1); }
 .deliv-body { margin: 0; font-size: var(--t-caption-size); line-height: var(--t-caption-lh); color: var(--fg2); }
-.deliv-for { margin: 0; font-size: 11px; color: var(--fg2); }
-.deliv-for b { color: var(--fg1); font-weight: var(--w-medium); }
+.deliv-for { margin: 0; font-size: var(--t-eyebrow-size); line-height: var(--t-eyebrow-lh); color: var(--fg2); }
+.deliv-for strong { color: var(--fg1); font-weight: var(--w-medium); }
 .deliv-sample {
-  margin: 0; padding: 8px 10px;
+  margin: 0; padding: 12px var(--space-sm);
   background: var(--bg-subtle); border-left: 2px solid var(--rule-strong);
-  font-family: var(--vi-font-mono); font-size: 12px; line-height: 1.6; color: var(--fg1);
-  overflow-wrap: anywhere;
 }
 .deliv-card-available .deliv-sample { border-left-color: var(--signal); }
-.deliv-status { font-size: 11px; font-weight: var(--w-medium); text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg2); }
-.deliv-card-available .deliv-status { color: var(--signal); }
-.deliv-actions { margin-top: auto; padding-top: 4px; }
-.deliv-download {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-size: var(--t-caption-size); font-weight: var(--w-medium); color: var(--fg1); text-decoration: none;
+.deliv-sample .doc-prose { max-width: none; }
+.deliv-sample p.doc-p:last-child { margin-bottom: 0; }
+.deliv-sample figcaption {
+  margin-top: 8px;
+  font-size: var(--t-eyebrow-size); line-height: var(--t-eyebrow-lh);
+  letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg2);
 }
-.deliv-download:hover { color: var(--signal); }
+.deliv-sample .doc-table { min-width: 0; }
+.deliv-sample .table-scroll { margin-top: 0; }
+.deliv-status {
+  margin: 0; font-size: var(--t-eyebrow-size); font-weight: var(--w-medium);
+  text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg2);
+}
+.deliv-actions {
+  margin-top: auto; padding-top: var(--space-xs);
+  display: flex; align-items: center; gap: var(--space-sm); flex-wrap: wrap;
+}
+
+/* A real control with real states, not underlined text with a hover colour. */
+.deliv-download { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; }
+.deliv-download-meta { color: var(--fg2); font-weight: var(--w-book); font-size: var(--t-eyebrow-size); letter-spacing: 0.04em; }
+.btn-ghost:hover .deliv-download-meta { color: var(--fg1); }
+.deliv-file {
+  font-family: var(--vi-font-mono); font-size: 11px; color: var(--fg2);
+  overflow-wrap: anywhere;
+}
+
+/* ---- the secondary tier: a list, not cards ---- */
+.deliv-subgroup { margin-bottom: var(--space-md); }
+.deliv-subgroup-label {
+  margin: 0 0 4px; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  font-weight: var(--w-medium); font-size: var(--t-body-size); line-height: var(--t-body-lh);
+}
+.deliv-subgroup-desc { font-weight: var(--w-book); font-size: var(--t-caption-size); color: var(--fg2); }
+.deliv-list { list-style: none; margin: 0; padding: 0; border-top: var(--border-hairline) solid var(--rule); }
+.deliv-row {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: var(--space-md); flex-wrap: wrap;
+  padding: 14px 0; border-bottom: var(--border-hairline) solid var(--rule);
+}
+.deliv-row-main { flex: 1 1 24rem; min-width: 0; }
+.deliv-row-name { margin: 0 0 2px; font-weight: var(--w-medium); font-size: var(--t-body-size); line-height: var(--t-body-lh); }
+.deliv-row-body { margin: 0; font-size: var(--t-caption-size); line-height: var(--t-caption-lh); color: var(--fg1); max-width: 62ch; }
+.deliv-row-action { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.deliv-row-pending .deliv-row-name { color: var(--fg2); }
 
 /* ------------------------------------------------------ topic detail --- */
 
@@ -710,6 +1037,10 @@ details[open] summary { margin-bottom: 8px; }
   .app-main { padding-left: 20px; padding-right: 20px; }
   .page { padding-top: 32px; }
   .deliv-grid { grid-template-columns: 1fr; }
+  .doc-title { font-size: var(--t-h2-size); line-height: var(--t-h2-lh); letter-spacing: var(--t-h2-track); max-width: none; }
+  .doc-h { font-size: var(--t-subhead-size); line-height: var(--t-subhead-lh); }
+  .finding-claim { font-size: var(--t-body-lg-size); line-height: var(--t-body-lg-lh); max-width: none; }
+  .doc-cover-facts { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 560px) {
   .app-top { height: auto; flex-wrap: wrap; gap: 12px; padding-top: 12px; padding-bottom: 12px; }
@@ -717,6 +1048,90 @@ details[open] summary { margin-bottom: 8px; }
   .page-head { align-items: flex-start; }
   .estimate-total-value { font-size: 30px; line-height: 36px; }
   .flow-steps { gap: 12px; }
+  .doc-cover-facts { grid-template-columns: 1fr; }
+  .doc-actions .btn { width: 100%; text-align: center; }
+  .deliv-row-action { width: 100%; }
+}
+
+/* =========================================================== print ====== */
+
+/* A client's report gets printed or saved as a PDF — that is the whole
+   difference between "a web page someone printed" and "a document". The app's
+   chrome goes; the document stays, with its references resolved to printed
+   URLs so a paper copy is still checkable.
+
+   Two things deliberately survive: the synthetic-data notice, because a
+   fabricated-run warning that vanishes on the way to the printer is worse
+   than useless, and every tab panel on the insight screen, four of which are
+   `display: none` on screen and would otherwise print blank. */
+@media print {
+  @page { margin: 18mm 16mm; }
+
+  html { font-size: 10.5pt; }
+  body { background: #fff; color: #000; }
+
+  .app-top, .app-top-nav, .flow-rail, .app-foot, .skip-link,
+  .read-only-banner, .doc-actions, .doc-no-print, .deliv-tiers,
+  .filter-form, .form-actions, .confirm-actions, .dated-strip,
+  .btn, .tabbar, .doc-print-note { display: none !important; }
+
+  .app-main { padding: 0 !important; }
+  .page, .doc { max-width: none !important; padding-top: 0 !important; }
+
+  /* The demonstration-data warning prints, and prints first. */
+  .synthetic-banner {
+    display: flex !important; background: #fff !important; color: #000 !important;
+    border: 1pt solid #000; padding: 8pt 10pt; margin-bottom: 12pt;
+  }
+  .synthetic-banner-mark { display: none; }
+
+  a { color: #000; text-decoration: none; }
+  .ref-marks a { color: #000; font-weight: 700; }
+  /* A reference is only checkable on paper if the URL is on the paper. Only
+     the appendix's source links are expanded — expanding every in-page
+     anchor would litter the document with `#finding-3`. */
+  .doc-appendix a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    font-size: 7.5pt; color: #333; word-break: break-all;
+  }
+
+  .doc-cover { border-bottom: 1pt solid #000; break-after: avoid; }
+  .doc-title { font-size: 26pt; line-height: 1.15; }
+  .doc-h { font-size: 14pt; break-after: avoid; }
+  .doc-section, .finding, .doc-figure, table, tr, .doc-cover-facts { break-inside: avoid; }
+  .doc-figure-plot { border: 0.5pt solid #999; }
+  .finding-claim { font-size: 13pt; line-height: 1.35; }
+
+  .table-scroll { overflow: visible !important; }
+  .doc-table { min-width: 0 !important; }
+  .doc-table thead th { position: static !important; }
+  .data-table thead th { position: static !important; background: none !important; }
+  .data-table tbody tr:hover { background: none !important; }
+
+  .tier-badge {
+    border: 0.5pt solid #000 !important; background: #fff !important; color: #000 !important;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .tier-badge-corroborated { background: #000 !important; color: #fff !important; }
+
+  /* Every insight tab prints, with its label as a heading — four of five are
+     hidden on screen and would silently vanish from a printed page. */
+  .tab-panel { display: block !important; padding-top: 0 !important; }
+  details { display: block; }
+  details > summary { display: none; }
+}
+
+/* ==================================================== forced colors ===== */
+
+/* In Windows High Contrast every `background`-drawn mark disappears or
+   inverts. Each of these is a *meaning*-carrying mark, not decoration, so
+   each gets a border fallback rather than being left to vanish. */
+@media (forced-colors: active) {
+  .status-badge::before, .stage-mark, .bar-fill,
+  .flow-step.flow-step-current::after { forced-color-adjust: none; }
+  .tier-badge { border: 1px solid currentColor; }
+  input:focus-visible, textarea:focus-visible, select:focus-visible,
+  .table-scroll:focus-visible { outline: 2px solid Highlight; }
 }
 
 @media (prefers-reduced-motion: reduce) {

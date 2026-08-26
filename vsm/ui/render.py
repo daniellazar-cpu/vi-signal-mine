@@ -20,12 +20,26 @@ for "not estimable"; black structure and a dashed stroke say it instead.
 from __future__ import annotations
 
 import math
+import re
 from html import escape
 from typing import Any, Mapping, Sequence
 
 from vsm.ui.content import TIERS
 
-__all__ = ["forest_plot_svg", "sparkline_svg", "usd", "pct", "net_stance_text", "fmt_dt"]
+__all__ = [
+    "forest_plot_svg",
+    "sparkline_svg",
+    "usd",
+    "pct",
+    "net_stance_text",
+    "fmt_dt",
+    "fmt_date_long",
+    "markdown_to_html",
+    "markdown_inline_html",
+    "markdown_sections",
+    "markdown_paragraphs",
+    "markdown_excerpt_html",
+]
 
 # Vi's palette (see ds/colors_and_type.css): black rules and structure, Vi
 # Violet for the one measured signal — here, the whisker and box that ARE
@@ -88,6 +102,34 @@ def fmt_dt(value: str | None) -> str:
     # Signals and runs both stamp ISO-8601. Slice rather than parse-and-
     # reformat: a malformed string still shows *something* instead of 500ing.
     return value[:16].replace("T", " ")
+
+
+_MONTHS = (
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+)
+
+
+def fmt_date_long(value: str | None) -> str:
+    """A date a client reads: `25 August 2026`.
+
+    The machine stamp stays available to a template as the raw value for a
+    `<time datetime="...">` attribute — this is the label, not a replacement
+    for the traceable original. A string that does not parse as ISO comes
+    back sliced rather than guessed at, for the same reason `fmt_dt` does:
+    showing something wrong is better than 500ing a whole report over a
+    malformed timestamp.
+    """
+    if not value:
+        return "undated"
+    head = str(value)[:10]
+    parts = head.split("-")
+    if len(parts) != 3 or not all(x.isdigit() for x in parts):
+        return head or "undated"
+    year, month, day = (int(x) for x in parts)
+    if not 1 <= month <= 12:
+        return head
+    return f"{day} {_MONTHS[month - 1]} {year}"
 
 
 def _row_h(n: int) -> int:
@@ -265,3 +307,626 @@ def forest_plot_svg(rows: Sequence[Mapping[str, Any]]) -> str:
     )
     parts.append("</svg>")
     return "".join(parts)
+
+
+# ==========================================================================
+# Markdown -> HTML. One converter, one place.
+# ==========================================================================
+#
+# Every markdown surface in this app goes through `markdown_to_html`. That is
+# the whole point of it living here rather than in a template filter or a
+# per-route helper: the failure that produced this module was raw `**bold**`
+# reaching a client-facing page, and the only structural fix for "raw syntax
+# can reach a page" is that no surface is allowed its own converter.
+#
+# It is not a general CommonMark implementation and does not pretend to be —
+# no third-party markdown dependency is on this project's allowed list. It is
+# a complete-enough converter for prose: ATX and setext headings, fenced and
+# indented code, blockquotes (nested), bullet and ordered lists (nested),
+# pipe tables with escaped pipes and alignment, thematic breaks, and inline
+# code, links, autolinks, bare URLs, images, strong, emphasis, strikethrough,
+# hard breaks and backslash escapes. Anything it cannot parse is emitted as
+# escaped text, never as the source syntax it came from.
+#
+# Two deliberate refusals:
+#
+# * `href` schemes are allow-listed (http, https, mailto, and anything with
+#   no scheme at all). A `javascript:` URL in a model-authored link is not
+#   rendered as a link — the label survives, the href does not.
+# * Headings are emitted at `base_level` and below, clamped at `h6`, so a
+#   document rendered inside a page cannot mint a second `<h1>` and flatten
+#   the page's own outline.
+
+_MD_ATX_RE = re.compile(r"^(#{1,6})(?:[ \t]+(.*?))?[ \t]*#*[ \t]*$")
+_MD_FENCE_RE = re.compile(r"^(`{3,}|~{3,})[ \t]*([A-Za-z0-9_+#.-]*)[ \t]*$")
+_MD_HR_RE = re.compile(
+    r"^ {0,3}(?:\*[ \t]*){3,}$|^ {0,3}(?:-[ \t]*){3,}$|^ {0,3}(?:_[ \t]*){3,}$"
+)
+_MD_SETEXT1_RE = re.compile(r"^ {0,3}=+[ \t]*$")
+_MD_SETEXT2_RE = re.compile(r"^ {0,3}-+[ \t]*$")
+_MD_QUOTE_RE = re.compile(r"^ {0,3}>[ \t]?(.*)$")
+_MD_ITEM_RE = re.compile(r"^( *)(?:([-*+])|(\d{1,9})[.)])( +|\t)(.*)$")
+_MD_PIPE_ROW_RE = re.compile(r"^\s*\|")
+_MD_DELIM_ROW_RE = re.compile(r"^[\s|:-]*-[\s|:-]*$")
+_MD_INDENTED_CODE_RE = re.compile(r"^ {4,}\S")
+
+#: The character run a paragraph's hard line break is folded to before the
+#: inline pass sees it. A literal NUL is stripped from the input, so this can
+#: never collide with document content.
+_MD_BREAK = "\x00"
+
+_MD_ESCAPABLE = set("\\`*_{}[]()#+-.!|>~<&\"'/:")
+
+_MD_CODE_SPAN_RE = re.compile(r"(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.S)
+_MD_LINK_RE = re.compile(
+    r"\[(?P<label>(?:[^\[\]\\]|\\.)*)\]\("
+    r"(?P<href><[^>]*>|(?:[^()\s]|\([^()\s]*\))*)"
+    r"(?:[ \t]+\"(?P<title>[^\"]*)\")?\)"
+)
+_MD_IMAGE_RE = re.compile(r"!(?=\[)")
+_MD_AUTOLINK_RE = re.compile(r"<((?:https?://|mailto:)[^>\s]+)>")
+_MD_BARE_URL_RE = re.compile(r"https?://[^\s<>\"'`\]]+")
+_MD_STRONG_EM_RE = re.compile(r"\*\*\*(?=\S)(.+?)(?<=\S)\*\*\*", re.S)
+_MD_STRONG_STAR_RE = re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*", re.S)
+_MD_STRONG_UNDER_RE = re.compile(r"__(?=\S)(.+?)(?<=\S)__(?!\w)", re.S)
+_MD_EM_STAR_RE = re.compile(r"\*(?=\S)([^*]+?)(?<=\S)\*", re.S)
+# Deliberately narrow, and the narrowness is load-bearing: without the word
+# boundaries this matches straight through identifiers like
+# `hcp_discussion, patient_community` — the first `_` pairs with the next
+# unrelated `_` and swallows the space and comma between them. `kind_mix`
+# and `venue_mix` keys are exactly that shape, so this is not hypothetical.
+_MD_EM_UNDER_RE = re.compile(r"(?<!\w)_(?=\S)([^_]+?)(?<=\S)_(?!\w)", re.S)
+_MD_STRIKE_RE = re.compile(r"~~(?=\S)(.+?)(?<=\S)~~", re.S)
+_MD_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
+_MD_SAFE_SCHEMES = ("http:", "https:", "mailto:")
+_MD_NUMERIC_CELL_RE = re.compile(r"^[+-]?[\d,]+(?:\.\d+)?%?$")
+
+
+def _md_href(raw: str) -> str:
+    """An escaped href, or `""` when the scheme is not one we will link to.
+
+    A refused href drops the link and keeps the label — the reader still
+    reads the words, and the page never carries a scheme this app did not
+    intend to hand a browser.
+    """
+    url = raw.strip()
+    if url.startswith("<") and url.endswith(">"):
+        url = url[1:-1].strip()
+    if not url:
+        return ""
+    m = _MD_SCHEME_RE.match(url)
+    if m and not url.lower().startswith(_MD_SAFE_SCHEMES):
+        return ""
+    return escape(url, quote=True)
+
+
+def _md_inline(text: str) -> str:
+    """Inline markdown, as HTML. Every literal character is escaped on the
+    way out; only tags this function itself emits are markup."""
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+
+        if ch == "\\" and i + 1 < n and text[i + 1] in _MD_ESCAPABLE:
+            out.append(escape(text[i + 1]))
+            i += 2
+            continue
+        if ch == _MD_BREAK:
+            out.append("<br>")
+            i += 1
+            continue
+        if ch == "\n":
+            out.append(" ")
+            i += 1
+            continue
+        if ch == "`":
+            m = _MD_CODE_SPAN_RE.match(text, i)
+            if m:
+                out.append(f"<code>{escape(m.group(2).strip())}</code>")
+                i = m.end()
+                continue
+        if ch == "!" and _MD_IMAGE_RE.match(text, i):
+            m = _MD_LINK_RE.match(text, i + 1)
+            if m:
+                # No image is ever rendered: this app loads nothing over the
+                # network, and an <img> pointing at a remote host would be
+                # the one exception. The alt text is the content; the source
+                # becomes a link beside it so nothing is silently dropped.
+                alt = _md_inline(m.group("label")) or "image"
+                href = _md_href(m.group("href"))
+                out.append(
+                    f'<a href="{href}">{alt}</a>' if href else f"<span>{alt}</span>"
+                )
+                i = m.end()
+                continue
+        if ch == "[":
+            m = _MD_LINK_RE.match(text, i)
+            if m:
+                label = _md_inline(m.group("label"))
+                href = _md_href(m.group("href"))
+                title = m.group("title")
+                if href:
+                    t = f' title="{escape(title, quote=True)}"' if title else ""
+                    out.append(f'<a href="{href}"{t}>{label}</a>')
+                else:
+                    out.append(label)
+                i = m.end()
+                continue
+        if ch == "<":
+            m = _MD_AUTOLINK_RE.match(text, i)
+            if m:
+                href = _md_href(m.group(1))
+                shown = escape(m.group(1))
+                out.append(f'<a href="{href}">{shown}</a>' if href else shown)
+                i = m.end()
+                continue
+        if ch in "hH":
+            m = _MD_BARE_URL_RE.match(text, i)
+            if m:
+                url = m.group(0).rstrip(".,;:!?)")
+                href = _md_href(url)
+                out.append(f'<a href="{href}">{escape(url)}</a>' if href else escape(url))
+                i += len(url)
+                continue
+        if ch == "*" or ch == "_":
+            for pattern, tag in (
+                (_MD_STRONG_EM_RE, "strong-em"),
+                (_MD_STRONG_STAR_RE, "strong"),
+                (_MD_STRONG_UNDER_RE, "strong"),
+                (_MD_EM_STAR_RE, "em"),
+                (_MD_EM_UNDER_RE, "em"),
+            ):
+                m = pattern.match(text, i)
+                if m:
+                    inner = _md_inline(m.group(1))
+                    if tag == "strong-em":
+                        out.append(f"<strong><em>{inner}</em></strong>")
+                    else:
+                        out.append(f"<{tag}>{inner}</{tag}>")
+                    i = m.end()
+                    break
+            else:
+                out.append(escape(ch))
+                i += 1
+            continue
+        if ch == "~":
+            m = _MD_STRIKE_RE.match(text, i)
+            if m:
+                out.append(f"<del>{_md_inline(m.group(1))}</del>")
+                i = m.end()
+                continue
+        out.append(escape(ch))
+        i += 1
+    return "".join(out)
+
+
+def _md_split_cells(row: str) -> list[str]:
+    """A pipe-table row's cells, honouring `\\|` inside a cell.
+
+    A bare `.split("|")` splits an escaped pipe and hands the table one cell
+    too many, which is how a three-column header ends up over a four-cell
+    row. The escape survives into the cell text and the inline pass turns it
+    back into a literal `|`.
+    """
+    body = row.strip()
+    if body.startswith("|"):
+        body = body[1:]
+    if body.endswith("|") and not body.endswith("\\|"):
+        body = body[:-1]
+    return [c.strip() for c in re.split(r"(?<!\\)\|", body)]
+
+
+def _md_alignments(cells: list[str]) -> list[str]:
+    out = []
+    for c in cells:
+        c = c.strip()
+        if c.startswith(":") and c.endswith(":"):
+            out.append("center")
+        elif c.endswith(":"):
+            out.append("right")
+        elif c.startswith(":"):
+            out.append("left")
+        else:
+            out.append("")
+    return out
+
+
+def _md_table(block: list[str], caption: str) -> str:
+    rows = [_md_split_cells(ln) for ln in block]
+    header = rows[0]
+    body = rows[1:]
+    aligns = [""] * len(header)
+    if body and _MD_DELIM_ROW_RE.match(block[1].strip()):
+        aligns = _md_alignments(body[0])
+        body = body[1:]
+    aligns += [""] * (len(header) - len(aligns))
+
+    width = len(header)
+    body = [r + [""] * (width - len(r)) if len(r) < width else r for r in body]
+
+    # A column whose every filled cell is a number is right-aligned and set
+    # in tabular numerals, so counts line up down the column. Explicit
+    # alignment in the delimiter row wins over the guess.
+    numeric = []
+    for col in range(width):
+        cells = [r[col] for r in body if col < len(r) and r[col].strip()]
+        numeric.append(bool(cells) and all(_MD_NUMERIC_CELL_RE.match(c) for c in cells))
+
+    def cls(col: int) -> str:
+        align = aligns[col] if col < len(aligns) else ""
+        if align == "right" or (not align and numeric[col]):
+            return ' class="num"'
+        if align == "center":
+            return ' class="mid"'
+        return ""
+
+    thead = "".join(
+        f'<th scope="col"{cls(c)}>{_md_inline(h)}</th>' for c, h in enumerate(header)
+    )
+    trs = []
+    for r in body:
+        tds = "".join(f"<td{cls(c)}>{_md_inline(v)}</td>" for c, v in enumerate(r))
+        trs.append(f"<tr>{tds}</tr>")
+    cap = escape(caption) if caption else "Table"
+    return (
+        f'<div class="table-scroll" tabindex="0" role="region" '
+        f'aria-label="{escape(cap)}">'
+        f'<table class="doc-table">'
+        f'<caption class="visually-hidden">{cap}</caption>'
+        f"<thead><tr>{thead}</tr></thead><tbody>{''.join(trs)}</tbody></table></div>"
+    )
+
+
+def _md_dedent(lines: list[str], width: int) -> list[str]:
+    out = []
+    for ln in lines:
+        stripped = ln[:width]
+        if stripped.strip():  # less indented than expected — keep as-is
+            out.append(ln.lstrip())
+        else:
+            out.append(ln[width:])
+    return out
+
+
+def _md_list(lines: list[str], start: int, level: int, ctx: dict) -> tuple[str, int]:
+    m = _MD_ITEM_RE.match(lines[start])
+    assert m is not None
+    indent = len(m.group(1))
+    ordered = m.group(3) is not None
+    first_num = m.group(3)
+
+    items: list[list[str]] = []
+    loose = False
+    i, n = start, len(lines)
+    while i < n:
+        m = _MD_ITEM_RE.match(lines[i])
+        if m is None or len(m.group(1)) < indent:
+            break
+        if len(m.group(1)) > indent:
+            # A deeper marker with no parent item is not ours to consume.
+            break
+        if (m.group(3) is not None) != ordered:
+            break
+        content_indent = len(m.group(1)) + len(m.group(2) or m.group(3) or "") + len(m.group(4))
+        item = [m.group(5)]
+        i += 1
+        blanks = 0
+        while i < n:
+            ln = lines[i]
+            if not ln.strip():
+                # A blank line only continues the item if indented content
+                # follows it; otherwise the list ends here.
+                j = i + 1
+                while j < n and not lines[j].strip():
+                    j += 1
+                if j < n and (
+                    len(lines[j]) - len(lines[j].lstrip(" ")) >= content_indent
+                ):
+                    item.append("")
+                    blanks += 1
+                    i += 1
+                    continue
+                break
+            lead = len(ln) - len(ln.lstrip(" "))
+            if lead >= content_indent:
+                item.append(ln[content_indent:])
+                i += 1
+                continue
+            if _MD_ITEM_RE.match(ln) or _MD_ATX_RE.match(ln.strip()) or _MD_PIPE_ROW_RE.match(ln):
+                break
+            # Lazy continuation: an unindented wrap of the same paragraph.
+            item.append(ln.strip())
+            i += 1
+        if blanks:
+            loose = True
+        items.append(item)
+
+    rendered = []
+    for item in items:
+        inner = _md_blocks(item, level, ctx)
+        # A tight list item's leading paragraph is unwrapped, so a one-line
+        # item is one line of text rather than a block with a paragraph's
+        # margins. A nested list under it still nests — only the wrapper of
+        # the *first* block goes.
+        open_p = '<p class="doc-p">'
+        if not loose and inner.startswith(open_p):
+            end = inner.find("</p>")
+            if end != -1:
+                inner = inner[len(open_p):end] + inner[end + 4:]
+        rendered.append(f"<li>{inner}</li>")
+    tag = "ol" if ordered else "ul"
+    attr = ""
+    if ordered and first_num and first_num != "1":
+        attr = f' start="{int(first_num)}"'
+    return f'<{tag} class="doc-list"{attr}>{"".join(rendered)}</{tag}>', i
+
+
+def _md_heading(level: int, base: int, text: str, ctx: dict) -> str:
+    tag = min(base + level - 1, 6)
+    ctx["heading"] = re.sub(r"\s+", " ", re.sub(r"[*_`]", "", text)).strip()
+    return f'<h{tag} class="doc-h{level}">{_md_inline(text)}</h{tag}>'
+
+
+def _md_blocks(lines: list[str], base: int, ctx: dict) -> str:
+    out: list[str] = []
+    i, n = 0, len(lines)
+    while i < n:
+        raw = lines[i]
+        line = raw.rstrip()
+        stripped = line.strip()
+
+        if not stripped:
+            i += 1
+            continue
+
+        m = _MD_FENCE_RE.match(stripped)
+        if m:
+            fence = m.group(1)[0] * 3
+            lang = m.group(2)
+            body: list[str] = []
+            i += 1
+            while i < n and not lines[i].strip().startswith(fence):
+                body.append(lines[i])
+                i += 1
+            if i < n:
+                i += 1
+            attr = f' class="language-{escape(lang, quote=True)}"' if lang else ""
+            out.append(
+                f'<pre class="doc-code"><code{attr}>{escape(chr(10).join(body))}</code></pre>'
+            )
+            continue
+
+        if _MD_HR_RE.match(line):
+            out.append('<hr class="doc-rule">')
+            i += 1
+            continue
+
+        m = _MD_ATX_RE.match(stripped)
+        if m:
+            out.append(_md_heading(len(m.group(1)), base, m.group(2) or "", ctx))
+            i += 1
+            continue
+
+        if _MD_QUOTE_RE.match(line):
+            block: list[str] = []
+            while i < n and (
+                _MD_QUOTE_RE.match(lines[i]) or (lines[i].strip() and block)
+            ):
+                qm = _MD_QUOTE_RE.match(lines[i])
+                block.append(qm.group(1) if qm else lines[i].strip())
+                i += 1
+            out.append(f'<blockquote class="doc-quote">{_md_blocks(block, base, ctx)}</blockquote>')
+            continue
+
+        if _MD_PIPE_ROW_RE.match(line):
+            block = []
+            while i < n and _MD_PIPE_ROW_RE.match(lines[i].strip() or ""):
+                block.append(lines[i].strip())
+                i += 1
+            out.append(_md_table(block, ctx.get("heading", "")))
+            continue
+
+        if _MD_ITEM_RE.match(line):
+            html, i = _md_list(lines, i, base, ctx)
+            out.append(html)
+            continue
+
+        if _MD_INDENTED_CODE_RE.match(raw):
+            body = []
+            while i < n and (_MD_INDENTED_CODE_RE.match(lines[i]) or not lines[i].strip()):
+                body.append(lines[i][4:] if lines[i].startswith("    ") else lines[i].strip())
+                i += 1
+            while body and not body[-1].strip():
+                body.pop()
+            out.append(f'<pre class="doc-code"><code>{escape(chr(10).join(body))}</code></pre>')
+            continue
+
+        # Setext heading: this line's text, underlined on the next.
+        if i + 1 < n and stripped:
+            nxt = lines[i + 1].rstrip()
+            if _MD_SETEXT1_RE.match(nxt) and nxt.strip():
+                out.append(_md_heading(1, base, stripped, ctx))
+                i += 2
+                continue
+            if _MD_SETEXT2_RE.match(nxt) and len(nxt.strip()) >= 2:
+                out.append(_md_heading(2, base, stripped, ctx))
+                i += 2
+                continue
+
+        block = []
+        while i < n:
+            ln = lines[i]
+            s = ln.strip()
+            if not s:
+                break
+            if (
+                _MD_ATX_RE.match(s)
+                or _MD_ITEM_RE.match(ln)
+                or _MD_PIPE_ROW_RE.match(ln)
+                or _MD_FENCE_RE.match(s)
+                or _MD_QUOTE_RE.match(ln)
+                or _MD_HR_RE.match(ln.rstrip())
+            ):
+                break
+            if i > 0 and block:
+                nxt = lines[i]
+                if _MD_SETEXT1_RE.match(nxt.rstrip()) or (
+                    _MD_SETEXT2_RE.match(nxt.rstrip()) and len(nxt.strip()) >= 2
+                ):
+                    break
+            block.append(ln.rstrip() if not ln.rstrip().endswith("  ") else ln.rstrip() + _MD_BREAK)
+            i += 1
+        if block:
+            text = "\n".join(block).replace("  " + _MD_BREAK, _MD_BREAK)
+            out.append(f'<p class="doc-p">{_md_inline(text)}</p>')
+    return "".join(out)
+
+
+def markdown_to_html(
+    text: str | None, *, base_level: int = 1, drop_title: bool = False
+) -> str:
+    """Markdown as HTML, with headings emitted at `base_level` and below.
+
+    `base_level=3` renders a document's `#` as `<h3>`, which is how a whole
+    artifact is placed inside a page that already has an `<h1>` and `<h2>`
+    of its own without minting a second `<h1>` or skipping a level.
+
+    `drop_title` removes the document's own leading `#` title. A page that
+    has already named the artifact in its section heading would otherwise
+    print that name twice, one line apart.
+    """
+    if not text:
+        return ""
+    body = text.replace("\r\n", "\n").replace("\r", "\n").replace(_MD_BREAK, "")
+    body = body.expandtabs(4).strip("\n")
+    if not body.strip():
+        return ""
+    lines = body.split("\n")
+    if drop_title:
+        for i, line in enumerate(lines):
+            if not line.strip():
+                continue
+            m = _MD_ATX_RE.match(line.strip())
+            if m and len(m.group(1)) == 1:
+                lines = lines[i + 1:]
+            break
+    # The document's *shallowest* heading becomes `base_level`, and the rest
+    # shift with it. Without this, a body whose own top heading is `##`
+    # (which is what every artifact looks like once its `#` title is dropped)
+    # renders one level deeper than the page asked for — and a section `<h2>`
+    # followed by an `<h4>` is a skipped level, which flattens the outline
+    # for anyone navigating by headings.
+    levels = [
+        len(m.group(1))
+        for m in (_MD_ATX_RE.match(ln.strip()) for ln in lines)
+        if m
+    ]
+    shift = (min(levels) - 1) if levels else 0
+    return _md_blocks(lines, max(1, base_level - shift), {"heading": ""})
+
+
+def markdown_inline_html(text: str | None) -> str:
+    """One line of markdown as inline HTML — no wrapping paragraph.
+
+    A finding's claim is a single sentence that has to end with its
+    superscript reference marks *inside* the sentence, not in a block after
+    it. Rendered as a block, the references detached onto their own line and
+    read as a footer rather than as part of the claim.
+    """
+    if not text:
+        return ""
+    return _md_inline(" ".join(text.replace("\r\n", "\n").split("\n")).strip())
+
+
+def markdown_sections(text: str | None) -> list[dict[str, Any]]:
+    """A markdown document split at its `##` headings, in order.
+
+    Presentation-only reshaping of a document this same process wrote: it
+    lets a view render some of an artifact's sections as designed components
+    and the rest as prose, without either one being written twice.
+
+    Returns `[{"heading": str, "level": int, "body": str}, ...]`. Anything
+    before the first heading arrives as a section with an empty heading.
+    """
+    if not text:
+        return []
+    sections: list[dict[str, Any]] = [{"heading": "", "level": 0, "body": []}]
+    for line in text.replace("\r\n", "\n").split("\n"):
+        m = _MD_ATX_RE.match(line.strip())
+        if m and len(m.group(1)) <= 2:
+            sections.append(
+                {"heading": (m.group(2) or "").strip(), "level": len(m.group(1)), "body": []}
+            )
+        else:
+            sections[-1]["body"].append(line)
+    return [
+        {"heading": s["heading"], "level": s["level"], "body": "\n".join(s["body"]).strip("\n")}
+        for s in sections
+        if s["heading"] or "\n".join(s["body"]).strip()
+    ]
+
+
+def markdown_paragraphs(text: str | None) -> list[str]:
+    """A markdown fragment's blank-line-separated paragraphs, as markdown.
+
+    Used where a section is known to hold one paragraph per finding — each
+    one becomes a designed statement rather than a run of body copy.
+    """
+    if not text:
+        return []
+    blocks: list[list[str]] = [[]]
+    for line in text.replace("\r\n", "\n").split("\n"):
+        if line.strip():
+            blocks[-1].append(line.strip())
+        elif blocks[-1]:
+            blocks.append([])
+    return [" ".join(b) for b in blocks if b]
+
+
+def markdown_excerpt_html(text: str | None, *, limit: int = 260, min_len: int = 48) -> str:
+    """A short, rendered excerpt of a markdown artifact.
+
+    Skips the document's own title, its tables and its rules, and takes the
+    first substantive prose block — a paragraph or a bullet list — which it
+    renders as markup. `min_len` is what keeps an excerpt off a document's
+    standing preamble ("Suggestions, not decisions.", "One row per cited
+    signal."): a block that short is a label, not a sample, so the next one
+    is preferred and the short one is only used if it is all there is.
+
+    The point is that a deliverable's sample is the *shape of the output*,
+    never its source syntax: an excerpt reading `**cost**` is the exact
+    defect this module exists to make impossible.
+    """
+    if not text:
+        return ""
+    blocks: list[tuple[str, list[str]]] = []
+    for line in text.replace("\r\n", "\n").split("\n"):
+        s_line = line.strip()
+        if not s_line:
+            if blocks and blocks[-1][1]:
+                blocks.append(("", []))
+            continue
+        if _MD_ATX_RE.match(s_line) or _MD_PIPE_ROW_RE.match(s_line) or _MD_HR_RE.match(s_line):
+            if blocks and blocks[-1][1]:
+                blocks.append(("", []))
+            continue
+        kind = "list" if _MD_ITEM_RE.match(line) else "para"
+        if not blocks or not blocks[-1][1] or blocks[-1][0] != kind:
+            blocks.append((kind, [s_line]))
+        else:
+            blocks[-1][1].append(s_line)
+    candidates = [(k, ls) for k, ls in blocks if ls]
+    if not candidates:
+        return ""
+    chosen = next(
+        (c for c in candidates if sum(len(x) for x in c[1]) >= min_len), candidates[0]
+    )
+    kind, picked = chosen
+    if kind == "list":
+        return markdown_to_html("\n".join(picked[:3]))
+    joined = " ".join(picked)
+    if len(joined) > limit:
+        head = joined[:limit].rsplit(" ", 1)[0]
+        joined = (head or joined[:limit]) + "…"
+    return markdown_to_html(joined)

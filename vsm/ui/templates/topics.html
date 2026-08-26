@@ -17,8 +17,9 @@
 {% endif %}
 
 {% if rows %}
-<div class="table-scroll">
+<div class="table-scroll" tabindex="0" role="region" aria-label="Topics">
 <table class="data-table topics-table">
+  <caption class="visually-hidden">Every topic being watched, with its last snapshot, spend to date and signal volume.</caption>
   <thead>
     <tr>
       <th scope="col">Topic</th>
@@ -26,7 +27,7 @@
       <th scope="col" class="num">Snapshots</th>
       <th scope="col" class="num">Spend to date</th>
       <th scope="col">Volume</th>
-      <th scope="col"></th>
+      <th scope="col"><span class="visually-hidden">Actions</span></th>
     </tr>
   </thead>
   <tbody>

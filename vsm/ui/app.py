@@ -42,6 +42,7 @@ from vsm.platform import assert_serveable, storage_is_durable
 from vsm.topics.model import BANDS
 from vsm.ui.content import (
     DELIVERABLE_GROUPS,
+    DELIVERABLE_TIERS,
     DELIVERABLES,
     EPHEMERAL_STORAGE_NOTICE,
     FIELD_GUIDE,
@@ -54,7 +55,20 @@ from vsm.ui.content import (
     WHAT_IT_IS,
     explainer,
 )
-from vsm.ui.render import forest_plot_svg, fmt_dt, net_stance_text, pct, sparkline_svg, usd
+from vsm.ui.render import (
+    fmt_date_long,
+    fmt_dt,
+    forest_plot_svg,
+    markdown_excerpt_html,
+    markdown_inline_html,
+    markdown_paragraphs,
+    markdown_sections,
+    markdown_to_html,
+    net_stance_text,
+    pct,
+    sparkline_svg,
+    usd,
+)
 
 __all__ = ["create_app"]
 
@@ -147,21 +161,13 @@ _STAGES: dict[str, list[tuple[str, str]]] = {
     ],
 }
 
-_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
-# Deliberately narrow: only a `_..._` span whose underscores sit at a word
-# boundary counts as emphasis. Without the boundary check this matches straight
-# through identifiers like `hcp_discussion, patient_community` — the first
-# `_` and the next unrelated `_` pair up and swallow everything between them,
-# including the space and comma. `kind_mix`/`venue_mix` keys are exactly that
-# shape, so this is not a hypothetical.
-_ITALIC_RE = re.compile(r"(?<!\w)_([^_\s][^_]*?)_(?!\w)")
 _PIPE_TABLE_ROW = re.compile(r"^\s*\|")
 
 
 # content.TIERS keys use a space ("single source"); run data uses an
 # underscore ("single_source"). Normalised once so a tier shown anywhere in
-# the templates can carry its own definition as a `title` attribute — the
-# reader should never meet "corroborated" with no way to learn what it means.
+# the templates can carry its own definition, and so the tier badge and the
+# glossary can never drift into two different definitions of the same word.
 _TIER_NOTES = {key.replace(" ", "_"): note for key, note in TIERS}
 
 
@@ -189,88 +195,6 @@ def _anomaly_label(kind: str | None) -> str:
     return _ANOMALY_KIND_LABELS.get(kind or "", kind or "change")
 
 
-def _inline_md(text: str) -> str:
-    escaped = _BOLD_RE.sub(r"<strong>\1</strong>", _esc(text))
-    return _ITALIC_RE.sub(r"<em>\1</em>", escaped)
-
-
-def _render_pipe_table(lines: list[str]) -> str:
-    rows = [[c.strip() for c in ln.strip().strip("|").split("|")] for ln in lines]
-    header, rest = rows[0], rows[1:]
-    if rest and set("".join(rest[0])) <= {"-", " "}:
-        rest = rest[1:]
-    thead = "".join(f"<th>{_inline_md(h)}</th>" for h in header)
-    tbody = "".join(
-        "<tr>" + "".join(f"<td>{_inline_md(c)}</td>" for c in row) + "</tr>"
-        for row in rest
-    )
-    return (
-        f'<div class="table-scroll"><table class="md-table"><thead><tr>{thead}</tr></thead>'
-        f"<tbody>{tbody}</tbody></table></div>"
-    )
-
-
-def _markdown_lite_to_html(text: str | None) -> str:
-    """Just enough Markdown to preview the four REPORT artifacts honestly.
-
-    Not a general renderer — a line-based pass for exactly the shapes
-    ``vsm.modes.report`` is known to emit: ``#``/``##``/``###`` headings,
-    pipe tables, ``- `` bullet lists, and plain paragraphs with ``**bold**``,
-    in any mix of blank-line-separated or tight (heading directly followed
-    by its body, as ``methodology.md`` writes it) grouping. No third-party
-    Markdown dependency is on the allowed list, so this is deliberately
-    narrow rather than general — but it walks line by line rather than
-    classifying a whole blank-line-delimited block at once, because both
-    real artifacts mix a heading or a paragraph directly against the next
-    element with no blank line in between, and a whole-block classifier
-    either drops that trailing content or flattens a bullet list into one
-    run-on paragraph.
-    """
-    if not text:
-        return ""
-    lines = text.strip("\n").split("\n")
-    out: list[str] = []
-    i, n = 0, len(lines)
-    while i < n:
-        line = lines[i]
-        stripped = line.strip()
-        if not stripped:
-            i += 1
-        elif stripped.startswith("### "):
-            out.append(f"<h3>{_inline_md(stripped[4:])}</h3>")
-            i += 1
-        elif stripped.startswith("## "):
-            out.append(f"<h2>{_inline_md(stripped[3:])}</h2>")
-            i += 1
-        elif stripped.startswith("# "):
-            out.append(f"<h1>{_inline_md(stripped[2:])}</h1>")
-            i += 1
-        elif _PIPE_TABLE_ROW.match(stripped):
-            block = []
-            while i < n and _PIPE_TABLE_ROW.match(lines[i].strip()):
-                block.append(lines[i].strip())
-                i += 1
-            out.append(_render_pipe_table(block))
-        elif stripped.startswith("- "):
-            items = []
-            while i < n and lines[i].strip().startswith("- "):
-                items.append(f"<li>{_inline_md(lines[i].strip()[2:])}</li>")
-                i += 1
-            out.append(f"<ul>{''.join(items)}</ul>")
-        else:
-            block = []
-            while (
-                i < n
-                and lines[i].strip()
-                and not lines[i].strip().startswith(("#", "- "))
-                and not _PIPE_TABLE_ROW.match(lines[i].strip())
-            ):
-                block.append(lines[i].strip())
-                i += 1
-            out.append(f"<p>{_inline_md(' '.join(block))}</p>")
-    return "".join(out)
-
-
 def _parse_pipe_table_rows(text: str | None) -> list[list[str]]:
     """The provenance appendix's one table, as raw cell lists.
 
@@ -282,7 +206,13 @@ def _parse_pipe_table_rows(text: str | None) -> list[list[str]]:
     lines = [ln for ln in text.splitlines() if _PIPE_TABLE_ROW.match(ln)]
     if len(lines) < 2:
         return []
-    rows = [[c.strip() for c in ln.strip().strip("|").split("|")] for ln in lines]
+    # `(?<!\\)\|` and not a bare `split("|")`: a venue or URL carrying an
+    # escaped pipe would otherwise hand this table one cell too many and
+    # shift every column after it.
+    rows = [
+        [c.strip().replace("\\|", "|") for c in re.split(r"(?<!\\)\|", ln.strip().strip("|"))]
+        for ln in lines
+    ]
     return rows[2:]
 
 
@@ -311,29 +241,48 @@ def _band_cards() -> list[dict[str, Any]]:
 # thing that lands after.
 
 
-def _md_preview(text: str, limit: int = 220) -> str:
-    """A short, honest excerpt of a produced markdown artifact.
+_FORMAT_LABELS = {".md": "Markdown", ".json": "JSON", ".csv": "CSV"}
 
-    Skips headings and table rows — neither reads as prose — and stops on
-    the first real paragraph line, trimmed to a whole word. Not a general
-    Markdown summarizer: just enough to make a produced report feel real
-    on a card, without re-rendering the whole document there.
+
+def _format_label(filename: str) -> str:
+    return _FORMAT_LABELS.get(Path(filename).suffix, "Text")
+
+
+def _size_label(n: int | None) -> str | None:
+    """A file's weight, or `None` when there is no file to weigh.
+
+    `None` rather than `0 B`, for this codebase's one non-negotiable reason:
+    a zero-byte artifact and an artifact that was never written are different
+    facts, and `0 B` is what makes them look the same.
     """
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith(("#", "|", "-")):
-            continue
-        cleaned = stripped.replace("**", "").replace("__", "")
-        if len(cleaned) > limit:
-            head = cleaned[:limit].rsplit(" ", 1)[0]
-            cleaned = (head or cleaned[:limit]) + "…"
-        return cleaned
-    return ""
+    if n is None:
+        return None
+    if n < 1024:
+        return f"{n} B"
+    if n < 1024 * 1024:
+        return f"{n / 1024:.1f} KB"
+    return f"{n / (1024 * 1024):.1f} MB"
 
 
 def _empty_deliverable_cards() -> list[dict[str, Any]]:
-    """Every deliverable, nothing filled in — the pre-run state."""
-    return [{**d, "available": False, "href": None, "preview": None} for d in DELIVERABLES]
+    """Every deliverable, nothing filled in — the pre-run state.
+
+    The sample line is rendered through the one converter, exactly as the
+    real artifact will be, so what a reader sees before spending money is
+    the *shape* of the output and never its source syntax.
+    """
+    return [
+        {
+            **d,
+            "available": False,
+            "href": None,
+            "excerpt": markdown_to_html(d["sample"]) if d["sample"] else "",
+            "excerpt_is_real": False,
+            "format_label": _format_label(d["file"]),
+            "size_label": None,
+        }
+        for d in DELIVERABLES
+    ]
 
 
 def _deliverable_cards(
@@ -344,7 +293,9 @@ def _deliverable_cards(
     cards: list[dict[str, Any]] = []
     for d in DELIVERABLES:
         run = run_by_group.get(d["group"])
-        available, href, preview = False, None, None
+        available, href, size = False, None, None
+        excerpt = markdown_to_html(d["sample"]) if d["sample"] else ""
+        excerpt_is_real = False
         if run is not None:
             try:
                 content = run_store.read_artifact(run.run_id, d["file"])
@@ -353,9 +304,24 @@ def _deliverable_cards(
             if content is not None:
                 available = True
                 href = f"/runs/{run.run_id}/artifact/{d['file']}"
+                path = run_store.artifacts_dir(run.run_id) / d["file"]
+                try:
+                    size = path.stat().st_size
+                except OSError:
+                    size = None
                 if d["file"].endswith(".md") and isinstance(content, str):
-                    preview = _md_preview(content)
-        cards.append({**d, "available": available, "href": href, "preview": preview})
+                    real = markdown_excerpt_html(content)
+                    if real:
+                        excerpt, excerpt_is_real = real, True
+        cards.append({
+            **d,
+            "available": available,
+            "href": href,
+            "excerpt": excerpt,
+            "excerpt_is_real": excerpt_is_real,
+            "format_label": _format_label(d["file"]),
+            "size_label": _size_label(size),
+        })
     return cards
 
 
@@ -369,6 +335,56 @@ def _deliverable_groups_ctx(cards: list[dict[str, Any]]) -> list[dict[str, Any]]
          "cards": [c for c in cards if c["group"] == key]}
         for key, label, desc in DELIVERABLE_GROUPS
     ]
+
+
+def _deliverable_tiers_ctx(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The same ten deliverables, in two tiers of unequal weight.
+
+    The four client-ready artifacts are the offer; the six behind them are
+    the evidence for it. Rendering all ten as one grid of identical cards
+    said they were worth the same, which is the specific error this splits
+    apart — the primary tier gets presence and a rendered excerpt, the
+    secondary tier is a list.
+    """
+    groups = {g["key"]: g for g in _deliverable_groups_ctx(cards)}
+    tiers = []
+    for tier in DELIVERABLE_TIERS:
+        member_groups = [groups[k] for k in tier["groups"] if k in groups]
+        tiers.append({
+            **tier,
+            "member_groups": member_groups,
+            "cards": [c for g in member_groups for c in g["cards"]],
+        })
+    return tiers
+
+
+def _forest_rows(
+    themes: Any, findings: Any, duallens: Any
+) -> list[dict[str, Any]]:
+    """One row per dual-lens gap, ordered by weight — the forest plot's input.
+
+    Shared by the insight screen's plot and the report's Figure 1 so the
+    figure a client sees and the figure an analyst reads are the same rows,
+    sorted the same way, built once. `reason` is carried through rather than
+    dropped: a row whose divergence is `None` has to be able to say why on
+    the page, not only in an `aria-label` nobody can reach.
+    """
+    paired = list(zip(themes, findings))
+    finding_by_theme_id = {t["theme_id"]: f for t, f in paired}
+    volume_by_theme_id = {t["theme_id"]: t["volume"] for t in themes}
+    rows = []
+    for gap in duallens:
+        finding = finding_by_theme_id.get(gap["theme_id"])
+        rows.append({
+            "name": gap["theme_name"],
+            "volume": volume_by_theme_id.get(gap["theme_id"], 0),
+            "hcp_net": gap["hcp_net"], "patient_net": gap["patient_net"],
+            "divergence": gap["divergence"], "reason": gap.get("reason") or "",
+            "independent_sources": finding["independent_sources"] if finding else None,
+            "tier": finding["tier"] if finding else "",
+        })
+    rows.sort(key=lambda r: -r["volume"])
+    return rows
 
 
 def _flow_chain(run_store: Any, topic_id: str, run: Any) -> dict[str, str | None]:
@@ -469,6 +485,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
     env.filters["pct"] = pct
     env.filters["net"] = net_stance_text
     env.filters["dt"] = fmt_dt
+    env.filters["date_long"] = fmt_date_long
     env.globals["tier_label"] = _tier_label
     env.globals["tier_note"] = _tier_note
     env.globals["kind_label"] = _kind_label
@@ -537,9 +554,22 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         nothing to fill in. This is the page someone reads to decide whether
         the tool is worth running at all.
         """
-        groups = _deliverable_groups_ctx(_empty_deliverable_cards())
+        tiers = _deliverable_tiers_ctx(_empty_deliverable_cards())
+        # Cross-link, not a dead end: if this instance has ever produced a
+        # report, the catalog page points at it. A page that describes a
+        # document and cannot show you one is the shape of brochure this
+        # whole pass exists to stop being.
+        example = None
+        for topic in topic_store.list():
+            reports = [
+                r for r in run_store.for_topic(topic.topic_id, "report")
+                if r.status == "complete"
+            ]
+            if reports:
+                example = {"run_id": reports[-1].run_id, "topic_name": topic.name}
         return render(
-            request, "deliverables.html", groups=groups, active_nav="deliverables",
+            request, "deliverables.html", tiers=tiers, example=example,
+            active_nav="deliverables",
         )
 
     # --------------------------------------------------------------- topics --
@@ -648,7 +678,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
 
         return render(
             request, "topic_detail.html", topic=topic, history=all_runs,
-            has_run=bool(all_runs), groups=_deliverable_groups_ctx(cards),
+            has_run=bool(all_runs), tiers=_deliverable_tiers_ctx(cards),
             latest_mine=latest_mine, latest_insight=latest_insight, latest_report=latest_report,
         )
 
@@ -764,7 +794,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         return render(
             request, "confirm.html", topic=topic, band=BANDS[chosen], estimate=estimate,
             cap_usd=settings.run_cost_cap_usd, changes_band=(chosen != topic.spend_band),
-            groups=_deliverable_groups_ctx(_empty_deliverable_cards()),
+            tiers=_deliverable_tiers_ctx(_empty_deliverable_cards()),
         )
 
     @app.post("/topics/{topic_id}/mine")
@@ -821,7 +851,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         next_snapshot_run_id = run.run_id if run.mode == "mine" else None
         next_insight_run_id = run.run_id if run.mode == "insight" else None
         fr = _flow_runs(run_store, run)
-        deliv_groups = _deliverable_groups_ctx(
+        deliv_tiers = _deliverable_tiers_ctx(
             _deliverable_cards(
                 run_store, mine_run=fr["mine_run"], insight_run=fr["insight_run"],
                 report_run=fr["report_run"],
@@ -832,7 +862,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             request, "run.html", run=run, topic=topic, stages=stages,
             cost_detail=cost_detail, next_snapshot_run_id=next_snapshot_run_id,
             next_insight_run_id=next_insight_run_id,
-            flow=fr["flow"], current_step=current_step, deliv_groups=deliv_groups,
+            flow=fr["flow"], current_step=current_step, deliv_tiers=deliv_tiers,
             synthetic=_mine_run_is_synthetic(run_store, fr["flow"]["mine_run_id"]),
         )
 
@@ -902,7 +932,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         ]
 
         fr = _flow_runs(run_store, run)
-        deliv_groups = _deliverable_groups_ctx(
+        deliv_tiers = _deliverable_tiers_ctx(
             _deliverable_cards(
                 run_store, mine_run=fr["mine_run"], insight_run=fr["insight_run"],
                 report_run=fr["report_run"],
@@ -914,7 +944,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             filters={"venue": venue, "kind": kind, "tier": tier, "date": date},
             options={"venues": venues, "kinds": kinds, "tiers": tiers, "dates": dates},
             any_filter_active=bool(venue or kind or tier or date),
-            flow=fr["flow"], deliv_groups=deliv_groups,
+            flow=fr["flow"], deliv_tiers=deliv_tiers,
             synthetic=any_synthetic(raw_rows),
         )
 
@@ -981,18 +1011,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         finding_by_theme_id = {t["theme_id"]: f for t, f in paired}
         volume_by_theme_id = {t["theme_id"]: t["volume"] for t in themes}
 
-        forest_rows = []
-        for gap in duallens:
-            finding = finding_by_theme_id.get(gap["theme_id"])
-            forest_rows.append({
-                "name": gap["theme_name"],
-                "volume": volume_by_theme_id.get(gap["theme_id"], 0),
-                "hcp_net": gap["hcp_net"], "patient_net": gap["patient_net"],
-                "divergence": gap["divergence"], "reason": gap.get("reason") or "",
-                "independent_sources": finding["independent_sources"] if finding else None,
-                "tier": finding["tier"] if finding else "",
-            })
-        forest_rows.sort(key=lambda r: -r["volume"])
+        forest_rows = _forest_rows(themes, findings, duallens)
         forest_svg = forest_plot_svg(forest_rows)
 
         mine_run_id = run.parent_run_id
@@ -1037,7 +1056,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         ]
 
         fr = _flow_runs(run_store, run)
-        deliv_groups = _deliverable_groups_ctx(
+        deliv_tiers = _deliverable_tiers_ctx(
             _deliverable_cards(
                 run_store, mine_run=fr["mine_run"], insight_run=fr["insight_run"],
                 report_run=fr["report_run"],
@@ -1051,7 +1070,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             anomaly_rows=anomaly_rows, theme_rows=theme_rows,
             stance_rows=stance_rows, entity_rows=entity_rows,
             unmapped_count=len(entities.get("unmapped_mentions", [])),
-            flow=fr["flow"], deliv_groups=deliv_groups,
+            flow=fr["flow"], deliv_tiers=deliv_tiers,
             synthetic=_mine_run_is_synthetic(run_store, mine_run_id),
         )
 
@@ -1096,6 +1115,15 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
 
     @app.get("/runs/{run_id}/report", response_class=HTMLResponse)
     def report_view(request: Request, run_id: str) -> HTMLResponse:
+        """The client-facing document, typeset.
+
+        This route does presentation-only reshaping of four artifacts the
+        engine already wrote — it derives no number and authors no sentence.
+        The claim sentences rendered as designed findings are lifted from
+        ``pulse_report.md``'s own sections rather than rebuilt here, because
+        rebuilding them would put the report's prose in two places and let
+        the page and the downloaded file drift apart.
+        """
         try:
             run = run_store.get(run_id)
         except NoSuchRun:
@@ -1124,28 +1152,13 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             except FileNotFoundError:
                 return None
 
-        pulse_text = _read_md("pulse_report.md")
-        appendix_text = _read_md("provenance_appendix.md")
-        methodology_text = _read_md("methodology.md")
-        considering_text = _read_md("worth_considering.md")
-
-        appendix_rows = _parse_pipe_table_rows(appendix_text)
-        # Header: signal_id | venue | venue kind | captured_at | collection method | URL
-        citations = [
-            {"signal_id": r[0], "venue": r[1], "venue_kind": r[2],
-             "captured_at": r[3], "method": r[4], "url": r[5]}
-            for r in appendix_rows if len(r) >= 6
-        ]
-        cited_ids = {c["signal_id"] for c in citations}
-
         def _read_json(run_id_for_read: str | None, name: str) -> Any:
             # A REPORT run's own four markdown files can be intact while the
             # INSIGHT run it was built from has since lost the artifacts this
-            # view re-reads to build the citations table — the same
-            # ephemeral-storage failure mode `_read_md` above already guards
-            # against for this run's own files. Unguarded, this used to raise
-            # `FileNotFoundError` straight through to a 500 on an otherwise
-            # perfectly viewable report.
+            # view re-reads — the same ephemeral-storage failure mode
+            # `_read_md` guards for this run's own files. Unguarded, this
+            # used to raise `FileNotFoundError` straight through to a 500 on
+            # an otherwise perfectly viewable report.
             if not run_id_for_read:
                 return []
             try:
@@ -1153,33 +1166,214 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             except FileNotFoundError:
                 return []
 
+        pulse_text = _read_md("pulse_report.md")
+        appendix_text = _read_md("provenance_appendix.md")
+        methodology_text = _read_md("methodology.md")
+        considering_text = _read_md("worth_considering.md")
+
+        # ---- the citation ledger, numbered ------------------------------
+        # Header: signal_id | venue | venue kind | captured_at | collection
+        # method | URL. Reference numbers are assigned in the appendix's own
+        # order, so [7] on the page and row 7 of the downloaded appendix are
+        # the same source.
+        citations = [
+            {"signal_id": r[0], "venue": r[1], "venue_kind": r[2],
+             "captured_at": r[3], "method": r[4], "url": r[5]}
+            for r in _parse_pipe_table_rows(appendix_text) if len(r) >= 6
+        ]
+        for n, c in enumerate(citations, start=1):
+            c["ref"] = n
+            c["anchor"] = f"ref-{n}"
+            c["back"] = []
+        ref_by_sid = {c["signal_id"]: c for c in citations}
+
+        def refs_for(signal_ids: Any, anchor: str, label: str) -> list[dict[str, Any]]:
+            """Superscript references for one claim, and the reciprocal link
+            recorded on each appendix row so the appendix is not a one-way
+            street. Only ids that actually resolved to an appendix row are
+            rendered: a reference to a row that does not exist is worse than
+            no reference, and G1 in `vsm/modes/report.py` has already
+            refused any report whose citations could not be rebuilt."""
+            out = []
+            for sid in signal_ids or []:
+                c = ref_by_sid.get(str(sid))
+                if c is None:
+                    continue
+                out.append({"ref": c["ref"], "anchor": c["anchor"], "signal_id": c["signal_id"]})
+                if not any(b["anchor"] == anchor for b in c["back"]):
+                    c["back"].append({"anchor": anchor, "label": label})
+            return sorted(out, key=lambda r: r["ref"])
+
         raw_themes = _read_json(insight_run_id, "themes.json")
         raw_findings = _read_json(insight_run_id, "findings.json")
-        theme_vms = []
-        for t, f in zip(raw_themes, raw_findings):
-            sids = [sid for sid in f.get("signal_ids", []) if sid in cited_ids]
-            theme_vms.append({
-                "name": t["name"], "volume": t["volume"],
-                "tier": f["tier"], "sources": f["independent_sources"],
-                "signal_ids": sids,
+        duallens = _read_json(insight_run_id, "duallens.json")
+        signals = _read_json(mine_run_id, "signals.json")
+
+        paired = list(zip(raw_themes, raw_findings))
+
+        # ---- the document's own sections --------------------------------
+        # Four of the pulse report's sections are rendered as designed
+        # components below (findings, the figure, the themes table) and are
+        # therefore dropped from the prose pass — otherwise the page carries
+        # each of them twice, which is what it used to do.
+        designed = {
+            "Themes observed",
+            "Corroborated findings",
+            "Emerging (two-source) signals",
+            "Patient vs. HCP divergence",
+        }
+        lead_html_parts: list[str] = []
+        extra_sections: list[dict[str, str]] = []
+        designed_bodies: dict[str, str] = {}
+        for section in markdown_sections(pulse_text):
+            if section["level"] <= 1:
+                # The document's own title is the cover; only its lead-in
+                # prose (the synthetic-run notice, when there is one) is kept.
+                if section["body"].strip():
+                    lead_html_parts.append(markdown_to_html(section["body"], base_level=3))
+                continue
+            if section["heading"] in designed:
+                designed_bodies[section["heading"]] = section["body"]
+                continue
+            extra_sections.append({
+                "heading": section["heading"],
+                "html": markdown_to_html(section["body"], base_level=3),
             })
 
+        def _designed_findings(tier: str, heading: str) -> tuple[list[dict[str, Any]], str]:
+            """One designed statement per finding of `tier`, and the note that
+            stands in when there are none.
+
+            `vsm/modes/report.py` writes exactly one paragraph per finding of
+            this tier, in this order. When the counts disagree — a hand-edited
+            artifact, a future change to that module — the claim falls back to
+            the theme name and the counts stay beside it, because a count is
+            arithmetic and safe to show while a mismatched sentence is not.
+            """
+            rows = [(i, t, f) for i, (t, f) in enumerate(paired) if f["tier"] == tier]
+            paragraphs = markdown_paragraphs(designed_bodies.get(heading, ""))
+            if not rows:
+                return [], markdown_to_html(designed_bodies.get(heading, ""), base_level=3)
+            out = []
+            for slot, (index, theme, finding) in enumerate(rows):
+                anchor = f"finding-{index + 1}"
+                claim_md = paragraphs[slot] if slot < len(paragraphs) else theme["name"]
+                out.append({
+                    "anchor": anchor,
+                    "name": theme["name"],
+                    "claim_html": markdown_inline_html(claim_md),
+                    "tier": finding["tier"],
+                    "sources": finding["independent_sources"],
+                    "volume": theme["volume"],
+                    "refs": refs_for(finding.get("signal_ids"), anchor, theme["name"]),
+                })
+            return out, ""
+
+        corroborated, corroborated_note = _designed_findings(
+            "corroborated", "Corroborated findings"
+        )
+        emerging, emerging_note = _designed_findings(
+            "emerging", "Emerging (two-source) signals"
+        )
+
+        # ---- the themes table ------------------------------------------
+        theme_rows = []
+        for index, (theme, finding) in enumerate(paired):
+            anchor = (
+                f"finding-{index + 1}"
+                if finding["tier"] in ("corroborated", "emerging")
+                else f"theme-{index + 1}"
+            )
+            theme_rows.append({
+                "anchor": anchor,
+                "row_anchor": f"theme-{index + 1}",
+                "name": theme["name"],
+                "volume": theme["volume"],
+                "tier": finding["tier"],
+                "sources": finding["independent_sources"],
+                "refs": refs_for(finding.get("signal_ids"), anchor, theme["name"]),
+            })
+
+        # ---- Figure 1: the clinician–patient gap ------------------------
+        figure_rows = _forest_rows(raw_themes, raw_findings, duallens)
+        figure = None
+        if figure_rows:
+            figure = {
+                "number": 1,
+                "svg": forest_plot_svg(figure_rows),
+                "rows": figure_rows,
+                "estimable": sum(1 for r in figure_rows if r["divergence"] is not None),
+                "not_estimable": sum(1 for r in figure_rows if r["divergence"] is None),
+            }
+
+        # ---- the cover's dated window ----------------------------------
+        stamps = sorted(str(s.get("captured_at") or "") for s in signals if s.get("captured_at"))
+        venues = {str(s.get("venue") or "") for s in signals if s.get("venue")}
+        snapshot_at = None
+        if mine_run_id:
+            try:
+                snapshot_at = run_store.get(mine_run_id).started_at
+            except NoSuchRun:
+                snapshot_at = None
+
+        tier_counts = {
+            "corroborated": sum(1 for _t, f in paired if f["tier"] == "corroborated"),
+            "emerging": sum(1 for _t, f in paired if f["tier"] == "emerging"),
+            "single_source": sum(1 for _t, f in paired if f["tier"] == "single_source"),
+        }
+
+        doc = {
+            "title": topic.name if topic is not None else "Topic no longer exists",
+            "window_from": stamps[0] if stamps else None,
+            "window_to": stamps[-1] if stamps else None,
+            # A sweep that ran inside one day is one date, not a range. "31
+            # July 2026 to 31 July 2026" is a zero-width window presented as
+            # a window, which is the kind of small tell that makes a reader
+            # stop trusting the rest of the page.
+            "window_single_day": bool(stamps) and stamps[0][:10] == stamps[-1][:10],
+            # Said rather than left blank, per this codebase's one rule: a
+            # snapshot whose rows carry no capture stamp has no window, and
+            # an empty range would read as a window of zero length.
+            "window_note": (
+                None if stamps
+                else "no capture timestamps were recorded on this snapshot's signals"
+            ),
+            "signal_count": len(signals) if signals else None,
+            "signal_note": (
+                None if signals
+                else "the snapshot this rests on is no longer readable on this instance"
+            ),
+            "venue_count": len(venues) if signals else None,
+            "snapshot_run_id": mine_run_id,
+            "snapshot_at": snapshot_at,
+            "insight_run_id": insight_run_id,
+            "tier_counts": tier_counts,
+            "theme_count": len(paired),
+            "citation_count": len(citations),
+        }
+
         fr = _flow_runs(run_store, run)
-        deliv_groups = _deliverable_groups_ctx(
+        deliv_tiers = _deliverable_tiers_ctx(
             _deliverable_cards(
                 run_store, mine_run=fr["mine_run"], insight_run=fr["insight_run"],
                 report_run=fr["report_run"],
             )
         )
+        pulse_href = (
+            f"/runs/{run.run_id}/artifact/pulse_report.md" if pulse_text else None
+        )
         return render(
-            request, "report.html", run=run, topic=topic,
+            request, "report.html", run=run, topic=topic, pulse_href=pulse_href,
             insight_run_id=insight_run_id, mine_run_id=mine_run_id,
-            theme_vms=theme_vms, citations=citations,
-            pulse_html=_markdown_lite_to_html(pulse_text) if pulse_text else None,
-            methodology_html=_markdown_lite_to_html(methodology_text) if methodology_text else None,
-            considering_html=_markdown_lite_to_html(considering_text) if considering_text else None,
-            has_pulse=pulse_text is not None,
-            flow=fr["flow"], deliv_groups=deliv_groups,
+            doc=doc, figure=figure, theme_rows=theme_rows,
+            corroborated=corroborated, corroborated_note=corroborated_note,
+            emerging=emerging, emerging_note=emerging_note,
+            lead_html="".join(lead_html_parts), extra_sections=extra_sections,
+            citations=citations,
+            methodology_html=markdown_to_html(methodology_text, base_level=3, drop_title=True),
+            considering_html=markdown_to_html(considering_text, base_level=3, drop_title=True),
+            has_pulse=bool(pulse_text and pulse_text.strip()),
+            flow=fr["flow"], deliv_tiers=deliv_tiers,
             synthetic=_mine_run_is_synthetic(run_store, mine_run_id),
         )
 

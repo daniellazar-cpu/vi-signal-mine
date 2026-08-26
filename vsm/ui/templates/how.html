@@ -21,14 +21,14 @@
       <div><dt>Cost</dt><dd>{{ m.cost }}</dd></div>
     </dl>
     <details>
-      <summary>More detail</summary>
+      <summary>More detail<span class="visually-hidden"> about {{ m.name }}</span></summary>
       <p>{{ m.detail }}</p>
     </details>
   </article>
   {% endfor %}
 </div>
 
-<h2>Confidence tiers</h2>
+<h2 id="tiers">Confidence tiers</h2>
 <dl class="key-list">
   {% for name, desc in tiers %}
   <div><dt>{{ name|capitalize }}</dt><dd>{{ desc }}</dd></div>
@@ -42,6 +42,6 @@
   {% endfor %}
 </dl>
 
-<p class="body-text field-note">Want to see the shape of the output before any of this runs? <a href="/deliverables">See what you get →</a></p>
+<p class="body-text field-note">Want to see the shape of the output before any of this runs? <a href="/deliverables">See what you get <span aria-hidden="true">→</span></a></p>
 </div>
 {% endblock %}

@@ -1,5 +1,5 @@
 {% extends "_base.html" %}
-{% from "_macros.html" import title_block, flow_rail, deliverable_groups %}
+{% from "_macros.html" import title_block, flow_rail, deliverable_tiers, tier_badge %}
 {% block title %}Insight — Vi Signal Mine{% endblock %}
 
 {% block top_rail %}
@@ -78,13 +78,14 @@
     {% if not has_baseline %}
     <p class="empty-state">No prior snapshot exists for this topic yet, so momentum has nothing to compare against.</p>
     {% elif momentum_rows %}
-    <div class="table-scroll">
+    <div class="table-scroll" tabindex="0" role="region" aria-label="Momentum by theme">
     <table class="data-table">
+      <caption class="visually-hidden">Volume change per theme against the prior snapshot.</caption>
       <thead><tr><th scope="col">Theme</th><th scope="col" class="num">Volume now</th><th scope="col" class="num">Volume prior</th><th scope="col" class="num">Delta</th><th scope="col" class="num">Delta %</th><th scope="col">Note</th></tr></thead>
       <tbody>
         {% for m in momentum_rows %}
         <tr>
-          <td class="cell-title">{{ m.theme_name }}</td>
+          <th scope="row" class="cell-title">{{ m.theme_name }}</th>
           <td class="num">{{ m.volume_now }}</td>
           <td class="num">{% if m.volume_prior is none %}—{% else %}{{ m.volume_prior }}{% endif %}</td>
           <td class="num">{% if m.delta is none %}—{% else %}{{ m.delta }}{% endif %}</td>
@@ -104,13 +105,14 @@
     {% if not has_baseline %}
     <p class="empty-state">No prior snapshot exists to compare against, so no anomalies can be detected yet.</p>
     {% elif anomaly_rows %}
-    <div class="table-scroll">
+    <div class="table-scroll" tabindex="0" role="region" aria-label="Anomalies">
     <table class="data-table">
+      <caption class="visually-hidden">Themes that appeared, vanished, spiked or collapsed against their recent baseline.</caption>
       <thead><tr><th scope="col">Theme</th><th scope="col">Kind</th><th scope="col" class="num">Observed</th><th scope="col" class="num">Baseline</th><th scope="col">Detail</th><th scope="col">Note</th></tr></thead>
       <tbody>
         {% for a in anomaly_rows %}
         <tr>
-          <td class="cell-title">{{ a.theme_name }}</td>
+          <th scope="row" class="cell-title">{{ a.theme_name }}</th>
           <td>{{ anomaly_label(a.kind) }}</td>
           <td class="num">{{ a.observed }}</td>
           <td class="num">{% if a.baseline is none %}—{% else %}{{ a.baseline }}{% endif %}</td>
@@ -128,17 +130,18 @@
 
   <div class="tab-panel panel-themes">
     {% if theme_rows %}
-    <div class="table-scroll">
+    <div class="table-scroll" tabindex="0" role="region" aria-label="Themes">
     <table class="data-table">
+      <caption class="visually-hidden">Every theme in this snapshot, with its venue mix, venue-kind mix and corroboration.</caption>
       <thead><tr><th scope="col">Theme</th><th scope="col" class="num">Volume</th><th scope="col">Venue mix</th><th scope="col">Kind mix</th><th scope="col">Tier</th><th scope="col" class="num">Independent sources</th></tr></thead>
       <tbody>
         {% for tr in theme_rows %}
         <tr>
-          <td class="cell-title">{{ tr.theme.name }}</td>
+          <th scope="row" class="cell-title">{{ tr.theme.name }}</th>
           <td class="num">{{ tr.theme.volume }}</td>
           <td class="cell-sub">{% for v, n in tr.venue_mix %}{{ v }} ({{ n }}){% if not loop.last %}, {% endif %}{% else %}—{% endfor %}</td>
           <td class="cell-sub">{% for k, n in tr.kind_mix %}{{ kind_label(k) }} ({{ n }}){% if not loop.last %}, {% endif %}{% else %}—{% endfor %}</td>
-          <td title="{{ tier_note(tr.tier) }}">{{ tier_label(tr.tier) }}</td>
+          <td>{{ tier_badge(tr.tier) }}</td>
           <td class="num">{{ tr.sources }}</td>
         </tr>
         {% endfor %}
@@ -157,15 +160,16 @@
       wearing a clinical label.
     </p>
     {% if stance_rows %}
-    <div class="table-scroll">
+    <div class="table-scroll" tabindex="0" role="region" aria-label="Stance by author class">
     <table class="data-table">
+      <caption class="visually-hidden">Stance counts per theme, split by author class. Never blended across classes.</caption>
       <thead><tr><th scope="col">Theme</th><th scope="col">Author class</th><th scope="col">Stance counts</th><th scope="col">Basis</th></tr></thead>
       <tbody>
         {% for sr in stance_rows %}
           {% if sr.by_class %}
             {% for cls, counts in sr.by_class %}
             <tr>
-              {% if loop.first %}<td class="cell-title" rowspan="{{ sr.by_class|length }}">{{ sr.name }}</td>{% endif %}
+              {% if loop.first %}<th scope="rowgroup" class="cell-title" rowspan="{{ sr.by_class|length }}">{{ sr.name }}</th>{% endif %}
               <td>{{ class_label(cls) }}</td>
               <td class="cell-sub">{% for stance, n in counts.items() %}{{ stance_label(stance) }} {{ n }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
               {% if loop.first %}<td class="cell-sub" rowspan="{{ sr.by_class|length }}">{{ sr.basis }}</td>{% endif %}
@@ -173,7 +177,7 @@
             {% endfor %}
           {% else %}
           <tr>
-            <td class="cell-title">{{ sr.name }}</td>
+            <th scope="row" class="cell-title">{{ sr.name }}</th>
             <td colspan="2" class="muted">no signals resolved to an author class</td>
             <td class="cell-sub">{{ sr.basis }}</td>
           </tr>
@@ -189,13 +193,14 @@
 
   <div class="tab-panel panel-entities">
     {% if entity_rows %}
-    <div class="table-scroll">
+    <div class="table-scroll" tabindex="0" role="region" aria-label="Entities">
     <table class="data-table">
+      <caption class="visually-hidden">Brand, molecule and competitor names resolved in this snapshot.</caption>
       <thead><tr><th scope="col">Entity</th><th scope="col">Role</th><th scope="col">Aliases</th><th scope="col" class="num">Signals mentioning it</th></tr></thead>
       <tbody>
         {% for e in entity_rows %}
         <tr>
-          <td class="cell-title">{{ e.canonical }}</td>
+          <th scope="row" class="cell-title">{{ e.canonical }}</th>
           <td>{{ e.role }}</td>
           <td class="cell-sub">{{ e.aliases|join(", ") }}</td>
           <td class="num">{{ e.signal_count }}</td>
@@ -213,6 +218,6 @@
 
 <h2>Deliverables</h2>
 <p class="body-text field-note">The findings above, as the artifacts they land in — the analysis group is real; the report becomes real once you generate it.</p>
-{{ deliverable_groups(deliv_groups) }}
+{{ deliverable_tiers(deliv_tiers) }}
 </div>
 {% endblock %}

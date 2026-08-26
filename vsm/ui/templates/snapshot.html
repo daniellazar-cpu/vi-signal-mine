@@ -1,5 +1,5 @@
 {% extends "_base.html" %}
-{% from "_macros.html" import title_block, flow_rail, deliverable_groups %}
+{% from "_macros.html" import title_block, flow_rail, deliverable_tiers %}
 {% block title %}Snapshot — Vi Signal Mine{% endblock %}
 
 {% block top_rail %}
@@ -104,8 +104,9 @@
 </form>
 
 {% if rows %}
-<div class="table-scroll">
+<div class="table-scroll" tabindex="0" role="region" aria-label="Collected signals">
 <table class="data-table signals-table">
+  <caption class="visually-hidden">Every signal collected in this snapshot, with its venue, capture time, collection method and source URL.</caption>
   <thead>
     <tr>
       <th scope="col">Venue</th>
@@ -120,7 +121,7 @@
   <tbody>
     {% for row in rows %}
     <tr>
-      <td class="cell-title">{{ row.venue }}</td>
+      <th scope="row" class="cell-title">{{ row.venue }}</th>
       <td>{{ kind_label(row.venue_kind) if row.venue_kind else "not on the gold-list registry" }}</td>
       <td class="cell-sub">{% if row.collection_tier is defined and row.collection_tier %}{{ row.collection_tier }}{% else %}not recorded{% endif %}</td>
       <td>{{ row.captured_at|dt }}</td>
@@ -130,7 +131,7 @@
         {% elif row.author_type is defined and row.author_type == "patient" %}<span class="muted">patient-generated — themes only, no excerpt kept</span>
         {% else %}<span class="muted">no excerpt kept</span>{% endif %}
       </td>
-      <td>{% if row.url %}<a href="{{ row.url }}">{{ row.collection_method if row.collection_method else "link" }} ↗</a>{% else %}<span class="muted">no url</span>{% endif %}</td>
+      <td>{% if row.url %}<a href="{{ row.url }}">{{ row.collection_method if row.collection_method else "link" }}<span class="visually-hidden"> — {{ row.venue }}</span> <span aria-hidden="true">↗</span></a>{% else %}<span class="muted">no url</span>{% endif %}</td>
     </tr>
     {% endfor %}
   </tbody>
@@ -148,7 +149,7 @@
 
 <h2>Deliverables</h2>
 <p class="body-text field-note">What this topic can produce, from here on — the signal ledger and coverage are already real; the rest fills in as insight and report run.</p>
-{{ deliverable_groups(deliv_groups) }}
+{{ deliverable_tiers(deliv_tiers) }}
 
 <div class="form-actions form-actions-end">
   {% if storage_is_durable() %}

@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
+<a class="skip-link" href="#main">Skip to content</a>
 <!--
 PINNED WORLD: the Vi marketing design system (vsm/ui/static/ds/colors_and_type.css),
 adopted wholesale per the owner's brief and REDESIGN.dc.html. White is the
@@ -32,19 +33,19 @@ not extended.
     </nav>
   </header>
   {% if not storage_is_durable() %}
-  <div class="read-only-banner" role="alert">
+  <div class="read-only-banner">
     <span class="read-only-banner-mark" aria-hidden="true"></span>
     <p>{{ ephemeral_storage_notice }}</p>
   </div>
   {% endif %}
   {% if synthetic is defined and synthetic %}
-  <div class="synthetic-banner" role="alert">
+  <div class="synthetic-banner" role="note" aria-label="demonstration data">
     <span class="synthetic-banner-mark" aria-hidden="true"></span>
     <p><strong>Demonstration data.</strong> This run used the offline synthetic miner — every signal below was fabricated for rehearsal, not collected from the web. Do not treat any figure, excerpt or citation on this page as real, and never hand it to a client.</p>
   </div>
   {% endif %}
   {% block top_rail %}{% endblock %}
-  <main class="app-main">
+  <main class="app-main" id="main" tabindex="-1">
     {% block content %}{% endblock %}
   </main>
   <footer class="app-foot">

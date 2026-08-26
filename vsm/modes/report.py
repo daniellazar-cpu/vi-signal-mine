@@ -84,6 +84,51 @@ _INDEPENDENT_SOURCE_DEFINITION = (
 )
 
 
+#: A net-stance cell in the dual-lens table. ``None`` is not a zero and is
+#: not a blank: ``net_stance`` returns ``None`` when *nothing* of that author
+#: class was classified for the theme, so the cell states that fact. Printing
+#: Python's ``None`` here — which is what an f-string does with it, and what
+#: this table used to do — puts leaked internals in the one artifact a client
+#: reads, and printing ``0`` would assert neutrality nobody expressed.
+_NET_CELL_REASON = {
+    "hcp": "not read — no clinician-class signal in this theme",
+    "patient": "not read — no patient-class signal in this theme",
+}
+
+
+def _net_cell(value: float | None, which: str) -> str:
+    if value is None:
+        return _NET_CELL_REASON[which]
+    sign = "+" if value >= 0 else ""
+    return f"{sign}{value:.2f}"
+
+
+_MONTHS = (
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+)
+
+
+def _long_date(stamp: str) -> str:
+    """`31 July 2026` from an ISO stamp — the date a client reads.
+
+    A raw `2026-07-31T00:00:00+00:00` in the one artifact whose job is to be
+    checked reads as machine output, and the time-of-day is a crawl
+    timestamp precise to a second that means nothing to the reader. The full
+    stamp is still in `signals.json` and in the provenance appendix, which is
+    where a reader who wants the exact second goes. A string that does not
+    parse comes back unchanged rather than guessed at.
+    """
+    head = stamp[:10]
+    parts = head.split("-")
+    if len(parts) != 3 or not all(x.isdigit() for x in parts):
+        return stamp
+    year, month, day = (int(x) for x in parts)
+    if not 1 <= month <= 12:
+        return stamp
+    return f"{day} {_MONTHS[month - 1]} {year}"
+
+
 def _finding_from_dict(d: Mapping[str, Any]) -> Finding:
     return Finding(
         finding_id=str(d["finding_id"]),
@@ -279,7 +324,8 @@ def run_report(
         for g in lens_rows:
             div = g["divergence"] if g["divergence"] is not None else f"n/a — {g['reason']}"
             lens_lines.append(
-                f"| {g['theme_name']} | {g['hcp_net']} | {g['patient_net']} | {div} |"
+                f"| {g['theme_name']} | {_net_cell(g['hcp_net'], 'hcp')} | "
+                f"{_net_cell(g['patient_net'], 'patient')} | {div} |"
             )
         lens_block = guard_only("\n".join(lens_lines), where="pulse_report.md")
     else:
@@ -384,11 +430,18 @@ def run_report(
     band = topic.band()
     venues_seen = sorted({str(s.get("venue") or "") for s in signals if s.get("venue")})
     captured_ats = sorted(str(s.get("captured_at") or "") for s in signals if s.get("captured_at"))
-    when_line = (
-        f"captured between {captured_ats[0]} and {captured_ats[-1]}"
-        if captured_ats
-        else "capture timestamps were not recorded on these signals"
-    )
+    if not captured_ats:
+        when_line = "capture timestamps were not recorded on these signals"
+    elif captured_ats[0][:10] == captured_ats[-1][:10]:
+        # One day is one date, not a range. "between X and X" is a
+        # zero-width window presented as a window — the sort of detail that
+        # makes a reader distrust every other figure in the document.
+        when_line = f"all captured on {_long_date(captured_ats[0])}"
+    else:
+        when_line = (
+            f"captured between {_long_date(captured_ats[0])} and "
+            f"{_long_date(captured_ats[-1])}"
+        )
     # Written so the claim is assertable, not just gesturable: the exact
     # phrases "author class" and "derived from the venue" / "derived from
     # resolved author identity" state the basis in words a test — or a

@@ -1,23 +1,43 @@
-{# The detail strip: a run's own metadata (topic, dated frame, run id, spend
-   band, cost) as plain label/value pairs in a row — the canvas's own
-   pattern, not a title block sitting on top of the page. Values are plain
-   text; Jinja's autoescape covers them, same as everywhere else. #}
+{# The provenance strip: a run's own metadata as label/value pairs in a row.
+   A real <dl>, not two spans: a screen reader reading ten loose strings has
+   no way to know which value belongs to which label, and the sibling
+   `.meta-grid` pattern in this same codebase already does it correctly.
+   Values are plain text; Jinja's autoescape covers them. #}
 {% macro title_block(items) %}
-<div class="title-block" role="group" aria-label="run metadata">
+<dl class="title-block">
   {% for label, value in items %}
   <div class="title-cell">
-    <span class="title-label">{{ label }}</span>
-    <span class="title-value">{{ value }}</span>
+    <dt class="title-label">{{ label }}</dt>
+    <dd class="title-value">{{ value }}</dd>
   </div>
   {% endfor %}
-</div>
+</dl>
+{% endmacro %}
+
+{# A horizontally scrollable table wrapper. `tabindex="0"` is not decoration:
+   `.table-scroll` is a scroll container, and without it a keyboard-only
+   reader on a narrow viewport cannot reach the right-hand columns at all. #}
+{% macro table_scroll_open(label) %}
+<div class="table-scroll" tabindex="0" role="region" aria-label="{{ label }}">
 {% endmacro %}
 
 {# The in-flow rail: Topics / topic name / band, then the three stages —
    Snapshot, Insight, Report — each a link when that stage exists for this
    topic's current run chain, plain text when it does not yet. `flow` is
    the dict app.py's `_flow_chain` returns; `current` is one of
-   "snapshot" | "insight" | "report". #}
+   "snapshot" | "insight" | "report".
+
+   An unreachable stage says so in words, not only in a lighter grey: colour
+   was the single carrier of "this stage does not exist yet", which is
+   unreadable to anyone who cannot see the difference. #}
+{% macro flow_step(num, label, href, is_current) %}
+{% if href %}
+<a class="flow-step {% if is_current %}flow-step-current{% endif %}" href="{{ href }}"{% if is_current %} aria-current="step"{% endif %}><span class="flow-step-num" aria-hidden="true">{{ num }}</span>{{ label }}</a>
+{% else %}
+<span class="flow-step flow-step-disabled"><span class="flow-step-num" aria-hidden="true">{{ num }}</span>{{ label }}<span class="visually-hidden"> — not run yet</span></span>
+{% endif %}
+{% endmacro %}
+
 {% macro flow_rail(topic, flow, current) %}
 <div class="flow-rail" role="navigation" aria-label="topic stages">
   <div class="flow-rail-crumb">
@@ -31,66 +51,129 @@
     {% endif %}
   </div>
   <div class="flow-steps">
-    {% if flow.mine_run_id %}
-    <a class="flow-step {% if current == 'snapshot' %}flow-step-current{% endif %}" href="/runs/{{ flow.mine_run_id }}/snapshot"><span class="flow-step-num">01</span>Snapshot</a>
-    {% else %}
-    <span class="flow-step flow-step-disabled"><span class="flow-step-num">01</span>Snapshot</span>
-    {% endif %}
+    {{ flow_step("01", "Snapshot", "/runs/" ~ flow.mine_run_id ~ "/snapshot" if flow.mine_run_id else none, current == "snapshot") }}
     <span class="flow-sep" aria-hidden="true">—</span>
-    {% if flow.insight_run_id %}
-    <a class="flow-step {% if current == 'insight' %}flow-step-current{% endif %}" href="/runs/{{ flow.insight_run_id }}/insight"><span class="flow-step-num">02</span>Insight</a>
-    {% else %}
-    <span class="flow-step flow-step-disabled"><span class="flow-step-num">02</span>Insight</span>
-    {% endif %}
+    {{ flow_step("02", "Insight", "/runs/" ~ flow.insight_run_id ~ "/insight" if flow.insight_run_id else none, current == "insight") }}
     <span class="flow-sep" aria-hidden="true">—</span>
-    {% if flow.report_run_id %}
-    <a class="flow-step {% if current == 'report' %}flow-step-current{% endif %}" href="/runs/{{ flow.report_run_id }}/report"><span class="flow-step-num">03</span>Report</a>
-    {% else %}
-    <span class="flow-step flow-step-disabled"><span class="flow-step-num">03</span>Report</span>
-    {% endif %}
+    {{ flow_step("03", "Report", "/runs/" ~ flow.report_run_id ~ "/report" if flow.report_run_id else none, current == "report") }}
   </div>
 </div>
 {% endmacro %}
 
-{# One deliverable, in the one card language used before a run exists and
-   after one has: `d.available` switches between "here is a sample of what
-   this looks like" and "here is the real thing, download it." Same
-   component either way — the empty state is a state, not a different
-   design. `show_more_link` is off on the /deliverables catalog itself,
-   where a self-link would be a no-op. #}
-{% macro deliverable_card(d, show_more_link=True) %}
-<article id="deliv-{{ d.key }}" class="deliv-card {% if d.available %}deliv-card-available{% else %}deliv-card-pending{% endif %}">
-  <div class="deliv-card-head">
-    <span class="deliv-name">{{ d.name }}</span>
-    <span class="deliv-file">{{ d.file }}</span>
-  </div>
+{# A confidence tier as a badge, not a word in a cell. Violet only for
+   corroborated — the one tier that has earned a claim in the report body;
+   everything else is drawn in ink and hairline, per the pinned system's rule
+   that violet is a signal and not a palette. The tier's own definition rides
+   along as a real link to /how#tiers rather than a `title` tooltip, which is
+   unreachable by keyboard, invisible on touch and absent in print. #}
+{% macro tier_badge(tier, linked=True) %}
+{% if linked %}
+<a class="tier-badge tier-badge-{{ tier }}" href="/how#tiers">{{ tier_label(tier) }}<span class="visually-hidden"> — {{ tier_note(tier) }}</span></a>
+{% else %}
+<span class="tier-badge tier-badge-{{ tier }}">{{ tier_label(tier) }}<span class="visually-hidden"> — {{ tier_note(tier) }}</span></span>
+{% endif %}
+{% endmacro %}
+
+{# Superscript reference marks that resolve to the provenance appendix, the
+   way a journal article's do. Every mark here has already been checked
+   against the appendix in app.py — an id that did not resolve is not
+   rendered, because a reference to a row that does not exist is worse than
+   no reference at all. #}
+{% macro ref_marks(refs) %}
+{% if refs %}
+<sup class="ref-marks">{% for r in refs %}<a href="#{{ r.anchor }}" id="cite-{{ r.anchor }}-{{ loop.index }}">{{ r.ref }}</a>{% if not loop.last %}<span aria-hidden="true">,</span>{% endif %}{% endfor %}</sup>
+{% endif %}
+{% endmacro %}
+
+{# ------------------------------------------------------------------------
+   The deliverables, in two tiers of unequal weight.
+
+   The four client-ready documents are the offer: real presence, a rendered
+   excerpt, a download control. The six files behind them are the evidence
+   for it: a compact ruled list. Ten identical cards said `coverage.json`
+   mattered as much as the report a client is handed, and nothing on the page
+   told the eye otherwise — that is the error this split corrects.
+
+   A filename is never the headline. It sits beside the download control as
+   what it is: metadata about a file, at caption weight.
+   ------------------------------------------------------------------------ #}
+
+{% macro download_control(d) %}
+<a class="btn btn-ghost btn-sm deliv-download" href="{{ d.href }}" download>
+  Download<span class="visually-hidden"> {{ d.name }}</span>
+  <span class="deliv-download-meta">{{ d.format_label }}{% if d.size_label %} · {{ d.size_label }}{% endif %}</span>
+  <span aria-hidden="true">↓</span>
+</a>
+<span class="deliv-file">{{ d.file }}</span>
+{% endmacro %}
+
+{% macro deliverable_card(d, show_more_link=True, heading_level=3) %}
+<article id="deliv-{{ d.key }}"
+         class="deliv-card {% if d.available %}deliv-card-available{% else %}deliv-card-pending{% endif %}"
+         aria-labelledby="deliv-name-{{ d.key }}">
+  <h{{ heading_level }} class="deliv-name" id="deliv-name-{{ d.key }}">{{ d.name }}</h{{ heading_level }}>
   <p class="deliv-headline">{{ d.headline }}</p>
   <p class="deliv-body">{{ d.body }}</p>
-  <p class="deliv-for">For — <b>{{ d.for_whom }}</b></p>
-  {% if d.available %}
-    {% if d.preview %}<p class="deliv-sample">{{ d.preview }}</p>{% endif %}
-    <div class="deliv-actions">
-      <a class="deliv-download" href="{{ d.href }}">Download {{ d.file }} ↓</a>
-      {% if show_more_link %}<a class="deliv-download" href="/deliverables#deliv-{{ d.key }}">What this is ↗</a>{% endif %}
-    </div>
-  {% else %}
-    {% if d.sample %}<p class="deliv-sample">{{ d.sample }}</p>{% endif %}
-    <p class="deliv-status">Not run yet</p>
+  {% if d.excerpt %}
+  <figure class="deliv-sample">
+    <div class="doc-prose doc-prose-sm">{{ d.excerpt|safe }}</div>
+    <figcaption>{% if d.excerpt_is_real %}From this run{% else %}The shape of a line — illustrative, not a quote from a run{% endif %}</figcaption>
+  </figure>
   {% endif %}
+  <p class="deliv-for">For <strong>{{ d.for_whom }}</strong></p>
+  <div class="deliv-actions">
+    {% if d.available %}
+      {{ download_control(d) }}
+      {% if show_more_link %}<a class="link-back" href="/deliverables#deliv-{{ d.key }}">What this is <span aria-hidden="true">↗</span><span class="visually-hidden"> — {{ d.name }}</span></a>{% endif %}
+    {% else %}
+      <p class="deliv-status">Not run yet</p>
+      {# The filename still earns a place before a run — a reader deciding
+         whether to spend anything wants to know what lands — but as caption
+         metadata beside the status, never as the card's headline. #}
+      <span class="deliv-file">{{ d.format_label }} · {{ d.file }}</span>
+    {% endif %}
+  </div>
 </article>
 {% endmacro %}
 
-{% macro deliverable_groups(groups, show_more_link=True) %}
-<div class="deliv-groups">
-  {% for g in groups %}
-  <section class="deliv-group">
-    <div class="deliv-group-head">
-      <p class="deliv-group-label">{{ g.label }}</p>
-      <p class="deliv-group-desc">{{ g.description }}</p>
+{% macro deliverable_row(d, heading_level=3) %}
+<li class="deliv-row {% if d.available %}deliv-row-available{% else %}deliv-row-pending{% endif %}" id="deliv-{{ d.key }}">
+  <div class="deliv-row-main">
+    <h{{ heading_level }} class="deliv-row-name">{{ d.name }}</h{{ heading_level }}>
+    <p class="deliv-row-body">{{ d.headline }} <span class="muted">{{ d.body }}</span></p>
+  </div>
+  <div class="deliv-row-action">
+    {% if d.available %}{{ download_control(d) }}{% else %}<span class="deliv-status">Not run yet</span><span class="deliv-file">{{ d.file }}</span>{% endif %}
+  </div>
+</li>
+{% endmacro %}
+
+{% macro deliverable_tiers(tiers, show_more_link=True, heading_level=2) %}
+{% set sub = heading_level + 1 %}
+<div class="deliv-tiers">
+  {% for t in tiers %}
+  <section class="deliv-tier deliv-tier-{{ t.key }}" id="deliverables-{{ t.key }}">
+    <div class="deliv-tier-head">
+      <h{{ heading_level }} class="deliv-tier-label">{{ t.label }}</h{{ heading_level }}>
+      <p class="deliv-tier-lede">{{ t.lede }}</p>
     </div>
+    {% if t.key == "primary" %}
     <div class="deliv-grid">
-      {% for d in g.cards %}{{ deliverable_card(d, show_more_link) }}{% endfor %}
+      {% for d in t.cards %}{{ deliverable_card(d, show_more_link, sub) }}{% endfor %}
     </div>
+    {% else %}
+    {# Still grouped — analysis and raw collection are different kinds of
+       evidence and a reader deciding what to download needs to know which is
+       which — but grouped inside a list rather than a second grid of cards. #}
+    {% for g in t.member_groups %}
+    <div class="deliv-subgroup">
+      <h{{ sub }} class="deliv-subgroup-label">{{ g.label }} <span class="deliv-subgroup-desc">{{ g.description }}</span></h{{ sub }}>
+      <ul class="deliv-list">
+        {% for d in g.cards %}{{ deliverable_row(d, sub + 1) }}{% endfor %}
+      </ul>
+    </div>
+    {% endfor %}
+    {% endif %}
   </section>
   {% endfor %}
 </div>

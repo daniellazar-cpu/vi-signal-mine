@@ -1,99 +1,275 @@
 {% extends "_base.html" %}
-{% from "_macros.html" import title_block, flow_rail, deliverable_groups %}
-{% block title %}Report — {% if topic is not none %}{{ topic.name }} — {% endif %}Vi Signal Mine{% endblock %}
+{% from "_macros.html" import flow_rail, deliverable_tiers, tier_badge, ref_marks %}
+{% block title %}Pulse report — {% if topic is not none %}{{ topic.name }} — {% endif %}Vi Signal Mine{% endblock %}
 
 {% block top_rail %}
 {{ flow_rail(topic, flow, "report") }}
 {% endblock %}
 
 {% block content %}
-<div class="page">
-<section class="page-head">
-  <h1>Report preview{% if topic is not none %} — {{ topic.name }}{% endif %}</h1>
+{# ---------------------------------------------------------------------------
+   This screen is a document, not a page of data. The reference is a pharma
+   commercial review deck or a journal article: authority from typography and
+   restraint, findings quotable straight off the screen, one numbered figure,
+   tables with captions, and an appendix that reads as an appendix.
+
+   Two rules hold everywhere below.
+
+   * Nothing here is a "preview". The word was tool language on the largest
+     type on the page, above a document whose own title then reappeared
+     smaller, inside a bordered box.
+   * `None` is never a blank and never a zero. Every absent figure on this
+     page states the reason it is absent — the window, the signal count, the
+     divergence column, the citation list.
+   --------------------------------------------------------------------------- #}
+<article class="page doc">
+
+<header class="doc-cover">
+  <p class="eyebrow">Pulse report</p>
+  <h1 class="doc-title">{{ doc.title }}</h1>
+  <p class="doc-window">
+    {% if doc.window_note %}
+    Dated window <span class="doc-window-note">{{ doc.window_note }}</span>
+    {% elif doc.window_single_day %}
+    Collected on <time datetime="{{ doc.window_from }}">{{ doc.window_from|date_long }}</time>
+    {% else %}
+    Collected <time datetime="{{ doc.window_from }}">{{ doc.window_from|date_long }}</time>
+    to <time datetime="{{ doc.window_to }}">{{ doc.window_to|date_long }}</time>
+    {% endif %}
+  </p>
+
+  <dl class="doc-cover-facts">
+    <div>
+      <dt>Signals collected</dt>
+      <dd>{% if doc.signal_count is not none %}{{ doc.signal_count }} across {{ doc.venue_count }} venue{% if doc.venue_count != 1 %}s{% endif %}{% else %}<span class="doc-reason">{{ doc.signal_note }}</span>{% endif %}</dd>
+    </div>
+    <div>
+      <dt>Themes</dt>
+      <dd>{{ doc.theme_count }}</dd>
+    </div>
+    <div>
+      <dt>Confidence</dt>
+      <dd>{{ doc.tier_counts.corroborated }} corroborated · {{ doc.tier_counts.emerging }} emerging · {{ doc.tier_counts.single_source }} single source</dd>
+    </div>
+    <div>
+      <dt>Sources cited</dt>
+      <dd>{{ doc.citation_count }}</dd>
+    </div>
+  </dl>
+
+  <p class="doc-cover-rests">
+    Rests on
+    {% if doc.snapshot_run_id %}<a href="/runs/{{ doc.snapshot_run_id }}/snapshot">the snapshot of {{ doc.snapshot_at|date_long }}</a>{% else %}a snapshot this instance can no longer read{% endif %}{% if doc.insight_run_id %}, analysed in <a href="/runs/{{ doc.insight_run_id }}/insight">the insight pass</a>{% endif %}.
+  </p>
+
+  {# The tool's own telemetry — run id, spend band, what it cost — belongs at
+     the foot of the cover at caption weight, not at cover weight beside the
+     subject. It is provenance, and a client's report is not the place to
+     advertise a supplier's unit economics. #}
+  <p class="doc-provenance">
+    Prepared by Vi Signal Mine · issued <time datetime="{{ run.started_at }}">{{ run.started_at|date_long }}</time>
+    · run <span class="doc-runid">{{ run.run_id }}</span>
+    {% if topic is not none %}· {{ topic.spend_band }} band{% endif %}
+    · {{ run.cost_usd|usd(4) }} of model and search time
+  </p>
+
+  <div class="doc-actions">
+    {% if pulse_href %}<a class="btn btn-primary" href="{{ pulse_href }}" download>Download this report</a>{% endif %}
+    <a class="btn btn-ghost" href="#appendix">Read the evidence</a>
+    <a class="btn btn-ghost" href="/deliverables">What you get <span aria-hidden="true">↗</span></a>
+  </div>
+  {# No button here prints the page: this app ships no JavaScript, so the
+     print path is the browser's own. The stylesheet is what makes it a
+     document rather than a printed web page — see the @media print block in
+     app.css. #}
+  <p class="doc-print-note">Print or save as PDF from your browser — the app chrome drops away and this sets as a document.</p>
+</header>
+
+{% if not has_pulse %}
+<p class="empty-state">The pulse report was not written on this run, so there is no document to typeset here. The run's other artifacts are listed at the foot of this page.</p>
+{% endif %}
+
+{% if lead_html %}
+<div class="doc-prose doc-lead">{{ lead_html|safe }}</div>
+{% endif %}
+
+<section class="doc-section" id="findings">
+  <h2 class="doc-h">Corroborated findings</h2>
+  <p class="doc-section-note">A claim reaches this section on three or more independent sources. Every reference number resolves to a dated row with a URL in the <a href="#appendix">provenance appendix</a>.</p>
+  {% if corroborated %}
+  {% for f in corroborated %}
+  <div class="finding" id="{{ f.anchor }}" tabindex="-1">
+    <div class="finding-head">
+      {{ tier_badge(f.tier) }}
+      <span class="finding-meta">{{ f.sources }} independent source{% if f.sources != 1 %}s{% endif %} · {{ f.volume }} signal{% if f.volume != 1 %}s{% endif %}</span>
+    </div>
+    <p class="finding-claim">{{ f.claim_html|safe }}{{ ref_marks(f.refs) }}</p>
+  </div>
+  {% endfor %}
+  {% else %}
+  <div class="doc-prose">{{ corroborated_note|safe }}</div>
+  {% endif %}
 </section>
-<p class="page-caption">{{ explainer('report') }}</p>
 
-{{ title_block([
-  ("Topic", topic.name if topic is not none else "—"),
-  ("Date", run.started_at|dt),
-  ("Run id", run.run_id),
-  ("Spend band", topic.spend_band if topic is not none else "—"),
-  ("Cost", run.cost_usd|usd(4)),
-]) }}
-<p class="cell-sub">
-  {% if mine_run_id %}<a href="/runs/{{ mine_run_id }}/snapshot">snapshot</a> — {% endif %}{% if insight_run_id %}<a href="/runs/{{ insight_run_id }}/insight">insight</a>{% endif %}{% if topic is not none %} — <a href="/topics/{{ topic.topic_id }}">topic</a>{% endif %}
-</p>
+<section class="doc-section" id="emerging">
+  <h2 class="doc-h">Emerging — two independent sources</h2>
+  <p class="doc-section-note">Shown separately, and never as a finding: two sources is worth watching, not worth stating.</p>
+  {% if emerging %}
+  {% for f in emerging %}
+  <div class="finding finding-emerging" id="{{ f.anchor }}" tabindex="-1">
+    <div class="finding-head">
+      {{ tier_badge(f.tier) }}
+      <span class="finding-meta">{{ f.sources }} independent source{% if f.sources != 1 %}s{% endif %} · {{ f.volume }} signal{% if f.volume != 1 %}s{% endif %}</span>
+    </div>
+    <p class="finding-claim">{{ f.claim_html|safe }}{{ ref_marks(f.refs) }}</p>
+  </div>
+  {% endfor %}
+  {% else %}
+  <div class="doc-prose">{{ emerging_note|safe }}</div>
+  {% endif %}
+</section>
 
-<h2>Themes at a glance</h2>
-{% if theme_vms %}
-<div class="table-scroll">
-<table class="data-table">
-  <thead><tr><th scope="col">Theme</th><th scope="col" class="num">Volume</th><th scope="col">Tier</th><th scope="col" class="num">Independent sources</th><th scope="col">Citations</th></tr></thead>
-  <tbody>
-    {% for t in theme_vms %}
-    <tr>
-      <td class="cell-title">{{ t.name }}</td>
-      <td class="num">{{ t.volume }}</td>
-      <td title="{{ tier_note(t.tier) }}">{{ tier_label(t.tier) }}</td>
-      <td class="num">{{ t.sources }}</td>
-      <td class="citation-chips">
-        {% for sid in t.signal_ids %}<a href="#sig-{{ sid }}">{{ sid }}</a>{% if not loop.last %}, {% endif %}{% else %}<span class="muted">none cited</span>{% endfor %}
-      </td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-</div>
-{% else %}
-<p class="empty-state">No themes in this snapshot.</p>
+{% if figure is not none %}
+<figure class="doc-figure" id="figure-1">
+  <div class="doc-figure-plot">{{ figure.svg|safe }}</div>
+  <figcaption>
+    <span class="doc-figure-num">Figure {{ figure.number }}</span>
+    Patient-versus-clinician divergence by theme. Box area is signal volume; the
+    whisker spans the signed gap between the two net-stance readings; the centre
+    line is no gap. {{ figure.estimable }} of {{ figure.rows|length }} themes are
+    estimable. NE marks a theme only one side discussed — not comparable, and not
+    a gap of zero.
+  </figcaption>
+  <div class="table-scroll doc-figure-data" tabindex="0" role="region" aria-label="Figure 1 as a table">
+  <table class="doc-table">
+    <caption>Figure {{ figure.number }} as a table — every mark in the plot, with the reason a theme is not estimable.</caption>
+    <thead><tr>
+      <th scope="col">Theme</th>
+      <th scope="col" class="num">Signals</th>
+      <th scope="col" class="num">Clinician net</th>
+      <th scope="col" class="num">Patient net</th>
+      <th scope="col">Divergence</th>
+      <th scope="col">Confidence</th>
+    </tr></thead>
+    <tbody>
+      {% for r in figure.rows %}
+      <tr>
+        <th scope="row">{{ r.name }}</th>
+        <td class="num">{{ r.volume }}</td>
+        <td class="num">{{ r.hcp_net|net }}</td>
+        <td class="num">{{ r.patient_net|net }}</td>
+        {# The one non-negotiable rule of this codebase, in the one column
+           most likely to break it: a divergence of `None` prints the stated
+           reason, never 0 and never an empty cell. #}
+        <td>{% if r.divergence is not none %}<span class="doc-num">{{ r.divergence|net }}</span>{% else %}<span class="doc-ne">NE</span> <span class="doc-reason">{{ r.reason }}</span>{% endif %}</td>
+        <td>{{ tier_badge(r.tier) if r.tier else "not scored" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</figure>
 {% endif %}
 
-<h2>Pulse report</h2>
-{% if has_pulse %}
-<div class="md-preview">{{ pulse_html|safe }}</div>
-{% else %}
-<p class="empty-state">pulse_report.md was not found on this run.</p>
-{% endif %}
+<section class="doc-section" id="themes">
+  <h2 class="doc-h">Themes observed</h2>
+  {% if theme_rows %}
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Themes observed">
+  <table class="doc-table">
+    <caption>Every theme in this snapshot, with its volume, its confidence tier and the sources behind it. A theme is always reported — a count needs no corroboration; a claim about it does.</caption>
+    <thead><tr>
+      <th scope="col">Theme</th>
+      <th scope="col" class="num">Volume</th>
+      <th scope="col">Confidence</th>
+      <th scope="col" class="num">Independent sources</th>
+      <th scope="col">Sources</th>
+    </tr></thead>
+    <tbody>
+      {% for t in theme_rows %}
+      <tr id="{{ t.row_anchor }}">
+        <th scope="row">{% if t.anchor != t.row_anchor %}<a href="#{{ t.anchor }}">{{ t.name }}</a>{% else %}{{ t.name }}{% endif %}</th>
+        <td class="num">{{ t.volume }}</td>
+        <td>{{ tier_badge(t.tier) }}</td>
+        <td class="num">{{ t.sources }}</td>
+        <td>{% if t.refs %}{{ ref_marks(t.refs) }}{% else %}<span class="doc-reason">no citation resolved for this theme</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="empty-state">No themes were found in this snapshot.</p>
+  {% endif %}
+</section>
 
-<h2>Methodology</h2>
-{% if methodology_html %}
-<div class="md-preview">{{ methodology_html|safe }}</div>
-{% else %}
-<p class="empty-state">methodology.md was not found on this run.</p>
-{% endif %}
+{% for s in extra_sections %}
+<section class="doc-section">
+  <h2 class="doc-h">{{ s.heading }}</h2>
+  <div class="doc-prose">{{ s.html|safe }}</div>
+</section>
+{% endfor %}
 
-<h2>Worth considering</h2>
-{% if considering_html %}
-<div class="md-preview">{{ considering_html|safe }}</div>
-{% else %}
-<p class="empty-state">worth_considering.md was not found on this run.</p>
-{% endif %}
+<section class="doc-section" id="worth-considering">
+  <h2 class="doc-h">Worth considering</h2>
+  {% if considering_html %}
+  <div class="doc-prose">{{ considering_html|safe }}</div>
+  {% else %}
+  <p class="empty-state">The worth-considering note was not written on this run.</p>
+  {% endif %}
+</section>
 
-<h2>Provenance appendix — one row per cited signal</h2>
-{% if citations %}
-<div class="table-scroll">
-<table class="data-table" id="citations-table">
-  <thead><tr><th scope="col">Signal</th><th scope="col">Venue</th><th scope="col">Venue kind</th><th scope="col">Captured</th><th scope="col">Method</th><th scope="col">URL</th></tr></thead>
-  <tbody>
-    {% for c in citations %}
-    <tr id="sig-{{ c.signal_id }}">
-      <td class="cell-title">{{ c.signal_id }}</td>
-      <td>{{ c.venue }}</td>
-      <td>{{ c.venue_kind }}</td>
-      <td>{{ c.captured_at|dt }}</td>
-      <td class="cell-sub">{{ c.method }}</td>
-      <td><a href="{{ c.url }}">{{ c.url }}</a></td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-</div>
-{% else %}
-<p class="empty-state">No citations recorded on this report.</p>
-{% endif %}
+<section class="doc-section" id="appendix">
+  <h2 class="doc-h">Provenance appendix</h2>
+  <p class="doc-section-note">One row per cited source, numbered as the references above. Every row links back to the claim that cited it.</p>
+  {% if citations %}
+  <div class="table-scroll doc-appendix" tabindex="0" role="region" aria-label="Provenance appendix">
+  <table class="doc-table doc-table-appendix">
+    <caption>Sources cited in this report, in reference order. Captured is when this tool collected the row, which is not necessarily when the thing was said.</caption>
+    <thead><tr>
+      <th scope="col" class="num">Ref</th>
+      <th scope="col">Source</th>
+      <th scope="col">Captured</th>
+      <th scope="col">Cited by</th>
+    </tr></thead>
+    <tbody>
+      {% for c in citations %}
+      <tr id="{{ c.anchor }}" tabindex="-1">
+        <th scope="row" class="num">{{ c.ref }}</th>
+        <td>
+          <a href="{{ c.url }}">{{ c.venue }}</a>
+          <span class="cell-sub">{{ kind_label(c.venue_kind) }} · {{ c.method }} · <span class="doc-runid">{{ c.signal_id }}</span></span>
+        </td>
+        <td><time datetime="{{ c.captured_at }}">{{ c.captured_at|date_long }}</time></td>
+        <td>
+          {% if c.back %}
+          {% for b in c.back %}<a href="#{{ b.anchor }}">{{ b.label }}</a>{% if not loop.last %}; {% endif %}{% endfor %}
+          {% else %}
+          <span class="doc-reason">recorded in the ledger, not cited in the body</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="empty-state">No source was cited in this report's body, so the appendix has no rows. That is a statement about the report, not a missing file.</p>
+  {% endif %}
+</section>
 
-<h2>Deliverables</h2>
-<p class="body-text field-note">The four client-ready files this run produced — each is exactly what downloads below.</p>
-{{ deliverable_groups(deliv_groups) }}
-</div>
+<section class="doc-section" id="methodology">
+  <h2 class="doc-h">Methodology</h2>
+  {% if methodology_html %}
+  <div class="doc-prose doc-prose-sm">{{ methodology_html|safe }}</div>
+  {% else %}
+  <p class="empty-state">The methodology note was not written on this run.</p>
+  {% endif %}
+</section>
+
+<section class="doc-section doc-no-print" id="files">
+  <h2 class="doc-h">The files this run produced</h2>
+  <p class="doc-section-note">Each of these is exactly what downloads — the document above is the first of them, typeset. <a href="/deliverables">What you get</a> describes all ten.</p>
+  {{ deliverable_tiers(deliv_tiers, true, 3) }}
+</section>
+</article>
 {% endblock %}

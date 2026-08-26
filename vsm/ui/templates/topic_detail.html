@@ -1,5 +1,5 @@
 {% extends "_base.html" %}
-{% from "_macros.html" import deliverable_groups %}
+{% from "_macros.html" import deliverable_tiers %}
 {% block title %}{{ topic.name }} — Vi Signal Mine{% endblock %}
 {% block content %}
 <div class="page page-wide">
@@ -41,6 +41,6 @@
 {% else %}
 <p class="body-text field-note">This topic has never been run, so nothing below is real yet — this is exactly what lands, in this shape, once a snapshot, insight and report complete. See it before you spend anything.</p>
 {% endif %}
-{{ deliverable_groups(groups) }}
+{{ deliverable_tiers(tiers) }}
 </div>
 {% endblock %}

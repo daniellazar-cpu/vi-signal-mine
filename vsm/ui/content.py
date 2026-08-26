@@ -20,6 +20,7 @@ __all__ = [
     "TAGLINE",
     "DELIVERABLES",
     "DELIVERABLE_GROUPS",
+    "DELIVERABLE_TIERS",
     "WHAT_IT_IS",
     "MODES",
     "PLOT_GUIDE",
@@ -286,7 +287,7 @@ _EXPLAINERS = {
     "how": "The whole process, start to finish, in about two minutes of reading.",
     "deliverables": (
         "What lands when a run finishes — before you spend anything on one. "
-        "Ten artifacts, grouped by who they are for."
+        "Four documents written to be handed over, and the evidence behind them."
     ),
 }
 
@@ -309,8 +310,12 @@ def explainer(screen: str) -> str:
 # so this is shown BEFORE a run as much as after — the pre-run screen is the
 # same list with nothing filled in yet.
 #
-# `sample` is one real line from a real run, not a mockup. It is what makes
-# "provenance appendix" mean something to someone who has never seen one.
+# `sample` is written in the same markdown the real artifact writes, and is
+# rendered through the same converter the report body uses — never handed to a
+# template as raw text. It is illustrative of the *shape* of a line, not a
+# quote from a particular run, and the page says so in those words: claiming a
+# hard-coded string is "real output" was itself a small dishonesty, and the
+# numbers in it matched no run in the system.
 
 DELIVERABLES = (
     {
@@ -325,7 +330,11 @@ DELIVERABLES = (
             "confidence tier on the page."
         ),
         "for_whom": "The client, as-is.",
-        "sample": "**cost** is corroborated on 12 independent sources. Volume is up 500% versus the prior snapshot (2 to 12).",
+        "sample": (
+            "**Cost of access** is corroborated on 12 independent sources "
+            "(14 signals). Volume is up 40% versus the prior snapshot "
+            "(10 to 14)."
+        ),
     },
     {
         "key": "provenance_appendix",
@@ -339,7 +348,11 @@ DELIVERABLES = (
             "the report instead of believing it."
         ),
         "for_whom": "Anyone who asks 'where did this come from?'",
-        "sample": "sig-h2 · studentdoctor.net · hcp_discussion · 2026-08-25 · serp_result · https://…",
+        "sample": (
+            "| ref | source | captured | method |\n"
+            "|---|---|---|---|\n"
+            "| 1 | studentdoctor.net | 25 August 2026 | search result |"
+        ),
     },
     {
         "key": "methodology",
@@ -428,6 +441,33 @@ DELIVERABLES = (
         "body": "Themes that appeared, vanished, spiked or collapsed against their recent baseline.",
         "for_whom": "Catching the thing you were not watching for.",
         "sample": "",
+    },
+)
+
+#: The two tiers the deliverables are shown in. The four client-ready
+#: artifacts are the offer and get the top of the page; the six behind them
+#: are the evidence for it and read as a list. Ten cards at one weight said
+#: `coverage.json` was worth as much as the report, which is exactly the
+#: impression this split exists to correct.
+DELIVERABLE_TIERS = (
+    {
+        "key": "primary",
+        "groups": ("report",),
+        "label": "Client-ready documents",
+        "lede": (
+            "Four documents, written to be handed over without editing. Every "
+            "sample below is rendered as it will appear in the report — never "
+            "as markdown source."
+        ),
+    },
+    {
+        "key": "secondary",
+        "groups": ("analysis", "data"),
+        "label": "The evidence underneath",
+        "lede": (
+            "Six machine-readable files behind those four documents — every "
+            "theme, stance, delta and collected row, for your own analysis."
+        ),
     },
 )
 

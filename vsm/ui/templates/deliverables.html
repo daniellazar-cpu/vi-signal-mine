@@ -1,22 +1,28 @@
 {% extends "_base.html" %}
-{% from "_macros.html" import deliverable_groups %}
+{% from "_macros.html" import deliverable_tiers %}
 {% block title %}What you get — Vi Signal Mine{% endblock %}
 {% block content %}
 <div class="page page-wide">
-<p class="eyebrow">The moat, not the tool</p>
+<p class="eyebrow">For the client meeting</p>
 <section class="page-head">
   <h1>What you get</h1>
 </section>
 <p class="page-caption">{{ explainer('deliverables') }}</p>
-<p class="body-text">
-  Ten artifacts come out of one topic watched to completion — four written to
-  be handed to a client as-is, four that back every claim in them, and two
-  raw collections underneath both. Every sample line below is real: a
-  quoted-out sentence from an actual run, not a mockup of one. This is the
-  page to read before you spend anything running one.
+<p class="lede-text">
+  A dated read on what is being said about your brand — every claim carrying
+  the number of independent sources behind it, and every source traceable to
+  the post it came from. Four documents are written to be handed over as they
+  are; six machine-readable files behind them are the evidence for every line.
 </p>
 
-{{ deliverable_groups(groups, false) }}
+{% if example is not none %}
+<p class="body-text">
+  <a class="btn btn-primary" href="/runs/{{ example.run_id }}/report">See a finished report</a>
+  <span class="field-note">Produced by this instance, for “{{ example.topic_name }}”.</span>
+</p>
+{% endif %}
+
+{{ deliverable_tiers(tiers, false, 2) }}
 
 <p class="body-text field-note">
   Ready to see this fill in for real? <a href="/">Start from a topic</a> — only

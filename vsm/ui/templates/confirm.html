@@ -1,5 +1,5 @@
 {% extends "_base.html" %}
-{% from "_macros.html" import title_block, deliverable_groups %}
+{% from "_macros.html" import title_block, deliverable_tiers %}
 {% block title %}Confirm spend — {{ topic.name }} — Vi Signal Mine{% endblock %}
 {% block content %}
 <div class="page page-narrow">
@@ -33,15 +33,16 @@
     <span class="estimate-total-value">{{ estimate.total_usd|usd(2) }}</span>
   </div>
 
-  <div class="table-scroll">
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Cost estimate breakdown">
   <table class="data-table breakdown-table">
+    <caption class="visually-hidden">What the estimate is made of, item by item.</caption>
     <thead>
       <tr><th scope="col">Item</th><th scope="col" class="num">Cost</th><th scope="col">Basis</th></tr>
     </thead>
     <tbody>
       {% for item in estimate.breakdown %}
       <tr>
-        <td class="cell-title">{{ item.item }}</td>
+        <th scope="row" class="cell-title">{{ item.item }}</th>
         <td class="num">{{ item.usd|usd(4) }}</td>
         <td class="cell-sub">{{ item.note }}</td>
       </tr>
@@ -63,7 +64,7 @@
     in the same shape, that fills in once the snapshot, insight and report
     stages complete.
   </p>
-  {{ deliverable_groups(groups) }}
+  {{ deliverable_tiers(tiers) }}
 
   {% if storage_is_durable() %}
   <div class="confirm-actions">
