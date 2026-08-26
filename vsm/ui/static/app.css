@@ -39,8 +39,8 @@
   /* The non-repro drafting grid the whole page sits on: a fine 8px pitch
      and a bolder 64px pitch, both cyan at low alpha so structure is
      visible without ever competing with ink. */
-  --grid-minor: rgba(143, 196, 216, 0.16);
-  --grid-major: rgba(143, 196, 216, 0.30);
+  --grid-minor: rgba(143, 196, 216, 0.07);
+  --grid-major: rgba(143, 196, 216, 0.15);
   /* A translucent wash of --ground, used on content surfaces (the plot,
      panels, the markdown preview) instead of a solid fill — the grid is
      drawn on the page's own background-image, so an opaque panel color
@@ -78,8 +78,8 @@ body {
      bolder 64px grid, both non-repro cyan. Structure, never ink — it
      must read as texture on the page, not as a table underneath it. */
   background-image:
-    repeating-linear-gradient(to right, var(--grid-minor), var(--grid-minor) 1px, transparent 1px, transparent 8px),
-    repeating-linear-gradient(to bottom, var(--grid-minor), var(--grid-minor) 1px, transparent 1px, transparent 8px),
+    repeating-linear-gradient(to right, var(--grid-minor), var(--grid-minor) 1px, transparent 1px, transparent 16px),
+    repeating-linear-gradient(to bottom, var(--grid-minor), var(--grid-minor) 1px, transparent 1px, transparent 16px),
     repeating-linear-gradient(to right, var(--grid-major), var(--grid-major) 1px, transparent 1px, transparent 64px),
     repeating-linear-gradient(to bottom, var(--grid-major), var(--grid-major) 1px, transparent 1px, transparent 64px);
   color: var(--ink);

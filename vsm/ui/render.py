@@ -46,8 +46,20 @@ _TIER_NOTE = {key.replace(" ", "_"): note for key, note in TIERS}
 
 
 def usd(value: float | None, decimals: int = 4) -> str:
+    """Money, at the precision this tool actually operates in.
+
+    Four decimals because a probe sweep costs about $0.03 and the cents matter;
+    rounding to `$0.03` would hide the difference between a run and ten of them.
+
+    An exact zero drops to `$0.00`. `$0.0000` is truthful and reads as broken,
+    and a figure a reader distrusts is worse than a coarser one they believe.
+    `None` stays an em dash — that is "not measured", which is a different fact
+    from "measured, and it was nothing".
+    """
     if value is None:
         return "—"
+    if value == 0:
+        return "$0.00"
     return f"${value:,.{decimals}f}"
 
 
