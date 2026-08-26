@@ -77,10 +77,16 @@ def test_how_page_renders_a_glossary_term_and_a_mode_name(client):
 def test_the_empty_state_contains_the_three_first_run_steps(client):
     """FIRST_RUN_STEPS replaces the old empty-state paragraph: three
     numbered steps that teach, not a paragraph reporting emptiness."""
+    from vsm.ui.content import FIRST_RUN_STEPS
+
     c, _, _ = client
     body = c.get("/").text
-    assert "Create a topic" in body
-    assert "Run a snapshot" in body
+    # Assert against the content module, never a literal: copy is edited far
+    # more often than markup, and a test that pins the words fails on every
+    # wording change while proving nothing about the rendering.
+    assert len(FIRST_RUN_STEPS) == 3
+    for heading, _detail in FIRST_RUN_STEPS:
+        assert heading in body, f"first-run step missing from the empty state: {heading}"
     assert "Run it again next week" in body
 
 

@@ -18,11 +18,14 @@ from __future__ import annotations
 
 __all__ = [
     "TAGLINE",
+    "DELIVERABLES",
+    "DELIVERABLE_GROUPS",
     "WHAT_IT_IS",
     "MODES",
     "PLOT_GUIDE",
     "TIERS",
     "GLOSSARY",
+    "FIELD_GUIDE",
     "FIRST_RUN_STEPS",
     "explainer",
 ]
@@ -161,7 +164,7 @@ GLOSSARY = (
 
 #: Shown on the empty state. Three steps, no more.
 FIRST_RUN_STEPS = (
-    ("Create a topic", "Name the brand or molecule, its competitors, and the area."),
+    ("Name a topic", "A brand, a molecule, a category — whatever you want watched. That is the only thing required."),
     ("Run a snapshot", "Pick a spend band. You see the estimate before anything is spent."),
     (
         "Run it again next week",
@@ -170,6 +173,55 @@ FIRST_RUN_STEPS = (
     ),
 )
 
+#: Per-field guidance for the topic form. Only `name` is required; every other
+#: field earns its place by saying what it changes about the result, so a user
+#: can decide to skip it rather than guess. `when_blank` is what happens if
+#: they do — never a warning, just the consequence.
+FIELD_GUIDE = {
+    "name": {
+        "label": "Topic",
+        "required": True,
+        "help": "What you want watched. A brand, a molecule, a category, a question.",
+        "placeholder": "e.g. Zepbound — obesity",
+        "when_blank": "",
+    },
+    "brand": {
+        "label": "Brand name",
+        "required": False,
+        "help": "The product as patients and clinicians actually write it.",
+        "placeholder": "e.g. Zepbound",
+        "when_blank": "Searches on the topic name alone.",
+    },
+    "molecule": {
+        "label": "Molecule (INN)",
+        "required": False,
+        "help": "The generic name. Clinicians often use it where patients use the brand — including it finds conversation the brand name misses.",
+        "placeholder": "e.g. tirzepatide",
+        "when_blank": "Fine to skip — not every topic has one, and some categories have several.",
+    },
+    "competitors": {
+        "label": "Competitors",
+        "required": False,
+        "help": "How a conversation refers to the category. Naming them widens what gets found and lets the report compare.",
+        "placeholder": "e.g. Wegovy, Saxenda",
+        "when_blank": "The run still works; it just will not tell you about the category around you.",
+    },
+    "therapeutic_area": {
+        "label": "Therapeutic area",
+        "required": False,
+        "help": "Routes the search to the venues that matter for this area, before spending anything on the open web.",
+        "placeholder": "e.g. obesity",
+        "when_blank": "Searches a general venue set, which costs the same and finds less.",
+    },
+    "questions": {
+        "label": "Questions you care about",
+        "required": False,
+        "help": "What you would ask if you could ask the internet directly. Shapes which themes get surfaced first.",
+        "placeholder": "e.g. what do prescribers say about tolerability?",
+        "when_blank": "Themes are ranked by volume alone.",
+    },
+}
+
 #: Short inline notes, keyed by screen. One sentence each.
 _EXPLAINERS = {
     "topics": (
@@ -177,8 +229,8 @@ _EXPLAINERS = {
         "across snapshots."
     ),
     "topic_form": (
-        "Competitors matter: they are how a conversation refers to the category, "
-        "so naming them widens what gets found."
+        "Only the topic is required. Everything else narrows or widens the "
+        "search — add what you know, skip what you do not."
     ),
     "confirm": (
         "This is the only screen that spends money. The estimate is a ceiling, "
@@ -208,3 +260,142 @@ def explainer(screen: str) -> str:
     and must never take a page down with it.
     """
     return _EXPLAINERS.get(screen, "")
+
+
+# --------------------------------------------------------------------------- #
+# The deliverables — the thing the tool is actually for                        #
+# --------------------------------------------------------------------------- #
+#
+# Everything above explains the process. This explains the product. A user
+# deciding whether to spend money needs to know what lands on the other side,
+# so this is shown BEFORE a run as much as after — the pre-run screen is the
+# same list with nothing filled in yet.
+#
+# `sample` is one real line from a real run, not a mockup. It is what makes
+# "provenance appendix" mean something to someone who has never seen one.
+
+DELIVERABLES = (
+    {
+        "key": "pulse_report",
+        "file": "pulse_report.md",
+        "name": "Pulse report",
+        "group": "report",
+        "headline": "The read you hand over.",
+        "body": (
+            "What is being said, where, by which kind of source, moving which "
+            "way, and what changed since last time. Every claim carries its "
+            "confidence tier on the page."
+        ),
+        "for_whom": "The client, as-is.",
+        "sample": "**cost** is corroborated on 12 independent sources. Volume is up 500% versus the prior snapshot (2 to 12).",
+    },
+    {
+        "key": "provenance_appendix",
+        "file": "provenance_appendix.md",
+        "name": "Provenance appendix",
+        "group": "report",
+        "headline": "Every claim, traced to the rows behind it.",
+        "body": (
+            "One row per cited signal: id, venue, what kind of venue, when it "
+            "was captured, how, and the URL. This is what lets someone check "
+            "the report instead of believing it."
+        ),
+        "for_whom": "Anyone who asks 'where did this come from?'",
+        "sample": "sig-h2 · studentdoctor.net · hcp_discussion · 2026-08-25 · serp_result · https://…",
+    },
+    {
+        "key": "methodology",
+        "file": "methodology.md",
+        "name": "Methodology note",
+        "group": "report",
+        "headline": "What was searched, and what was not.",
+        "body": (
+            "Venues queried, the date window, what was excluded and why, how "
+            "confidence tiers are defined, and the limits of the run. Written "
+            "so the method can be checked, not just described."
+        ),
+        "for_whom": "Medical, legal, or a client's own analyst.",
+        "sample": "An independent source is a distinct post or a distinct publisher.",
+    },
+    {
+        "key": "worth_considering",
+        "file": "worth_considering.md",
+        "name": "Worth considering",
+        "group": "report",
+        "headline": "Options, never instructions.",
+        "body": (
+            "What the findings might mean for what you do next, framed as "
+            "things to weigh. The tool suggests; the decision stays with the "
+            "person who has the context it does not."
+        ),
+        "for_whom": "Whoever owns the brand.",
+        "sample": "Cost is the dominant patient theme and absent from clinician venues — worth checking whether access messaging reaches patients directly.",
+    },
+    {
+        "key": "signals",
+        "file": "signals.json",
+        "name": "Signal ledger",
+        "group": "data",
+        "headline": "Everything collected, row by row.",
+        "body": "Each result with its venue, capture time, collection method, tier and URL.",
+        "for_whom": "Your own analysis.",
+        "sample": "",
+    },
+    {
+        "key": "coverage",
+        "file": "coverage.json",
+        "name": "Coverage",
+        "group": "data",
+        "headline": "Which venues answered, and which came back empty.",
+        "body": "An empty venue is a finding, so it is named rather than dropped.",
+        "for_whom": "Judging whether the sweep was wide enough.",
+        "sample": "",
+    },
+    {
+        "key": "themes",
+        "file": "themes.json",
+        "name": "Themes",
+        "group": "analysis",
+        "headline": "What is being discussed, grouped and counted.",
+        "body": "Volume, venue mix and venue-kind mix per theme.",
+        "for_whom": "Charting and re-cuts.",
+        "sample": "",
+    },
+    {
+        "key": "duallens",
+        "file": "duallens.json",
+        "name": "Clinician–patient gap",
+        "group": "analysis",
+        "headline": "Where the two audiences diverge.",
+        "body": "Per theme, each side's stance and the distance between them — or a stated reason when they cannot be compared.",
+        "for_whom": "The finding nobody thinks to ask for.",
+        "sample": "",
+    },
+    {
+        "key": "momentum",
+        "file": "momentum.json",
+        "name": "Momentum",
+        "group": "analysis",
+        "headline": "What moved since the last snapshot.",
+        "body": "Volume change per theme. Measured, never forecast.",
+        "for_whom": "The half a client cannot get by reading forums themselves.",
+        "sample": "",
+    },
+    {
+        "key": "anomaly",
+        "file": "anomaly.json",
+        "name": "Anomalies",
+        "group": "analysis",
+        "headline": "What changed that nobody asked about.",
+        "body": "Themes that appeared, vanished, spiked or collapsed against their recent baseline.",
+        "for_whom": "Catching the thing you were not watching for.",
+        "sample": "",
+    },
+)
+
+#: How the deliverables screen groups them, in the order a reader should meet them.
+DELIVERABLE_GROUPS = (
+    ("report", "Client-ready", "Written to be handed over without editing."),
+    ("analysis", "Analysis", "The findings behind the report, as data."),
+    ("data", "Raw collection", "Everything gathered, with full provenance."),
+)

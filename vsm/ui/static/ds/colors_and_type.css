@@ -1,0 +1,192 @@
+/* ============================================================
+   Vi — Colors & Type Foundation
+   Source of truth: "Vi — Visual Identity Guidelines" v1.1 (June 2026)
+   ------------------------------------------------------------
+   Aesthetic: calm, structured, enterprise-grade, restrained.
+   White is the canvas · Black is structure · Vi Violet is a signal.
+
+   FONT: The brand typeface is "Neue Montreal" (Book / Medium), self-hosted
+   from /fonts. Geist Mono is loaded from Google Fonts for the rare monospace
+   need (no brand mono was specified).
+   ============================================================ */
+
+@font-face {
+  font-family: "Neue Montreal";
+  src: url("../fonts/NeueMontreal-Book.ttf") format("truetype");
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Neue Montreal";
+  src: url("../fonts/NeueMontreal-Medium.ttf") format("truetype");
+  font-weight: 500; font-style: normal; font-display: swap;
+}
+/* Geist Mono @import removed: this app renders with zero network. */
+
+:root {
+  /* ---------- CORE PALETTE ---------- */
+  --vi-white:  #FFFFFF;   /* Primary canvas — the default background */
+  --vi-black:  #000000;   /* Contrast & structure — text, rules, surfaces */
+  --vi-violet: #4F31F5;   /* Signal — intelligence, action, focus. Used sparingly. */
+
+  /* Logo ink (true wordmark fill is a near-black violet-black) */
+  --vi-ink: #140923;
+
+  /* ---------- WORKING NEUTRALS (cool grays) ---------- */
+  /* Support the three core colors — never used as accents. */
+  --vi-gray-50:  #F7F8FA;  /* background tints, lightest surfaces */
+  --vi-gray-100: #ECEFF5;  /* surfaces, hover fills */
+  --vi-gray-300: #C5C9D0;  /* dividers (strong), disabled fills */
+  --vi-gray-500: #797F88;  /* secondary text, captions, icons */
+  --vi-gray-800: #2A2D33;  /* near-black structural surfaces */
+
+  /* ---------- VIOLET TINTS (derived; for fills/states only) ---------- */
+  --vi-violet-12: rgba(79, 49, 245, 0.12);
+  --vi-violet-08: rgba(79, 49, 245, 0.08);
+  --vi-violet-06: rgba(79, 49, 245, 0.06);
+  --vi-violet-pressed: #3E27C4;  /* darker violet for press states */
+  --vi-violet-hover:   #4429DC;  /* slightly darker violet for hover */
+  --vi-violet-on-dark: #9B86FF;  /* lifted violet — legible signal on black/dark surfaces */
+
+  /* ---------- SEMANTIC COLOR ROLES ---------- */
+  --bg:            var(--vi-white);
+  --bg-subtle:     var(--vi-gray-50);
+  --bg-surface:    var(--vi-gray-100);
+  --bg-inverse:    var(--vi-black);
+
+  --fg1:           var(--vi-black);            /* primary text */
+  --fg2:           var(--vi-gray-500);         /* secondary text */
+  --fg-muted:      rgba(0, 0, 0, 0.55);        /* muted body / metadata */
+  --fg-on-dark:    var(--vi-white);
+  --fg-on-dark-2:  rgba(255, 255, 255, 0.62);
+
+  --signal:        var(--vi-violet);           /* the one accent */
+  --on-signal:     var(--vi-white);
+
+  /* ---------- RULES / BORDERS ---------- */
+  --rule:          rgba(0, 0, 0, 0.10);        /* hairline divider */
+  --rule-strong:   rgba(0, 0, 0, 0.25);        /* emphasized divider */
+  --rule-on-dark:  rgba(255, 255, 255, 0.18);
+  --border-hairline: 0.5px;                    /* the brand loves a true hairline */
+
+  /* ---------- TYPE FAMILY ---------- */
+  --vi-font-family: "Neue Montreal", "Helvetica Neue", Arial, sans-serif;
+  --vi-font-mono:   "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* ---------- TYPE WEIGHTS ---------- */
+  --w-book:    400; /* @kind font */  /* "Book" — the default, used for nearly everything incl. display */
+  --w-medium:  500; /* @kind font */  /* emphasis, eyebrows, subheads */
+  --w-semibold:600; /* @kind font */  /* reserved; use rarely */
+
+  /* ---------- TYPE SCALE (px / line-height / tracking / weight) ---------- */
+  /* Mirrors the guideline scale. Headlines use tight tracking & Book weight. */
+  --t-display-size: 64px;  --t-display-lh: 72px;  --t-display-track: -0.02em;
+  --t-headline-size:48px;  --t-headline-lh:56px;  --t-headline-track:-0.015em;
+  --t-h2-size:     36px;   --t-h2-lh:     44px;   --t-h2-track:    -0.01em;
+  --t-h3-size:     28px;   --t-h3-lh:     36px;   --t-h3-track:    -0.005em;
+  --t-subhead-size:22px;   --t-subhead-lh:30px;   --t-subhead-track:0em;       /* Medium */
+  --t-body-lg-size:18px;   --t-body-lg-lh:28px;
+  --t-body-size:   16px;   --t-body-lh:   24px;
+  --t-small-size:  14px;   --t-small-lh:  22px;
+  --t-caption-size:12px;   --t-caption-lh:18px;
+  --t-eyebrow-size:11px;   --t-eyebrow-lh:16px;   --t-eyebrow-track:0.12em;    /* Medium, UPPERCASE */
+
+  /* ---------- SPACING SCALE (named tokens — never invent in-betweens) ---------- */
+  --space-xs:  8px;    /* tight internal spacing */
+  --space-sm:  16px;   /* small gaps, labels */
+  --space-md:  24px;   /* standard spacing */
+  --space-lg:  40px;   /* section spacing */
+  --space-xl:  64px;   /* major layout spacing */
+  --space-xxl: 96px;   /* large editorial breathing room */
+
+  /* ---------- GRID / LAYOUT ---------- */
+  --grid-cols-desktop: 12; /* @kind other */
+  --grid-margin-desktop: 80px;  --grid-gutter-desktop: 24px;
+  --grid-cols-deck:    12; /* @kind other */
+  --grid-margin-deck:    64px;  --grid-gutter-deck:    24px;
+  --grid-cols-tablet:  8; /* @kind other */
+  --grid-margin-tablet:  40px;  --grid-gutter-tablet:  20px;
+  --grid-cols-mobile:  4; /* @kind other */
+  --grid-margin-mobile:  24px;  --grid-gutter-mobile:  16px;
+  --maxw-content: 1280px;
+
+  /* ---------- RADII (restrained — near-square; brand favors hard edges) ---------- */
+  --radius-none: 0px;
+  --radius-sm:   4px;   /* inputs, chips */
+  --radius-md:   8px;   /* cards, buttons */
+  --radius-lg:   12px;  /* large surfaces, modals */
+  --radius-pill: 999px; /* pills only when intentional */
+
+  /* ---------- ELEVATION (soft, low, cool — never heavy) ---------- */
+  --shadow-xs: 0 1px 2px rgba(20, 9, 35, 0.04);
+  --shadow-sm: 0 1px 3px rgba(20, 9, 35, 0.06), 0 1px 2px rgba(20, 9, 35, 0.04);
+  --shadow-md: 0 4px 16px rgba(20, 9, 35, 0.08);
+  --shadow-lg: 0 12px 40px rgba(20, 9, 35, 0.10);
+  --shadow-signal: 0 8px 28px rgba(79, 49, 245, 0.22);
+
+  /* ---------- MOTION (calm, continuous, intelligent) ---------- */
+  --ease-standard: cubic-bezier(0.4, 0.0, 0.2, 1); /* @kind other */
+  --ease-entrance: cubic-bezier(0.16, 1, 0.3, 1); /* @kind other */
+  --dur-fast: 120ms; /* @kind other */
+  --dur-base: 200ms; /* @kind other */
+  --dur-slow: 360ms; /* @kind other */
+}
+
+/* ============================================================
+   SEMANTIC TYPE CLASSES
+   Sentence case by default. Left-aligned. No italics for emphasis.
+   ============================================================ */
+.vi-display {
+  font-family: var(--vi-font-family); font-weight: var(--w-book);
+  font-size: var(--t-display-size); line-height: var(--t-display-lh);
+  letter-spacing: var(--t-display-track); margin: 0;
+}
+.vi-headline {
+  font-family: var(--vi-font-family); font-weight: var(--w-book);
+  font-size: var(--t-headline-size); line-height: var(--t-headline-lh);
+  letter-spacing: var(--t-headline-track); margin: 0;
+}
+.vi-h2 {
+  font-family: var(--vi-font-family); font-weight: var(--w-book);
+  font-size: var(--t-h2-size); line-height: var(--t-h2-lh);
+  letter-spacing: var(--t-h2-track); margin: 0;
+}
+.vi-h3 {
+  font-family: var(--vi-font-family); font-weight: var(--w-book);
+  font-size: var(--t-h3-size); line-height: var(--t-h3-lh);
+  letter-spacing: var(--t-h3-track); margin: 0;
+}
+.vi-subhead {
+  font-family: var(--vi-font-family); font-weight: var(--w-medium);
+  font-size: var(--t-subhead-size); line-height: var(--t-subhead-lh);
+  letter-spacing: var(--t-subhead-track); margin: 0;
+}
+.vi-body-lg {
+  font-family: var(--vi-font-family); font-weight: var(--w-book);
+  font-size: var(--t-body-lg-size); line-height: var(--t-body-lg-lh); margin: 0;
+}
+.vi-body {
+  font-family: var(--vi-font-family); font-weight: var(--w-book);
+  font-size: var(--t-body-size); line-height: var(--t-body-lh); margin: 0;
+}
+.vi-small {
+  font-family: var(--vi-font-family); font-weight: var(--w-book);
+  font-size: var(--t-small-size); line-height: var(--t-small-lh); margin: 0;
+}
+.vi-caption {
+  font-family: var(--vi-font-family); font-weight: var(--w-book);
+  font-size: var(--t-caption-size); line-height: var(--t-caption-lh);
+  color: var(--fg2); margin: 0;
+}
+.vi-eyebrow {
+  font-family: var(--vi-font-family); font-weight: var(--w-medium);
+  font-size: var(--t-eyebrow-size); line-height: var(--t-eyebrow-lh);
+  letter-spacing: var(--t-eyebrow-track); text-transform: uppercase; margin: 0;
+}
+.vi-mono {
+  font-family: var(--vi-font-mono); font-weight: var(--w-book);
+  font-size: var(--t-small-size); line-height: var(--t-small-lh);
+  font-variant-numeric: tabular-nums; margin: 0;
+}
+
+/* Signal helper — apply violet to the single most important element in view. */
+.vi-signal { color: var(--signal); }
