@@ -38,8 +38,24 @@ __all__ = [
 ]
 
 
-def is_vercel() -> bool:
-    return os.environ.get("VERCEL", "").strip() == "1"
+def is_vercel(env: Mapping[str, str] | None = None) -> bool:
+    """Are we running as a Vercel serverless function?
+
+    Checks ``VERCEL_ENV`` as well as ``VERCEL``, and that is not belt-and-
+    braces — it is the bug this signature exists to fix. **``VERCEL`` is set
+    during the build but is not reliably present in the function's own
+    runtime environment**, while ``VERCEL_ENV`` is. Keyed on ``VERCEL``
+    alone, every guard downstream of this silently believed it was running
+    locally: the read-only guard let a production deployment accept writes it
+    could not keep, and the spend-band guard would have let a ``deep`` sweep
+    start against a 60-second timeout.
+
+    Proven on the deployment rather than assumed: ``assert_serveable`` fired
+    its refusal there (so ``VERCEL_ENV`` was set), while
+    ``storage_is_durable`` reported durable (so ``VERCEL`` was not).
+    """
+    env = env if env is not None else os.environ
+    return bool(env.get("VERCEL_ENV", "").strip()) or env.get("VERCEL", "").strip() == "1"
 
 
 def vercel_env() -> str | None:
@@ -163,7 +179,11 @@ def storage_is_durable(env: Mapping[str, str] | None = None) -> bool:
     env = env if env is not None else os.environ
     if resolve_db_url(env) is not None:
         return True
-    return env.get("VERCEL", "").strip() != "1"
+    # Through `is_vercel` rather than reading `VERCEL` here: one definition of
+    # "are we on Vercel", in one place. Two copies of that check is how this
+    # guard came to trust a build-only variable and report a serverless
+    # deployment as durable.
+    return not is_vercel(env)
 
 
 #: The path prefix Vercel's rewrite prepends. `vercel.json` rewrites `/(.*)`

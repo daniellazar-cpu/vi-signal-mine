@@ -213,3 +213,22 @@ def test_does_not_mutate_the_caller_supplied_scope(captured):
     asyncio.run(app(original, None, None))
     assert original["path"] == "/api/index/x"
     assert calls[0]["path"] == "/x"
+
+
+def test_is_vercel_detects_the_runtime_not_only_the_build():
+    """The bug this pins: `VERCEL` is set during Vercel's build but is not
+    reliably present in the function's own runtime environment, while
+    `VERCEL_ENV` is. Keyed on `VERCEL` alone, every guard downstream believed
+    it was local — a production deployment accepted writes it could not keep,
+    and a `deep` sweep would have been allowed against a 60-second timeout.
+    Found on the deployment, not in a test, which is why it is now pinned.
+    """
+    assert is_vercel({"VERCEL_ENV": "production"}) is True
+    assert is_vercel({"VERCEL": "1"}) is True
+    assert is_vercel({}) is False
+
+
+def test_the_read_only_guard_sees_a_runtime_only_vercel_env():
+    """The exact production shape: VERCEL_ENV present, VERCEL absent, no
+    database. Storage cannot honour a write, and the guard must say so."""
+    assert storage_is_durable({"VERCEL_ENV": "production"}) is False
