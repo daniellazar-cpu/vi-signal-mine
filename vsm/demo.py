@@ -24,13 +24,19 @@ not.
    silently duplicate the demo topic or race a concurrent write. An empty
    store is the only signal this function trusts, and it never updates or
    deletes anything to get there.
-2. **Only when storage is actually ephemeral.** A configured database URL
-   means topics persist for real (spec'd by
-   :func:`vsm.backends.dburl.resolve_db_url`, the same function
-   ``open_stores`` itself defers to) — seeding a synthetic demonstration
-   topic into a *real* database would leave fabricated rows sitting there
-   forever next to genuine ones, which is a worse failure than the empty
-   list this function exists to fix.
+2. **Only when storage is actually ephemeral.** A configured database URL,
+   or a configured ``BLOB_READ_WRITE_TOKEN``, means topics persist for real
+   — the same two names, checked in the same order, that
+   :func:`vsm.storage.open_stores` itself defers to when picking a backend
+   (:func:`vsm.backends.dburl.resolve_db_url` for the former). Seeding a
+   synthetic demonstration topic into either real backend would leave
+   fabricated rows sitting there forever next to genuine ones, which is a
+   worse failure than the empty list this function exists to fix — this
+   check is deliberately "would ``open_stores`` pick something other than
+   SQLite+filesystem", not ``vsm.platform.storage_is_durable``, which would
+   also say yes for a plain local install with neither configured (SQLite on
+   a real filesystem *is* durable there) and wrongly skip the seed a fresh
+   local checkout still needs.
 3. **Always the offline, deterministic fake miner, regardless of this
    process's own ``VSM_OFFLINE``/``VSM_MINER``.** A cold-start seed must
    never place one real, billed request — so the ``Settings`` handed to
@@ -154,8 +160,11 @@ def seed_demo_topic(
     ephemeral store. A no-op in every other case — see the module docstring
     for the three guards this checks, in the order it checks them.
     """
-    if resolve_db_url(env if env is not None else os.environ) is not None:
+    env = env if env is not None else os.environ
+    if resolve_db_url(env) is not None:
         return  # a real database is configured — topics here persist for real
+    if (env.get("BLOB_READ_WRITE_TOKEN") or "").strip():
+        return  # Vercel Blob is configured — topics here persist for real too
     if topic_store.list():
         return  # not a cold, empty container — never overwrite, never duplicate
 

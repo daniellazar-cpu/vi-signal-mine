@@ -179,10 +179,15 @@ def test_the_topic_form_marks_exactly_one_field_required(client):
 
 def _not_durable(monkeypatch):
     """The one combination `storage_is_durable()` refuses: a Vercel
-    serverless instance with no database url resolving."""
+    serverless instance with no database url resolving and no
+    BLOB_READ_WRITE_TOKEN set — both cleared explicitly rather than assumed
+    absent, so this precondition holds even in an environment (a developer's
+    shell with Vercel Blob configured for local use, say) that happens to
+    carry a real token."""
     monkeypatch.setenv("VERCEL", "1")
     for var in ("POSTGRES_URL_NON_POOLING", "POSTGRES_URL", "DATABASE_URL"):
         monkeypatch.delenv(var, raising=False)
+    monkeypatch.delenv("BLOB_READ_WRITE_TOKEN", raising=False)
 
 
 def test_the_read_only_banner_appears_once_at_the_top_of_every_page(client, monkeypatch):

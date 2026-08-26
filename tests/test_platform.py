@@ -141,16 +141,55 @@ def test_storage_is_durable_recognises_every_db_url_env_var(var):
     assert storage_is_durable({"VERCEL": "1", var: "postgresql://x/y"}) is True
 
 
+def test_storage_is_durable_with_a_blob_token_on_vercel():
+    """The combination this task adds: a Vercel serverless instance with no
+    database URL, but BLOB_READ_WRITE_TOKEN set. A write through the Blob
+    backend (vsm/backends/vercel_blob.py) is an HTTP call to Vercel's own
+    storage service, not a local file — it survives any instance the same
+    way a database row does, so this must report durable exactly like a
+    database URL already does."""
+    assert storage_is_durable({"VERCEL": "1", "BLOB_READ_WRITE_TOKEN": "a-token"}) is True
+
+
+def test_storage_is_durable_with_a_blob_token_locally():
+    assert storage_is_durable({"BLOB_READ_WRITE_TOKEN": "a-token"}) is True
+
+
+def test_storage_is_durable_treats_a_blank_blob_token_as_unset():
+    """An empty or whitespace-only ``BLOB_READ_WRITE_TOKEN`` (e.g. a shell
+    export left blank, or a template ``.env`` copied verbatim) must not
+    count as "configured" — the same ``.strip()`` handling
+    ``resolve_db_url`` already applies to its own env vars. Distinct from
+    ``test_storage_is_not_durable_with_no_database_on_vercel`` above (which
+    pins the same refusal with the var absent entirely, not merely blank):
+    without the ``.strip()`` in ``storage_is_durable``, a blank string is
+    still truthy-checked as *present* by a naive ``if env.get(...)``, and
+    this is the case that would catch that."""
+    assert storage_is_durable({"VERCEL": "1", "BLOB_READ_WRITE_TOKEN": "   "}) is False
+
+
 def test_storage_is_durable_reads_the_real_environment_by_default(monkeypatch):
     """No ``env`` argument means ``os.environ``, read fresh — the same
     convention ``resolve_db_url``, ``open_stores`` and ``seed_demo_topic``
-    already use, so a database configured after the process started is
-    reflected on the very next call with no restart."""
+    already use, so a database (or Blob token) configured after the process
+    started is reflected on the very next call with no restart.
+
+    Every recognised name is cleared explicitly, ``BLOB_READ_WRITE_TOKEN``
+    included, rather than assumed absent — otherwise this test would
+    silently depend on the environment it runs in never happening to carry a
+    real one (a developer's shell with Vercel Blob configured for local use,
+    say), which is exactly the kind of untested assumption this suite does
+    not allow."""
     monkeypatch.setenv("VERCEL", "1")
     for var in ("POSTGRES_URL_NON_POOLING", "POSTGRES_URL", "DATABASE_URL"):
         monkeypatch.delenv(var, raising=False)
+    monkeypatch.delenv("BLOB_READ_WRITE_TOKEN", raising=False)
     assert storage_is_durable() is False
     monkeypatch.setenv("DATABASE_URL", "postgresql://x/y")
+    assert storage_is_durable() is True
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    assert storage_is_durable() is False
+    monkeypatch.setenv("BLOB_READ_WRITE_TOKEN", "a-token")
     assert storage_is_durable() is True
 
 

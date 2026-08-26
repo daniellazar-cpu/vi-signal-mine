@@ -139,6 +139,19 @@ def test_is_a_noop_for_each_recognised_database_env_var(tmp_path):
         assert ts.list() == [], f"seeded despite {var} being set"
 
 
+def test_is_a_noop_when_a_blob_token_is_configured(tmp_path):
+    """Vercel Blob is the same kind of real, durable storage a database URL
+    is — seeding a synthetic demonstration topic into it would leave a
+    fabricated row sitting there forever, exactly the failure the database
+    check above exists to prevent. Would fail if this guard only checked
+    ``resolve_db_url`` and never learned about ``BLOB_READ_WRITE_TOKEN``: a
+    fresh Blob-backed deployment would then always seed the demo topic into
+    what is now permanent storage, with no way to clean it back up."""
+    ts, rs = _stores(tmp_path)
+    seed_demo_topic(ts, rs, env={"BLOB_READ_WRITE_TOKEN": "fake-token-for-guard-test"})
+    assert ts.list() == []
+
+
 def test_the_seeded_topics_own_spend_band_is_probe(tmp_path):
     """Only the probe band is allowed to run on Vercel
     (vsm.platform.assert_band_allowed) — a seeded topic in a wider band

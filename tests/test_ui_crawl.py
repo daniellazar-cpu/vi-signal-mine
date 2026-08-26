@@ -253,6 +253,7 @@ def read_only_seeded_client(tmp_path, monkeypatch):
     monkeypatch.setenv("VERCEL", "1")
     for var in ("POSTGRES_URL_NON_POOLING", "POSTGRES_URL", "DATABASE_URL"):
         monkeypatch.delenv(var, raising=False)
+    monkeypatch.delenv("BLOB_READ_WRITE_TOKEN", raising=False)
     ts = TopicStore(tmp_path / "db")
     rs = RunStore(tmp_path / "db", tmp_path / "var")
     seed_demo_topic(ts, rs, env={})  # the seed's own guard checks for a db url, not VERCEL

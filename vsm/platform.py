@@ -153,8 +153,16 @@ def storage_is_durable(env: Mapping[str, str] | None = None) -> bool:
 
     **True** whenever a database URL resolves (spec'd by
     :func:`vsm.backends.dburl.resolve_db_url`, the same function
-    ``vsm.storage.open_stores`` itself defers to) — Postgres+blob storage
+    ``vsm.storage.open_stores`` itself defers to) — Postgres storage
     survives any request landing on any instance, container recycle or not.
+
+    **Also true** whenever ``BLOB_READ_WRITE_TOKEN`` is set, the same name
+    ``vsm.storage.open_stores`` checks to pick the Vercel Blob backend
+    (``vsm/backends/vercel_blob.py``). A write there is an HTTP call to
+    Vercel's own storage service, not a local file — it genuinely survives
+    any instance the same way a database row does, so this is not a second,
+    weaker notion of "durable"; it is the same one a database URL already
+    satisfies, checked against a different name.
 
     **Also true** whenever this process is not running as a Vercel
     serverless function. SQLite+filesystem storage is genuinely durable
@@ -164,20 +172,23 @@ def storage_is_durable(env: Mapping[str, str] | None = None) -> bool:
     invocation and is gone the moment the container is recycled (see
     ``vsm/storage.py``'s own docstring). A local install must be unaffected
     by this guard, and this is the check that makes that true without
-    needing a database at all.
+    needing a database or a Blob token at all.
 
     **False** in exactly the one combination that cannot honour a write: no
-    database configured, on the one platform where the filesystem
-    underneath it does not survive between requests.
+    database configured, no Blob token configured, on the one platform where
+    the filesystem underneath it does not survive between requests.
 
     ``env`` is injectable for tests, the same convention ``resolve_db_url``,
     ``open_stores`` and ``seed_demo_topic`` already use; every real caller
     leaves it at ``None`` and gets ``os.environ`` read fresh at call time, so
-    a database configured (or ``VERCEL`` set) after the process started is
-    reflected on the very next call, never requiring a restart to notice.
+    a database or Blob token configured (or ``VERCEL`` set) after the
+    process started is reflected on the very next call, never requiring a
+    restart to notice.
     """
     env = env if env is not None else os.environ
     if resolve_db_url(env) is not None:
+        return True
+    if (env.get("BLOB_READ_WRITE_TOKEN") or "").strip():
         return True
     # Through `is_vercel` rather than reading `VERCEL` here: one definition of
     # "are we on Vercel", in one place. Two copies of that check is how this

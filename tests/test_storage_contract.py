@@ -21,22 +21,24 @@ callable ``(tmp_path) -> (TopicStoreLike, RunStoreLike, scramble_started_at)``
    SQLite, the equivalent for Postgres) without going through the public
    store API — there is deliberately no public "rewrite a run" method.
 
-Task 24 registers its Postgres-plus-blob backend by appending a
-``pytest.param(its_factory, id="postgres")`` to ``STORE_FACTORIES`` below.
-Every case in this file — round trips, unknown-id errors, ``snapshots()``
-ordering, the mode/status guards, the artifact traversal guard,
-cross-instance persistence — then runs against that backend unchanged. A
-factory registered this way must satisfy one contract of its own: called
-twice with the *same* ``tmp_path``, it must return two independent store
-objects that see each other's writes (e.g. by deriving a connection string
-or blob root deterministically from ``tmp_path``), not two objects backed by
-fresh, isolated storage.
+Task 24 registered its Postgres backend by appending a
+``pytest.param(its_factory, id="postgres")`` to ``STORE_FACTORIES`` below;
+the Vercel Blob backend (``vsm/backends/vercel_blob.py``) is registered the
+same way as ``id="blob"``. Every case in this file — round trips, unknown-id
+errors, ``snapshots()`` ordering, the mode/status guards, the artifact
+traversal guard, cross-instance persistence — then runs against that backend
+unchanged. A factory registered this way must satisfy one contract of its
+own: called twice with the *same* ``tmp_path``, it must return two
+independent store objects that see each other's writes (e.g. by deriving a
+connection string or blob root deterministically from ``tmp_path``), not two
+objects backed by fresh, isolated storage.
 """
 
 from __future__ import annotations
 
 import hashlib
 import os
+import socket
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -49,6 +51,16 @@ from vsm.errors import NoSuchRun, NoSuchTopic
 from vsm.runs.store import RunStore
 from vsm.storage import RunStoreLike, TopicStoreLike, open_stores
 from vsm.topics.store import TopicStore
+
+#: The real `socket.socket.connect`, captured at import time — before
+#: `tests/conftest.py`'s autouse `_no_real_sockets` fixture ever runs and
+#: replaces it with a version that raises. The Blob factory below restores
+#: this for the one test using it, because unlike `psycopg` (which reaches
+#: libpq's own C sockets, invisible to this patch — why the Postgres factory
+#: above needs no such restore) `httpx`'s default transport goes through
+#: Python's own `socket` module and would otherwise be blocked by the same
+#: guard that keeps the rest of this suite hermetic.
+_REAL_SOCKET_CONNECT = socket.socket.connect
 
 ScrambleStartedAt = Callable[[str, str], None]
 
@@ -115,9 +127,59 @@ def _postgres_blob_stores(
     return topic_store, run_store, _scramble_started_at
 
 
+# The Vercel Blob factory. Skipped entirely (never added to
+# STORE_FACTORIES, the same convention the Postgres factory above uses) when
+# BLOB_READ_WRITE_TOKEN is not set, so the default suite stays hermetic —
+# no test here ever makes a real network call unless a token was explicitly
+# provided. Point it at a real Vercel Blob store to exercise it, e.g.:
+#   BLOB_READ_WRITE_TOKEN=vercel_blob_rw_... pytest tests/test_storage_contract.py
+_BLOB_TOKEN = (os.environ.get("BLOB_READ_WRITE_TOKEN") or "").strip()
+
+
+def _blob_stores(
+    tmp_path: Path,
+) -> tuple[TopicStoreLike, RunStoreLike, ScrambleStartedAt]:
+    from vsm.backends.vercel_blob import BlobRunStore, BlobTopicStore
+
+    # Restore real networking for this one backend — see the module-level
+    # note on `_REAL_SOCKET_CONNECT` for why this is needed here and not for
+    # the Postgres factory above. `tests/conftest.py`'s autouse fixture
+    # re-blocks it before the very next test regardless of this, so nothing
+    # here leaks hermeticity into any test that does not use this factory.
+    socket.socket.connect = _REAL_SOCKET_CONNECT
+
+    # A root namespace derived deterministically from `tmp_path`, the same
+    # technique the Postgres factory uses for its schema name: two calls
+    # against the *same* `tmp_path` land in the same root (so they see each
+    # other's writes, as the cross-instance-persistence cases require), and
+    # two different `tmp_path`s — i.e. two different tests — land in
+    # different roots and cannot collide. Real objects are left behind in
+    # the Blob store under this `vsm-test/` prefix (there is no schema to
+    # drop the way the Postgres factory's is, on a database nobody but tests
+    # writes to); harmless scratch data, identifiable by that prefix if it
+    # is ever worth sweeping.
+    digest = hashlib.sha256(str(tmp_path).encode()).hexdigest()[:16]
+    root = f"vsm-test/{digest}"
+    topic_store = BlobTopicStore(_BLOB_TOKEN, root=root)
+    run_store = BlobRunStore(_BLOB_TOKEN, root=root)
+
+    def _scramble_started_at(run_id: str, started_at: str) -> None:
+        # No public "rewrite a run" method, by design — reach the run's own
+        # JSON blob directly and overwrite it, the equivalent of the raw
+        # SQL `UPDATE` the other two factories use for the same hook.
+        pathname = f"{root}/runs/{run_id}.json"
+        data = run_store._ns.read_json(pathname)
+        data["started_at"] = started_at
+        run_store._ns.write_json(pathname, data)
+
+    return topic_store, run_store, _scramble_started_at
+
+
 STORE_FACTORIES = [pytest.param(_sqlite_stores, id="sqlite")]
 if _HAS_PSYCOPG and _TEST_DB_URL:
     STORE_FACTORIES.append(pytest.param(_postgres_blob_stores, id="postgres"))
+if _BLOB_TOKEN:
+    STORE_FACTORIES.append(pytest.param(_blob_stores, id="blob"))
 
 
 @pytest.fixture(params=STORE_FACTORIES)
@@ -128,6 +190,60 @@ def store_factory(request):
 @pytest.fixture
 def stores(store_factory, tmp_path):
     return store_factory(tmp_path)
+
+
+@pytest.mark.skipif(not _BLOB_TOKEN, reason="BLOB_READ_WRITE_TOKEN not set")
+def test_blob_seq_allocation_has_no_collisions_under_real_concurrent_writers(tmp_path):
+    """Not part of the generic parametrised suite above — every other case
+    in this file runs single-threaded, which cannot exercise the one thing
+    ``BlobRunStore``'s ``_next_seq`` (``vsm/backends/vercel_blob.py``) exists
+    to survive: two writers racing on the *same* counter blob. SQLite's
+    ``seq`` column is safe by construction (one process, one file, a single
+    writer at a time) and Postgres's ``BIGSERIAL`` is safe by the database
+    engine's own guarantee — neither needed a test shaped like this one.
+    Vercel Blob's compare-and-swap allocator is new, hand-built code, so its
+    collision-freedom claim gets an actual concurrent race against the live
+    API, not just the docstring's argument for why it should hold.
+
+    Eight threads all call ``start()`` on the same topic at once; if two
+    ever won a CAS race by landing on the same ``seq`` (the exact bug a
+    naive "read then write, no precondition" counter would have), two of
+    the eight stored records would carry an identical value and this fails.
+    Eight, not more: each round of this race costs a real HTTP round trip
+    (confirmed live, thanks to the very contention this test creates —
+    see `_CAS_MAX_RETRIES`'s and the CAS loop's own notes on what a
+    much wider burst costs to converge), and eight real concurrent writers
+    is already far more than this low-traffic internal tool sees in
+    practice while keeping this test's own runtime reasonable.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from vsm.backends.vercel_blob import BlobRunStore
+
+    # Same restore the `_blob_stores` factory does, and for the same reason
+    # (see the module-level note on `_REAL_SOCKET_CONNECT`) — this test does
+    # not go through that factory, so the autouse hermetic-socket guard is
+    # still in force here otherwise.
+    socket.socket.connect = _REAL_SOCKET_CONNECT
+
+    digest = hashlib.sha256(str(tmp_path).encode()).hexdigest()[:16]
+    root = f"vsm-test/{digest}-concurrency"
+    run_store = BlobRunStore(_BLOB_TOKEN, root=root)
+    n = 8
+
+    def _start_one(_: int) -> str:
+        return run_store.start("top-concurrency", "mine").run_id
+
+    with ThreadPoolExecutor(max_workers=n) as pool:
+        run_ids = list(pool.map(_start_one, range(n)))
+
+    assert len(set(run_ids)) == n, "two threads minted the same run_id"
+
+    seqs = [
+        run_store._ns.read_json(f"{root}/runs/{rid}.json")["seq"] for rid in run_ids
+    ]
+    assert len(set(seqs)) == n, f"seq collision under concurrency: {sorted(seqs)}"
+    assert sorted(seqs) == list(range(1, n + 1)), f"gaps or duplicates: {sorted(seqs)}"
 
 
 @pytest.fixture
@@ -315,13 +431,77 @@ def test_open_stores_returns_a_working_sqlite_pair(tmp_path):
     """Two lines of production code, but the exact seam a later backend
     swaps: this pins that ``open_stores`` wires a ``Settings`` into a pair
     that actually works together (both pointed at the same ``var_dir``),
-    not just that each store class works in isolation."""
+    not just that each store class works in isolation.
+
+    ``env={}`` is explicit rather than left to default to ``os.environ``:
+    this test wants the SQLite fallback specifically, and depending on the
+    ambient shell never happening to carry a database URL or a
+    ``BLOB_READ_WRITE_TOKEN`` (plausible once Vercel Blob is in normal use)
+    would make this test's outcome depend on who runs it and from where."""
     settings = Settings(var_dir=tmp_path)
 
-    topic_store, run_store = open_stores(settings)
+    topic_store, run_store = open_stores(settings, env={})
 
     t = topic_store.create(name="A", therapeutic_area="gi", spend_band="probe")
     assert topic_store.get(t.topic_id) == t
 
     r = run_store.start(t.topic_id, "mine")
     assert run_store.get(r.run_id).status == "running"
+
+
+def test_open_stores_picks_blob_over_sqlite_when_a_blob_token_is_set(tmp_path):
+    """This task's backend selection, unconditional on any live token or
+    network access: ``BlobTopicStore``/``BlobRunStore`` do no I/O in
+    ``__init__`` (unlike ``PostgresTopicStore``, which connects and issues
+    ``CREATE TABLE`` eagerly — see the next test for why that one needs a
+    fake module instead), so this proves the branch was taken with nothing
+    but a bogus token string."""
+    from vsm.backends.vercel_blob import BlobRunStore, BlobTopicStore
+
+    settings = Settings(var_dir=tmp_path)
+    topic_store, run_store = open_stores(
+        settings, env={"BLOB_READ_WRITE_TOKEN": "fake-token-for-selection-test"}
+    )
+    assert isinstance(topic_store, BlobTopicStore)
+    assert isinstance(run_store, BlobRunStore)
+
+
+def test_open_stores_picks_postgres_over_blob_when_both_are_configured(monkeypatch, tmp_path):
+    """Postgres wins the tie when both a database URL and a Blob token
+    resolve — see ``open_stores``'s own docstring for why: the more capable
+    backend goes first, and the ordering has to be *some* fixed order.
+
+    Proven without a live database or even ``psycopg`` installed: a fake
+    module is installed at ``sys.modules["vsm.backends.postgres"]`` before
+    calling ``open_stores``, so the lazy ``from vsm.backends.postgres import
+    ...`` inside it resolves against dummy sentinel classes instead of ever
+    dialing a real connection — keeping this hermetic regardless of whether
+    the optional ``postgres`` extra happens to be installed in the
+    environment running the suite.
+    """
+    import sys
+    import types
+
+    class DummyPostgresTopicStore:
+        def __init__(self, dsn: str, schema: str = "public") -> None:
+            self.dsn = dsn
+
+    class DummyPostgresRunStore:
+        def __init__(self, dsn: str, schema: str = "public") -> None:
+            self.dsn = dsn
+
+    fake_module = types.ModuleType("vsm.backends.postgres")
+    fake_module.PostgresTopicStore = DummyPostgresTopicStore
+    fake_module.PostgresRunStore = DummyPostgresRunStore
+    monkeypatch.setitem(sys.modules, "vsm.backends.postgres", fake_module)
+
+    settings = Settings(var_dir=tmp_path)
+    topic_store, run_store = open_stores(
+        settings,
+        env={
+            "DATABASE_URL": "postgresql://x/y",
+            "BLOB_READ_WRITE_TOKEN": "fake-token-for-selection-test",
+        },
+    )
+    assert isinstance(topic_store, DummyPostgresTopicStore)
+    assert isinstance(run_store, DummyPostgresRunStore)

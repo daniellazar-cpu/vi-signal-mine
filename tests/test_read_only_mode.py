@@ -48,13 +48,17 @@ from vsm.ui.content import EPHEMERAL_STORAGE_NOTICE, READ_ONLY_CONTROL_NOTE
 
 def _not_durable(monkeypatch):
     """The one combination `storage_is_durable()` refuses: a Vercel
-    serverless instance with no database url resolving. Setting `VERCEL`
-    alone would not be enough to prove the guard actually checks for a
-    database too, so every recognised db-url name is cleared explicitly
-    rather than assumed absent."""
+    serverless instance with no database url resolving and no
+    BLOB_READ_WRITE_TOKEN set. Setting `VERCEL` alone would not be enough to
+    prove the guard actually checks for a database (and now a Blob token)
+    too, so every recognised name is cleared explicitly rather than assumed
+    absent — an environment that happens to carry a real
+    BLOB_READ_WRITE_TOKEN (a developer's shell with Vercel Blob configured
+    for local use, say) must not silently turn this into "durable"."""
     monkeypatch.setenv("VERCEL", "1")
     for var in ("POSTGRES_URL_NON_POOLING", "POSTGRES_URL", "DATABASE_URL"):
         monkeypatch.delenv(var, raising=False)
+    monkeypatch.delenv("BLOB_READ_WRITE_TOKEN", raising=False)
 
 
 def _durable_locally(monkeypatch):
@@ -63,6 +67,20 @@ def _durable_locally(monkeypatch):
     monkeypatch.delenv("VERCEL", raising=False)
     for var in ("POSTGRES_URL_NON_POOLING", "POSTGRES_URL", "DATABASE_URL"):
         monkeypatch.delenv(var, raising=False)
+
+
+def _durable_via_blob_token(monkeypatch):
+    """A third way this guard is satisfied without a database: Vercel, no
+    database url, but ``BLOB_READ_WRITE_TOKEN`` set. This is the concrete
+    behaviour this task adds — the read-only refusal must not fire here.
+    The ``flow`` fixture's stores stay plain SQLite either way (this only
+    changes what ``storage_is_durable()`` reports, exactly like
+    ``_durable_locally`` above does for the "no Vercel" case); no real Blob
+    token or network access is needed to prove the guard's decision."""
+    monkeypatch.setenv("VERCEL", "1")
+    for var in ("POSTGRES_URL_NON_POOLING", "POSTGRES_URL", "DATABASE_URL"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("BLOB_READ_WRITE_TOKEN", "fake-token-for-guard-test")
 
 
 @pytest.fixture
@@ -123,6 +141,19 @@ def test_mutating_route_works_when_durable(flow, monkeypatch, name, path_fn, dat
     assert resp.status_code in (200, 303), f"{name}: expected success, got {resp.status_code}\n{resp.text[:800]}"
 
 
+@pytest.mark.parametrize("name, path_fn, data_fn", _MUTATING_ROUTES, ids=_ROUTE_IDS)
+def test_mutating_route_works_when_durable_via_blob_token(flow, monkeypatch, name, path_fn, data_fn):
+    """The read-only refusal must not fire on a Vercel instance with no
+    database configured, once a Blob token is present — the whole point of
+    this task. Would fail if ``vsm.platform.storage_is_durable`` did not
+    check ``BLOB_READ_WRITE_TOKEN`` (every one of these routes would still
+    409, same as ``test_mutating_route_refuses_with_409_when_not_durable``)."""
+    _durable_via_blob_token(monkeypatch)
+    client = _client(flow)
+    resp = client.post(path_fn(flow), data=data_fn(flow), follow_redirects=False)
+    assert resp.status_code in (200, 303), f"{name}: expected success, got {resp.status_code}\n{resp.text[:800]}"
+
+
 def test_the_409_page_is_not_a_500_and_names_no_stack_trace(flow, monkeypatch):
     """A guard that raises where it should refuse cleanly is still a 500 by
     another name. Belt-and-braces beyond the parametrised check above."""
@@ -156,6 +187,14 @@ def test_confirm_screen_has_no_mine_form_when_not_durable(flow, monkeypatch):
 
 def test_confirm_screen_has_the_mine_form_when_durable(flow, monkeypatch):
     _durable_locally(monkeypatch)
+    ts, rs, topic, *_ = flow
+    client = _client(flow)
+    body = client.get(f"/topics/{topic.topic_id}/confirm?band=probe").text
+    assert f'action="/topics/{topic.topic_id}/mine"' in body
+
+
+def test_confirm_screen_has_the_mine_form_when_durable_via_blob_token(flow, monkeypatch):
+    _durable_via_blob_token(monkeypatch)
     ts, rs, topic, *_ = flow
     client = _client(flow)
     body = client.get(f"/topics/{topic.topic_id}/confirm?band=probe").text
