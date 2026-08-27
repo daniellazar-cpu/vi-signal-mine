@@ -140,13 +140,29 @@ def open_stores(
     env = env if env is not None else os.environ
     db_url = resolve_db_url(env)
     if db_url:
-        from vsm.backends.postgres import PostgresRunStore, PostgresTopicStore
-
-        _log.info(
-            "storage backend: Postgres (a database URL is configured) — "
-            "topics, runs and artifacts survive across invocations"
-        )
-        return PostgresTopicStore(db_url), PostgresRunStore(db_url)
+        try:
+            from vsm.backends.postgres import PostgresRunStore, PostgresTopicStore
+        except ModuleNotFoundError as exc:
+            # A configured database with no driver is a deployment mistake, not
+            # a reason to serve nothing. This raised on *every request* the
+            # first time a Postgres URL was added, because the driver was an
+            # optional extra and the host installs only core dependencies — so
+            # the effect of pointing the app at a database was a total outage
+            # rather than a fallback. The driver is core now (see
+            # pyproject.toml), and this stays as the guard that failure mode
+            # deserved in the first place.
+            _log.error(
+                "a database URL is configured but its driver is missing (%s) — "
+                "falling back to the next backend. Storage will not be Postgres "
+                "until the driver is installed",
+                exc.name or exc,
+            )
+        else:
+            _log.info(
+                "storage backend: Postgres (a database URL is configured) — "
+                "topics, runs and artifacts survive across invocations"
+            )
+            return PostgresTopicStore(db_url), PostgresRunStore(db_url)
 
     blob_token = (env.get("BLOB_READ_WRITE_TOKEN") or "").strip()
     if blob_token:

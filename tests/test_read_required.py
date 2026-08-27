@@ -253,3 +253,41 @@ def test_the_report_shares_one_deadline_across_every_required_read():
         "some required read does not draw on the shared budget"
     )
     assert src.count("ReadDeadline(") == 1, "more than one budget per operation"
+
+
+def test_a_configured_database_with_no_driver_falls_back_instead_of_500ing(monkeypatch, tmp_path, caplog):
+    """The outage this nearly shipped.
+
+    Pointing the app at Postgres set a database URL, and `open_stores` then
+    imported a backend whose driver was an optional extra the host never
+    installs — a `ModuleNotFoundError` on every single request. A missing
+    driver is a deployment mistake; serving nothing is not the right response
+    to it, and the log has to say which so it is fixable.
+    """
+    import builtins
+    import logging
+
+    from vsm.config import Settings
+    from vsm.storage import open_stores
+
+    real_import = builtins.__import__
+
+    def no_psycopg(name, *args, **kwargs):
+        if name == "psycopg" or name.startswith("psycopg."):
+            raise ModuleNotFoundError("No module named 'psycopg'", name="psycopg")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_psycopg)
+    monkeypatch.delitem(__import__("sys").modules, "vsm.backends.postgres", raising=False)
+
+    env = {
+        "POSTGRES_URL_NON_POOLING": "postgres://u:p@h/db",
+        "BLOB_READ_WRITE_TOKEN": "",
+        "VSM_VAR_DIR": str(tmp_path),
+    }
+    with caplog.at_level(logging.ERROR):
+        topics, runs = open_stores(Settings(var_dir=tmp_path), env=env)
+
+    assert topics is not None and runs is not None, "served nothing at all"
+    assert any("driver is missing" in r.message or "driver is missing" in r.getMessage()
+               for r in caplog.records), [r.getMessage() for r in caplog.records]

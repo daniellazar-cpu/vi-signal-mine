@@ -12,13 +12,23 @@ dependencies = [
     "python-multipart",
     "pyyaml",
     "anthropic",
+    # A core dependency, reversing an earlier call, because the deployment now
+    # runs on Postgres and Vercel installs *only* this list — optional extras
+    # are never resolved there. Left as an extra, a configured database URL
+    # made `open_stores` import a backend whose driver was absent, which is a
+    # `ModuleNotFoundError` on every request rather than a degraded mode. The
+    # original reasoning was that a local install and the hermetic suite must
+    # work without a driver; they still do, because having the driver installed
+    # connects to nothing. It is a binary wheel, so the cost is size, not
+    # build complexity.
+    "psycopg[binary]",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest"]
-# Never a core dependency: the local tool and the hermetic test suite must
-# install and run without a database driver. Only needed when a Postgres URL
-# is actually configured (see vsm/backends/dburl.py, vsm/storage.py).
+# Kept as an alias so `pip install .[postgres]` still works and nothing that
+# referenced it breaks. It is no longer where the driver comes from — see the
+# note on `psycopg[binary]` in the core dependency list above.
 postgres = ["psycopg[binary]"]
 
 [tool.pytest.ini_options]
