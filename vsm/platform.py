@@ -21,6 +21,8 @@ goes through.
 
 from __future__ import annotations
 
+import base64
+import hmac
 import os
 from typing import Any, Mapping
 
@@ -35,6 +37,7 @@ __all__ = [
     "assert_band_allowed",
     "storage_is_durable",
     "StripFunctionPrefix",
+    "RequireAccessKey",
 ]
 
 
@@ -81,9 +84,12 @@ def production_is_safe() -> tuple[bool, str]:
       A visitor gets a working but inert instance. This is the state a fresh
       deployment is in before anyone adds secrets, which is why it can be
       clicked through immediately.
-    * **Something in front of it.** ``VSM_ACCESS_KEY`` set means the app gates
-      itself, so live keys sit behind a shared secret rather than behind
-      nothing.
+    * **Something in front of it.** ``VSM_ACCESS_KEY`` set means every request
+      must present that key over HTTP Basic — see :class:`RequireAccessKey`, and
+      note that this branch was a lie until that class existed: the key was read
+      here and nowhere else, so "the app gates itself" described a gate no code
+      implemented. Live keys behind a shared secret that checked nothing is the
+      exact combination this function exists to prevent.
 
     Live keys with no gate is the single combination that refuses — the actual
     danger, stated precisely instead of approximated by "is this production".
@@ -243,3 +249,89 @@ class StripFunctionPrefix:
                 # nobody reading this call site would expect.
                 scope = {**scope, "path": stripped, "raw_path": stripped.encode()}
         await self._inner(scope, receive, send)
+
+class RequireAccessKey:
+    """HTTP Basic in front of the whole app when ``VSM_ACCESS_KEY`` is set.
+
+    **This is the gate ``production_is_safe`` already claimed existed.** That
+    function returned "an access key is set, so the app gates itself" and
+    nothing anywhere checked a request against the key — it was read in exactly
+    one place, to decide whether serving was *permitted*. So the combination the
+    guard was built to make safe — live API keys behind a shared secret — put no
+    secret in front of anything: any visitor with the URL could start sweeps
+    that spend real money. The test named
+    ``test_production_serves_when_an_access_key_gates_it`` asserted only that
+    serving was allowed, which locked the hole in rather than catching it.
+
+    Basic rather than a login form and a session: the app has no JavaScript, no
+    session store, and no user model, and a shared secret has no account to
+    belong to. The browser's own prompt needs none of that and survives a
+    stateless serverless invocation, where a cookie signed with a per-container
+    key would not.
+
+    Any username is accepted; only the password is checked. The secret is
+    shared, so inventing a username to go with it would be theatre — and a
+    wrong username silently failing is worse to diagnose than one field.
+
+    Compared with :func:`hmac.compare_digest`, so a wrong key cannot be
+    recovered a character at a time from response timing.
+
+    Applied at the ASGI layer, outside the router, so it covers every route,
+    every static asset, and every 404 — a gate that only wraps the pages you
+    remembered to decorate is not a gate.
+    """
+
+    def __init__(self, inner: Any, realm: str = "Vi Signal Mine") -> None:
+        self._inner = inner
+        self._realm = realm
+
+    @staticmethod
+    def _expected() -> str:
+        # Read per request, not captured at construction: on a serverless host
+        # the module may be imported before the environment is fully populated,
+        # and a gate that cached an empty key would be permanently open.
+        return os.environ.get("VSM_ACCESS_KEY", "").strip()
+
+    @staticmethod
+    def _offered(scope: Any) -> str | None:
+        for name, value in scope.get("headers") or ():
+            if name.lower() != b"authorization":
+                continue
+            try:
+                kind, _, payload = value.decode("latin-1").partition(" ")
+                if kind.lower() != "basic":
+                    return None
+                decoded = base64.b64decode(payload, validate=True).decode("utf-8")
+            except (ValueError, UnicodeDecodeError):
+                return None
+            _user, sep, password = decoded.partition(":")
+            return password if sep else None
+        return None
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        expected = self._expected()
+        if not expected or scope.get("type") != "http":
+            await self._inner(scope, receive, send)
+            return
+        offered = self._offered(scope)
+        if offered is not None and hmac.compare_digest(offered, expected):
+            await self._inner(scope, receive, send)
+            return
+        body = (
+            b"This instance is protected. Sign in with the access key as the "
+            b"password; any username will do."
+        )
+        await send({
+            "type": "http.response.start",
+            "status": 401,
+            "headers": [
+                (b"www-authenticate",
+                 f'Basic realm="{self._realm}", charset="UTF-8"'.encode("latin-1")),
+                (b"content-type", b"text/plain; charset=utf-8"),
+                (b"content-length", str(len(body)).encode()),
+                # Nothing behind this may be cached by a shared cache.
+                (b"cache-control", b"no-store"),
+            ],
+        })
+        await send({"type": "http.response.body", "body": body})
+

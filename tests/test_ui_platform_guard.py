@@ -68,7 +68,11 @@ def test_production_serves_when_offline_because_there_is_nothing_to_spend(
     assert client.get("/").status_code == 200
 
 
-def test_production_serves_when_an_access_key_gates_it(client, monkeypatch):
+def test_production_is_permitted_to_serve_when_an_access_key_is_set(client, monkeypatch):
+    """See the note on the same rename in `tests/test_platform.py`: `client`
+    here is the bare app, deliberately *not* wrapped in `RequireAccessKey`, so
+    this asserts only that the D15 guard permits the request. The gate is
+    covered in `tests/test_access_gate.py`."""
     monkeypatch.setenv("VERCEL_ENV", "production")
     monkeypatch.setenv("VSM_OFFLINE", "0")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-live-looking-key")

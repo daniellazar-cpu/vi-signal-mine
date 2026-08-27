@@ -86,9 +86,15 @@ def test_a_valid_submission_marks_nothing_invalid(client):
     assert 'aria-invalid="true"' not in body, "a fresh form reports itself invalid"
 
 
-def test_print_forces_collapsed_details_open(client):
-    """`display: block` on the wrapper does not defeat the UA rule that hides
-    a closed details' children."""
+def test_print_asks_for_collapsed_details_to_be_shown(client):
+    """Asserts the *declaration*, and deliberately claims no more than that.
+
+    A closed `<details>` does not render its content slot, so this rule cannot
+    guarantee the content prints — Chrome prints it anyway, other engines may
+    not, and with no JavaScript there is nothing to force `open`. The
+    declaration is still right to have, and the test below keeps the exposure
+    bounded by checking the report carries no `<details>` at all.
+    """
     css = _APP_CSS.read_text()
     block = css[css.index("@media print"):]
     block = block[:block.index("\n}\n") + 3]
@@ -96,6 +102,17 @@ def test_print_forces_collapsed_details_open(client):
         r"details:not\(\[open\]\)\s*>\s*:not\(summary\)\s*\{[^}]*display:\s*block\s*!important",
         block,
     ), "collapsed <details> content still vanishes from a printed page"
+
+
+def test_the_client_facing_report_contains_no_details_at_all(client):
+    """What actually protects the deliverable. Whatever a given engine does with
+    a closed `<details>` cannot matter for the report if the report has none —
+    so this, not the print rule, is the guarantee that the document a client
+    receives prints whole."""
+    from pathlib import Path
+
+    report = Path(__file__).resolve().parents[1] / "vsm" / "ui" / "templates" / "report.html"
+    assert "<details" not in report.read_text()
 
 
 def test_there_is_collapsed_details_content_worth_printing(client):

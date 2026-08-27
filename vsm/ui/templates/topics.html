@@ -48,7 +48,7 @@
     </div>
   </div>
   <p class="list-tools-count">
-    {% if shown == total %}{{ total }} topic{{ '' if total == 1 else 's' }}{% else %}{{ shown }} of {{ total }} topics{% endif %}
+    {% if matched == total %}{{ total }} topic{{ '' if total == 1 else 's' }}{% else %}{{ matched }} of {{ total }} topics{% endif %}
     {% if show != 'all' %}<span class="muted">— {{ filter_help[show] }}</span>{% endif %}
   </p>
 </form>
@@ -110,6 +110,14 @@
   </tbody>
 </table>
 </div>
+{% if capped %}
+<p class="list-cap">
+  Showing the first {{ row_cap }} of {{ matched }} — narrow it with search or a
+  filter above, or <a href="/?q={{ q|urlencode }}&amp;sort={{ sort }}&amp;show={{ show }}&amp;all=1">show all {{ matched }}</a>.
+</p>
+{% elif uncapped and matched > row_cap %}
+<p class="list-cap">Showing all {{ matched }} topics.</p>
+{% endif %}
 {% elif total > 0 %}
 {# Filtered to nothing. Distinct from the first-run state below: telling
    someone with sixty topics how to create their first one is not help. #}

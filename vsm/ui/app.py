@@ -22,10 +22,11 @@ from html import escape as _esc
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import FastAPI, Form, Query, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import PlainTextResponse, Response
 from starlette.templating import Jinja2Templates
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -60,6 +61,7 @@ from vsm.ui.content import (
     PLOT_GUIDE,
     READ_ONLY_CONTROL_NOTE,
     SORTS,
+    TAGLINE,
     TIERS,
     WHAT_IT_IS,
     explainer,
@@ -539,6 +541,10 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
     env.globals["stance_label"] = _stance_label
     env.globals["anomaly_label"] = _anomaly_label
     env.globals["explainer"] = explainer
+    # The product in one line, for the document head on every page — and the
+    # link-preview card, which is part of the deliverable when a report gets
+    # pasted into chat.
+    env.globals["tagline"] = TAGLINE
     env.globals["ephemeral_storage_notice"] = EPHEMERAL_STORAGE_NOTICE
     env.globals["read_only_control_note"] = READ_ONLY_CONTROL_NOTE
     # A callable, not a value computed once here: every template that wants
@@ -562,6 +568,34 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
     def error_page(request: Request, status_code: int, title: str, message: str) -> HTMLResponse:
         return render(request, "error.html", status_code=status_code, title=title, message=message)
 
+    @app.exception_handler(StarletteHTTPException)
+    async def _styled_http_error(request: Request, exc: StarletteHTTPException) -> Any:
+        """Every unrouted path and unhandled HTTP status, in the app's own skin.
+
+        A mistyped or stale URL used to return FastAPI's default
+        ``{"detail":"Not Found"}`` — raw JSON, no navigation, no way back. Every
+        404 the routes raise *themselves* was already a designed page, so the
+        one 404 a visitor is most likely to reach was the only one that looked
+        broken. A link shared into a chat and gone stale lands exactly here.
+
+        Static assets keep the plain response: a stylesheet request that 404s
+        should not be answered with a page of HTML, and nothing renders that
+        would show it.
+        """
+        if request.url.path.startswith("/static/"):
+            return PlainTextResponse(str(exc.detail), status_code=exc.status_code)
+        titles = {
+            404: ("Page not found", "There is nothing at this address. It may have "
+                  "been a mistyped link, or a topic or run that has since been deleted."),
+            405: ("That is not how this page is reached",
+                  "The address exists but does not accept this kind of request."),
+        }
+        title, message = titles.get(
+            exc.status_code,
+            (f"Something went wrong ({exc.status_code})", str(exc.detail)),
+        )
+        return error_page(request, exc.status_code, title, message)
+
     def read_only_refusal(request: Request) -> HTMLResponse | None:
         """``None`` when this instance can honour a write; otherwise the one
         409 page every mutating route below returns. Centralised so a new
@@ -580,6 +614,17 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         )
 
     # ------------------------------------------------------------------ how --
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon() -> Any:
+        """Browsers request this from the site root regardless of what the page
+        links, so without it every page load logged a 404. Serves the same SVG
+        the `<link>` points at — modern browsers accept it under this name, and
+        one asset cannot drift from another."""
+        return FileResponse(
+            _STATIC_DIR / "icon.svg", media_type="image/svg+xml",
+            headers={"cache-control": "public, max-age=86400"},
+        )
 
     @app.get("/how", response_class=HTMLResponse)
     def how_it_works(request: Request) -> HTMLResponse:
@@ -719,9 +764,21 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             return [r for r in rows if r["snapshot_count"] == 0]
         return rows
 
+    #: How many rows the index renders before it stops and says so. Measured at
+    #: ~677 bytes of HTML per row, so this bounds the document at roughly 40KB
+    #: however long the list gets. Not pagination: there is no page state to
+    #: carry through sort, filter and search, and an internal tool with a search
+    #: box does not need one. A cap that announces itself and offers the whole
+    #: list is honest; silently rendering the first fifty would not be.
+    _ROW_CAP = 50
+
     @app.get("/", response_class=HTMLResponse)
     def topics_index(
         request: Request, q: str = "", sort: str = "recent", show: str = "all",
+        # `show_all`, not `all`: a parameter named `all` shadows the builtin for
+        # the whole function body, and this one already calls `all()` indirectly
+        # through the helpers above. The URL keeps the short spelling.
+        show_all: str = Query("", alias="all"),
     ) -> HTMLResponse:
         # Unknown values fall back rather than 400: this is a shareable URL and
         # a stale bookmark should show the list, not an error page.
@@ -760,11 +817,17 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             rows.reverse()
         elif _SORT_KEYS[sort] is not None:
             rows.sort(key=_SORT_KEYS[sort])
+        matched = len(rows)
+        uncapped = show_all.strip() == "1"
+        capped = not uncapped and matched > _ROW_CAP
+        if capped:
+            rows = rows[:_ROW_CAP]
         return render(
             request, "topics.html", rows=rows, first_run_steps=FIRST_RUN_STEPS,
             active_nav="topics", sorts=SORTS, filters=FILTERS,
             filter_help=FILTER_HELP, filter_lede=FILTER_LEDE,
             q=q, sort=sort, show=show, total=total, shown=len(rows),
+            matched=matched, capped=capped, row_cap=_ROW_CAP, uncapped=uncapped,
         )
 
     _BLANK_TOPIC_VALUES = {

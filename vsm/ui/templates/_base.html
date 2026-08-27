@@ -4,6 +4,26 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Vi Signal Mine{% endblock %}</title>
+{# A shared link used to render as a bare URL with no title card. These reports
+   get pasted into chat, so the preview is part of the deliverable. `description`
+   defaults to the product's one-line answer to "what is this?" and any page can
+   say something more specific.
+
+   No `og:image`: it would have to be a raster asset, and shipping one that most
+   platforms decline to render is worse than a text-only card that always works. #}
+{% set page_description = self.description() | trim or tagline %}
+<meta name="description" content="{{ page_description }}">
+<meta property="og:type" content="website">
+<meta property="og:title" content="{{ self.title() | trim }}">
+<meta property="og:description" content="{{ page_description }}">
+<meta name="twitter:card" content="summary">
+{% block description %}{% endblock %}
+{# Self-hosted, like every other asset here: no CDN, works with zero network.
+   An SVG icon covers every modern browser; the .ico route below exists because
+   browsers request /favicon.ico from the site root whether or not you link it,
+   and an unanswered request is a 404 on every single page load. #}
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/icon.svg">
 <link rel="stylesheet" href="/static/ds/colors_and_type.css">
 <link rel="stylesheet" href="/static/app.css">
 </head>

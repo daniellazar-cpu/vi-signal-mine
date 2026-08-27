@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Vi Signal Mine">
+  <!--
+    The tab icon. Drawn, not an emoji or a glyph in a box: the app has no icon
+    library and a letterform screenshot at 16px is mud.
+
+    The figure is the one thing this tool actually shows — a signal read twice,
+    the second reading higher than the first. That is the whole product in two
+    marks: a baseline and a change against it. The dot is the prior snapshot,
+    the rising line the current one, so the icon means "watched over time"
+    rather than decorating a page about it.
+
+    Vi Violet is the accent everywhere else in this app and it is the accent
+    here, on the same white canvas, so the tab reads as part of the same object
+    as the page. Stroke weights are chosen for 16px, where 1.5px is the
+    thinnest line that survives; the hairlines the brand uses elsewhere would
+    disappear entirely at this size, which is why this is the one place they
+    are not used.
+  -->
+  <rect width="32" height="32" fill="#FFFFFF"/>
+  <path d="M5 22.5 L13 17 L19.5 19 L27 8.5"
+        fill="none" stroke="#4F31F5" stroke-width="2.75"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="5" cy="22.5" r="2.75" fill="#000000"/>
+</svg>

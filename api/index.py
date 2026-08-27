@@ -43,7 +43,7 @@ os.environ.setdefault("VSM_VAR_DIR", "/tmp/vsm-var")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 
 from vsm.app import app as _vsm_app  # noqa: E402 — after the env/logging setup above
-from vsm.platform import StripFunctionPrefix  # noqa: E402
+from vsm.platform import RequireAccessKey, StripFunctionPrefix  # noqa: E402
 
 #: `vercel.json`'s rewrite carries the capture group (`destination:
 #: "/api/index/$1"`); without it every path collapses to the one literal
@@ -53,6 +53,9 @@ from vsm.platform import StripFunctionPrefix  # noqa: E402
 #: expects to see it, as an ASGI wrapper rather than `root_path` — `root_path`
 #: would also shift URL *generation*, putting `/api/index` into every link
 #: and form action this app emits.
-app = StripFunctionPrefix(_vsm_app)
+# The gate goes *outside* the prefix stripper, so an unauthenticated
+# request is refused before any routing decision is made about it.
+# Inert unless VSM_ACCESS_KEY is set.
+app = RequireAccessKey(StripFunctionPrefix(_vsm_app))
 
 __all__ = ["app"]

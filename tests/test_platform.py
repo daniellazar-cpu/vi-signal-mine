@@ -41,12 +41,43 @@ def test_production_serves_when_offline_leaves_nothing_to_abuse(monkeypatch):
     assert assert_serveable() is None
 
 
-def test_production_serves_when_an_access_key_gates_it(monkeypatch):
+def test_production_is_permitted_to_serve_when_an_access_key_is_set(monkeypatch):
+    """Renamed, because the old name — "when an access key gates it" — asserted
+    a gate this test never exercised, and for a long time no gate existed at
+    all: the key was read only here, to decide whether serving was permitted.
+
+    This test's real subject is that narrow decision. The gate itself is
+    `RequireAccessKey`, covered in `tests/test_access_gate.py`, and the
+    assertion below is only meaningful because that class exists.
+    """
     monkeypatch.setenv("VERCEL_ENV", "production")
     monkeypatch.setenv("VSM_OFFLINE", "0")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-live-looking-key")
     monkeypatch.setenv("VSM_ACCESS_KEY", "a-shared-secret")
     assert assert_serveable() is None
+
+
+def test_the_permissive_access_key_branch_has_a_gate_behind_it(monkeypatch):
+    """The link the rename above leaves implicit, asserted.
+
+    `production_is_safe` says an access key makes the deployment safe. That is
+    only true while something enforces the key, and both entrypoints must wrap
+    the app in it — a protection present on one and not the other is one nobody
+    can reason about.
+    """
+    from pathlib import Path
+
+    import vsm.platform
+
+    assert hasattr(vsm.platform, "RequireAccessKey")
+    # Read as files rather than imported: `api` is a common top-level name and
+    # `import api.index` here picked up an unrelated project's package from the
+    # path, which made this assertion pass or fail for reasons that had nothing
+    # to do with this app.
+    root = Path(__file__).resolve().parents[1]
+    for rel in ("vsm/app.py", "api/index.py"):
+        src = (root / rel).read_text()
+        assert "RequireAccessKey(" in src, rel
 
 
 def test_the_guard_fails_closed(monkeypatch):

@@ -1135,6 +1135,59 @@ a.tier-badge-corroborated:hover { background: var(--vi-violet-hover); border-col
   align-items: flex-start; gap: var(--space-sm);
 }
 
+/*
+   Narrow screens: each chip row becomes one swipeable line instead of wrapping
+   into three. Ten chips plus two labels filled the entire first viewport on a
+   375px phone before a single row of content — for a list that might hold five
+   topics.
+
+   A <details> disclosure was the obvious fix and does not work: a closed
+   <details> does not render its content slot at all, so no amount of
+   `display`/`content-visibility` on the light-DOM child brings it back for a
+   desktop override. Scrolling the rows keeps every chip discoverable, needs no
+   JavaScript and no shadow-DOM fight, and reuses the same edge-shadow hint the
+   wide tables use so the cut edge is not silent.
+*/
+@media (max-width: 699px) {
+  /* The search input's 320px flex-basis forced the button onto its own line,
+     costing a whole row on the narrowest screen this has to work on. */
+  .list-tools-search input[type="search"] { flex-basis: 0; }
+  .list-tools-row { display: block; }
+  .list-tools-label { display: block; margin-bottom: 6px; }
+  .chip-row {
+    flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px;
+    scrollbar-width: none;
+    background:
+      linear-gradient(to right, var(--bg) 30%, transparent) left center / 24px 100% no-repeat,
+      linear-gradient(to left, var(--bg) 30%, transparent) right center / 24px 100% no-repeat,
+      radial-gradient(farthest-side at 0 50%, rgba(0, 0, 0, 0.13), transparent) left center / 9px 100% no-repeat,
+      radial-gradient(farthest-side at 100% 50%, rgba(0, 0, 0, 0.13), transparent) right center / 9px 100% no-repeat;
+    background-attachment: local, local, scroll, scroll;
+  }
+  .chip-row::-webkit-scrollbar { display: none; }
+  .chip { flex: none; }
+}
+
+/*
+   Touch targets. Every control already clears WCAG 2.2 AA's 24px, so this is
+   comfort rather than compliance — but a 35px chip and a 27px nav link are
+   what a thumb actually has to hit, and this list is the one screen made
+   almost entirely of small controls. Only on pointer:coarse, so a mouse keeps
+   the tighter, denser layout the density of a data table wants.
+*/
+@media (pointer: coarse) {
+  .chip { padding: 11px 14px; }
+  .app-top-nav a { padding: 10px 0; }
+  .btn-sm { min-height: 44px; }
+  .link-danger, .link-back { display: inline-block; padding: 11px 0; }
+  .table-scroll .data-table a { display: inline-block; padding: 4px 0; }
+}
+
+.list-cap {
+  font-size: 13px; color: var(--fg2); margin: var(--space-sm) 0 0;
+  padding-top: var(--space-sm); border-top: var(--border-hairline) solid var(--rule);
+}
+
 /* ============================================= delete ================= */
 /*
    Deleting is the only irreversible thing here, so it reads like the
@@ -1219,11 +1272,17 @@ a.tier-badge-corroborated:hover { background: var(--vi-violet-hover); border-col
   /* Every insight tab prints, with its label as a heading — four of five are
      hidden on screen and would silently vanish from a printed page. */
   .tab-panel { display: block !important; padding-top: 0 !important; }
-  /* The wrapper alone was not enough: the browser's own
-     `details:not([open]) > :not(summary) { display: none }` still applies,
-     so any <details> left closed on screen printed as an empty gap — the
-     exact loss this block exists to prevent, solved only for the CSS-only
-     .tab-panels above, which hide by a different mechanism. */
+  /* Best effort, and the limit is worth stating rather than implying it is
+     solved. A closed <details> does not render its content slot at all, so CSS
+     on the light-DOM child cannot bring it back — the same thing that defeated
+     a CSS-only disclosure for the list toolbar. Chrome prints closed <details>
+     content of its own accord (since 118); other engines may not, and with no
+     JavaScript in this app there is nothing to force `open` at print time.
+
+     The exposure is bounded on purpose: the only two <details> left are
+     supplementary explanations on the insight and "how this works" pages
+     ("Why some rows say NE", "More detail"). The client-facing report contains
+     none, so the deliverable prints whole regardless. */
   details { display: block; }
   details > summary { display: none; }
   details:not([open]) > :not(summary) { display: block !important; }
