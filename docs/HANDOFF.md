@@ -9,8 +9,8 @@ what a person (or an agent) needs to pick it up cold.
 |---|---|
 | Repo | `daniellazar-cpu/vi-signal-mine`, private. Branches `build/vi-signal-mine-v1` (work) and `deploy` |
 | Live | https://vi-signal-mine-pink.vercel.app — production, serving, **read-write** |
-| Tests | **600 passed, 2 skipped** hermetically; **38 passed** of the storage contract suite against the live Neon. The skip is the Blob storage-contract suite, which needs a live Blob token |
-| Working tree | clean at `5324341` |
+| Tests | **646 passed, 2 skipped** hermetically; **38 passed** of the storage contract suite against the live Neon. The skip is the Blob storage-contract suite, which needs a live Blob token |
+| Working tree | clean at `2000095` |
 
 ## What works right now
 
@@ -107,7 +107,11 @@ project as **Non-sensitive** (Vercel's default for an integration-injected
 variable), so its value is partly readable in `vercel env ls`. Not exposed
 publicly, but it is a write credential and would be better re-added as sensitive.
 
-**Set `VSM_ACCESS_KEY` before adding live keys.** With keys present and no gate,
+**Set `VSM_ACCESS_KEY` before adding live keys — and it now does something.**
+Until this pass it only satisfied the guard; nothing checked it. It is HTTP Basic
+over the whole app now: any username, the key as the password.
+
+ With keys present and no gate,
 the production guard refuses to serve — deliberately. On this plan Vercel gates
 preview deployments only, so a production URL is reachable by anyone holding it,
 and live keys behind an open URL can spend real money. Gate first, then add keys.
@@ -122,6 +126,37 @@ clinician–patient gap reads `NE` on most themes because no stance classifier
 runs without an Anthropic key; and every seeded row is flagged `synthetic` with a
 fabrication notice carried into the artifacts, so a downloaded report cannot be
 mistaken for real collection.
+
+## What an audit found missing
+
+A systematic pass for what was *absent* rather than wrong. All fixed.
+
+| Sev | Gap |
+|---|---|
+| **P0** | **`VSM_ACCESS_KEY` gated nothing.** `production_is_safe` said "the app gates itself"; no code checked a request against the key. The one combination D15 exists to make safe — live keys behind a shared secret — put no secret in front of anything. `RequireAccessKey` is now HTTP Basic at the ASGI layer, on both entrypoints |
+| P1 | An unrouted path returned raw `{"detail":"Not Found"}` — the 404 most likely to be reached was the only one that looked broken |
+| P1 | No favicon; `/favicon.ico` 404ed on every page load |
+| P1 | No description or link-preview tags, so a shared report rendered as a bare URL |
+| P2 | Mobile: the filter toolbar consumed the whole first viewport (~800px) before any content |
+| P2 | 33 controls under 44px on mobile (now 12; all already cleared WCAG 2.2 AA's 24px) |
+| P2 | The index rendered every row — ~677 bytes each, so 400 topics was a 269KB document. Capped at 50 with an escape hatch |
+| P3 | `TAGLINE` was defined, exported and rendered nowhere — it is the meta description now |
+
+### Two things worth knowing rather than fixing
+
+**A closed `<details>` cannot be forced open with CSS.** It does not render its
+content slot at all, so neither `display` nor `content-visibility` on the
+light-DOM child brings it back. That killed a disclosure-based mobile toolbar
+(replaced with per-row horizontal scrolling) and means the print rule from an
+earlier pass never worked as its comment claimed. The exposure is bounded and
+tested: the client-facing report contains no `<details>`, so the deliverable
+prints whole whatever an engine does.
+
+**`PRODUCT.md` is stale on one point.** It says "Brand commitments: None
+inherited **[assumed]**", which stopped being true when the Vi marketing design
+system was adopted on the owner's explicit brief. Left alone deliberately —
+repairing it was not the task — but any future design pass reading it will be
+misled.
 
 ## Speed
 
