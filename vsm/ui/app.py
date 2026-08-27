@@ -744,7 +744,10 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         # turns the most expensive page in the app into one of the cheapest.
         if q:
             topics = [t for t in topics if _matches(t, q)]
-        runs_by_topic = {t.topic_id: run_store.for_topic(t.topic_id) for t in topics}
+        # One call for every topic, not one per topic. Asking per topic made
+        # this page's cost grow with the length of the list — a query or a
+        # fan-out each, so forty topics were forty round trips for one render.
+        runs_by_topic = run_store.for_topics([t.topic_id for t in topics])
         _prefetch([
             (r.run_id, "signals.json")
             for runs in runs_by_topic.values()

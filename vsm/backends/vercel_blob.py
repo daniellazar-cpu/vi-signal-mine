@@ -826,6 +826,36 @@ class BlobRunStore:
         rows.sort(key=lambda pair: pair[0])
         return [r for _seq, r in rows]
 
+    def for_topics(self, topic_ids: list[str]) -> dict[str, list[Run]]:
+        """One listing and one batched fetch for all of them.
+
+        This backend has to read every run record whatever it is asked, because
+        the topic a run belongs to is in the record's *content*, not its
+        pathname. The gain is that it now does that once for the whole page
+        instead of once per topic — the request maps made repeat calls cheap,
+        but "cheap" still meant a dictionary walk per topic per render.
+        """
+        wanted = set(topic_ids)
+        out: dict[str, list[Run]] = {tid: [] for tid in topic_ids}
+        blobs = [
+            b for b in self._ns._http.list_all(f"{self._ns.root}/runs/")
+            if not b["pathname"].endswith("/_seq.json")
+        ]
+        fetched = self._ns._http.get_many([b["url"] for b in blobs])
+        rows: list[tuple[int, Run]] = []
+        for blob in blobs:
+            got = fetched.get(blob["url"])
+            if got is None:
+                continue
+            data = json.loads(got[0])
+            if data.get("topic_id") not in wanted:
+                continue
+            rows.append((data.get("seq", 0), self._to_run(data)))
+        rows.sort(key=lambda pair: pair[0])
+        for _seq, run in rows:
+            out.setdefault(run.topic_id, []).append(run)
+        return out
+
     def snapshots(self, topic_id: str) -> list[Run]:
         """Completed MINE runs, oldest first — see ``vsm/storage.py``'s
         ``RunStoreLike.snapshots`` docstring: ordered by the monotonic

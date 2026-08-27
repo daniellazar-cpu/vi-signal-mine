@@ -42,6 +42,10 @@ class CountingRunStore:
         self._count("for_topic")
         return self._real.for_topic(topic_id, mode)
 
+    def for_topics(self, topic_ids):
+        self._count("for_topics")
+        return self._real.for_topics(topic_ids)
+
     def snapshots(self, topic_id: str):
         self._count("snapshots")
         return self._real.snapshots(topic_id)
@@ -76,18 +80,26 @@ def counted(tmp_path, monkeypatch):
     return TestClient(create_app(topic_store=ts, run_store=rs)), ts, rs
 
 
-def test_the_index_asks_each_topic_for_its_runs_exactly_once(counted):
+def test_the_index_asks_for_every_topic_s_runs_in_one_call(counted):
+    """The property that decides whether this page scales.
+
+    Per-topic, a render costs one round trip per topic: on Postgres a query
+    each, on a flat key-value store a fan-out each. Measured on the deployment
+    with Postgres, asking per topic grew the index linearly — 0.96s at 10
+    topics, 1.84s at 40, about 30ms per topic, so a few hundred topics would
+    have put it back into seconds. One call is a constant number of round trips
+    however long the list gets.
+    """
     client, ts, rs = counted
     n_topics = len(ts.list())
     assert n_topics >= 6, "fixture needs several topics for this to mean anything"
 
     assert client.get("/").status_code == 200
 
-    total = rs.calls.get("for_topic", 0) + rs.calls.get("snapshots", 0)
-    assert total == n_topics, (
-        f"{total} run-listing calls for {n_topics} topics — "
-        f"{rs.calls}. Each one is O(all runs in the store) on a flat "
-        f"key-value backend."
+    per_topic = rs.calls.get("for_topic", 0) + rs.calls.get("snapshots", 0)
+    assert rs.calls.get("for_topics", 0) == 1, f"expected one batched call: {rs.calls}"
+    assert per_topic == 0, (
+        f"{per_topic} per-topic run lookups for {n_topics} topics — {rs.calls}"
     )
 
 
@@ -146,10 +158,20 @@ def test_the_deliverables_page_stops_at_the_first_topic_with_a_report(counted):
 
 def test_the_index_settles_snapshots_once_and_reuses_them(counted):
     """The index needs each topic's runs twice — once to know which snapshots
-    to prefetch, once to build the row. It must not ask the store twice."""
+    to prefetch, once to build the row. It must fetch them once."""
     client, ts, rs = counted
-    n_topics = len(ts.list())
     client.get("/")
-    assert rs.calls.get("for_topic", 0) == n_topics, (
-        f"{rs.calls.get('for_topic', 0)} calls for {n_topics} topics"
-    )
+    assert rs.calls.get("for_topics", 0) == 1, rs.calls
+    assert rs.calls.get("for_topic", 0) == 0, rs.calls
+
+
+def test_for_topics_agrees_with_for_topic_on_the_real_store(counted):
+    """Backend-independent version of the same guard: the index builds its rows
+    from the batched call and every other screen from the single one. If they
+    ever disagree, the index quietly contradicts the pages it links to."""
+    _, ts, rs = counted
+    ids = [t.topic_id for t in ts.list()]
+    batched = rs._real.for_topics(ids)
+    assert set(batched) == set(ids)
+    for tid in ids:
+        assert batched[tid] == rs._real.for_topic(tid), tid

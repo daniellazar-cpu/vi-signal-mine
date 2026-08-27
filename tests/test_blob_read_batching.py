@@ -184,3 +184,49 @@ def test_the_topic_list_is_batched_too(monkeypatch):
     assert len(store.list()) == 30
     assert len(rec.gets) == 30
     assert len(rec.lists) == 1
+
+
+def test_for_topics_answers_many_topics_in_one_pass(monkeypatch):
+    """The index's actual operation. Per topic it was one fan-out each; this
+    must be one listing and one batch however many topics are asked for."""
+    bodies = {}
+    host = "https://tlmd7odfil8g8upe.public.blob.vercel-storage.com/"
+    for t in range(20):
+        for r in range(2):
+            rid = f"min-{t:03d}{r}"
+            bodies[f"{host}vsm/runs/{rid}.json"] = json.dumps({
+                "run_id": rid, "topic_id": f"top-{t:03d}", "mode": "mine",
+                "status": "complete", "started_at": "2026-08-27T00:00:00+00:00",
+                "finished_at": "2026-08-27T00:00:01+00:00", "cost_usd": 0.0,
+                "parent_run_id": None, "note": "", "seq": t * 10 + r,
+            }).encode()
+    rec = _Recorder(bodies)
+    store = rec.install(BlobRunStore(_TOKEN, root="vsm"), monkeypatch)
+
+    ids = [f"top-{t:03d}" for t in range(20)]
+    got = store.for_topics(ids)
+    assert set(got) == set(ids), "every id asked for must be a key"
+    assert all(len(v) == 2 for v in got.values()), {k: len(v) for k, v in got.items()}
+    assert len(rec.lists) == 1, f"{len(rec.lists)} listings"
+    assert len(rec.gets) == 40, f"{len(rec.gets)} content reads for 40 runs"
+
+
+def test_for_topics_maps_an_unknown_topic_to_an_empty_list(monkeypatch):
+    """Callers index the result directly, so a topic with no runs must be a key
+    with `[]`, never absent."""
+    rec = _Recorder(_run_bodies(2, topic_id="top-a"))
+    store = rec.install(BlobRunStore(_TOKEN, root="vsm"), monkeypatch)
+
+    got = store.for_topics(["top-a", "top-nothing"])
+    assert got["top-nothing"] == []
+    assert len(got["top-a"]) == 2
+
+
+def test_for_topics_agrees_with_for_topic(monkeypatch):
+    """Two code paths that must not drift: the index reads its rows from the
+    batched one and every other screen from the single one, so a difference
+    shows up as the index disagreeing with the page it links to."""
+    rec = _Recorder(_run_bodies(6, topic_id="top-a"))
+    store = rec.install(BlobRunStore(_TOKEN, root="vsm"), monkeypatch)
+
+    assert store.for_topics(["top-a"])["top-a"] == store.for_topic("top-a")

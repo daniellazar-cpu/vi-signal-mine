@@ -279,6 +279,29 @@ class PostgresRunStore:
             rows = conn.execute(sql, args).fetchall()
         return [self._to_run(r) for r in rows]
 
+    def for_topics(self, topic_ids: list[str]) -> dict[str, list[Run]]:
+        """One query, `= ANY`, ordered by the same monotonic ``seq``
+        ``for_topic`` uses. This is the operation the topics index is actually
+        made of, and answering it per topic is what made that page's cost grow
+        with the length of the list."""
+        out: dict[str, list[Run]] = {tid: [] for tid in topic_ids}
+        if not topic_ids:
+            return out
+        with self._conn() as conn:
+            rows = conn.execute(
+                # `_RUN_COLS`, not `*`: the table carries a `seq` column that
+                # `_to_run` does not take, so a star select unpacks ten values
+                # into nine. `for_topic` above already names the columns for
+                # exactly this reason.
+                f"SELECT {_RUN_COLS} FROM {self.schema}.runs "
+                "WHERE topic_id = ANY(%s) ORDER BY seq ASC",
+                (list(topic_ids),),
+            ).fetchall()
+        for row in rows:
+            run = self._to_run(row)
+            out.setdefault(run.topic_id, []).append(run)
+        return out
+
     def snapshots(self, topic_id: str) -> list[Run]:
         return [
             r for r in self.for_topic(topic_id, "mine") if r.status == "complete"

@@ -158,6 +158,29 @@ class RunStore:
         with self._conn() as c:
             return [self._to_run(r) for r in c.execute(sql, args).fetchall()]
 
+    def for_topics(self, topic_ids: list[str]) -> dict[str, list[Run]]:
+        """One statement for every topic, grouped in Python.
+
+        The index used to call `for_topic` per topic, so a page render cost one
+        round trip per topic and grew with the list.
+        """
+        out: dict[str, list[Run]] = {tid: [] for tid in topic_ids}
+        if not topic_ids:
+            return out
+        marks = ",".join("?" for _ in topic_ids)
+        with self._conn() as c:
+            rows = c.execute(
+                f"SELECT * FROM runs WHERE topic_id IN ({marks}) ORDER BY seq ASC",
+                list(topic_ids),
+            ).fetchall()
+        for row in rows:
+            run = self._to_run(row)
+            # A row for a topic that was not asked for cannot happen given the
+            # IN clause, but `setdefault` keeps this honest rather than raising
+            # a KeyError if that ever stops being true.
+            out.setdefault(run.topic_id, []).append(run)
+        return out
+
     def snapshots(self, topic_id: str) -> list[Run]:
         """Completed MINE runs, **oldest first** — every delta walks forward.
 

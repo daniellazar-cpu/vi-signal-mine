@@ -399,6 +399,59 @@ def test_artifact_name_cannot_escape_the_run_directory(run_store):
 # against the same location is what actually exercises that.
 
 
+def test_for_topics_matches_for_topic_on_every_backend(topic_store, run_store):
+    """``for_topics`` exists so the topics index costs a constant number of
+    round trips instead of one per topic. It is therefore a *second*
+    implementation of a query the app already had, on every backend — and the
+    index reads its rows from the new one while every other screen reads from
+    the old one, so a divergence shows up as the index quietly contradicting
+    the pages it links to.
+
+    Worth having in the shared suite rather than as a unit test with a fake:
+    the Postgres version shipped with ``SELECT *`` where the table carries a
+    ``seq`` column its row-mapper does not take, which unpacked ten values into
+    nine. No fake would have caught it; the first run against a real database
+    did.
+    """
+    ids = []
+    for i in range(4):
+        topic = topic_store.create(
+            name=f"batched-{i}", therapeutic_area="", spend_band="probe"
+        )
+        ids.append(topic.topic_id)
+        for _ in range(i):                      # 0, 1, 2, 3 runs
+            run = run_store.start(topic.topic_id, "mine")
+            run_store.finish(run.run_id, "complete", 0.0)
+
+    batched = run_store.for_topics(ids)
+
+    assert set(batched) == set(ids), "every id asked for must be a key"
+    for tid in ids:
+        assert batched[tid] == run_store.for_topic(tid), tid
+    assert batched[ids[0]] == [], "a topic with no runs must map to an empty list"
+    assert [len(batched[t]) for t in ids] == [0, 1, 2, 3]
+
+
+def test_for_topics_ignores_topics_it_was_not_asked_about(topic_store, run_store):
+    """A backend that has to read every run to find the ones it wants must not
+    leak the others into the result."""
+    keep = topic_store.create(name="keep", therapeutic_area="", spend_band="probe")
+    other = topic_store.create(name="other", therapeutic_area="", spend_band="probe")
+    for topic in (keep, other):
+        run = run_store.start(topic.topic_id, "mine")
+        run_store.finish(run.run_id, "complete", 0.0)
+
+    batched = run_store.for_topics([keep.topic_id])
+    assert set(batched) == {keep.topic_id}
+    assert all(r.topic_id == keep.topic_id for r in batched[keep.topic_id])
+
+
+def test_for_topics_of_nothing_is_an_empty_mapping(run_store):
+    """The index renders an empty store, and a backend must not read anything
+    to answer a question about no topics."""
+    assert run_store.for_topics([]) == {}
+
+
 def test_topic_persists_across_store_instances(store_factory, tmp_path):
     topic_store_1, _, _ = store_factory(tmp_path)
     t = topic_store_1.create(name="persistent", therapeutic_area="gi", spend_band="probe")

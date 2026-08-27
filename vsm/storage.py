@@ -100,6 +100,18 @@ class RunStoreLike(Protocol):
 
     def read_artifact(self, run_id: str, name: str) -> Any: ...
 
+    #: Runs for many topics at once, keyed by topic id, each list in the same
+    #: order ``for_topic`` would return.
+    #:
+    #: Exists because the topics index needs exactly this and asking per topic
+    #: made the page cost grow with the number of topics — one query or one
+    #: fan-out each, forty topics being forty round trips for a single render.
+    #: A backend answers it in one operation, so the page becomes a constant
+    #: number of round trips regardless of how long the list gets. Every id is
+    #: present in the result, mapped to an empty list when it has no runs, so a
+    #: caller can index it without guarding.
+    def for_topics(self, topic_ids: "list[str]") -> "dict[str, list[Run]]": ...
+
     #: Remove every run for ``topic_id`` **and every artifact those runs
     #: wrote**, returning how many runs went. Artifacts are the point: they are
     #: the bulk of what a topic occupies, and a backend that dropped only the
