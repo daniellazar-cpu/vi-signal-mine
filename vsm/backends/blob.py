@@ -109,6 +109,21 @@ class BlobArtifacts:
             )
         return self._path_cls(run_id) / name
 
+    def delete_for_runs(self, run_ids: "list[str]") -> None:
+        """Every artifact belonging to any of these runs, in one statement.
+
+        Takes the whole list rather than one run at a time because deleting a
+        topic means deleting all of its runs, and a round trip per run is a
+        round trip too many.
+        """
+        if not run_ids:
+            return
+        with psycopg.connect(self.dsn, autocommit=True) as conn:
+            conn.execute(
+                f"DELETE FROM {self.schema}.artifacts WHERE run_id = ANY(%s)",
+                (list(run_ids),),
+            )
+
     def read_artifact(self, run_id: str, name: str) -> Any:
         self._validated_key(run_id, name)
         with self._conn() as conn:

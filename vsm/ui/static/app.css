@@ -1090,6 +1090,82 @@ a.tier-badge-corroborated:hover { background: var(--vi-violet-hover); border-col
    fabricated-run warning that vanishes on the way to the printer is worse
    than useless, and every tab panel on the insight screen, four of which are
    `display: none` on screen and would otherwise print blank. */
+/* ============================================= list tools ============= */
+/*
+   Search, sort and filter for the topics list. All of it is links and a plain
+   GET form: the view you are looking at is a URL you can share, bookmark or
+   print, and it works with scripting off. Chips rather than <select> so the
+   current state is legible without opening anything — the whole reason this
+   exists is that a long list had become hard to read at a glance.
+*/
+.list-tools {
+  display: flex; flex-direction: column; gap: var(--space-sm);
+  padding: var(--space-sm) 0 var(--space-md);
+  border-bottom: var(--border-hairline) solid var(--rule);
+  margin-bottom: var(--space-md);
+}
+.list-tools-search { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.list-tools-search input[type="search"] {
+  flex: 1 1 320px; min-width: 0; padding: 9px 12px;
+  border: var(--border-hairline) solid var(--rule-control); border-radius: var(--radius-sm);
+  font-family: var(--vi-font-family); font-size: var(--t-body-size); color: var(--fg1); background: var(--bg);
+}
+.list-tools-search input[type="search"]:focus-visible { outline: 2px solid var(--signal); outline-offset: 1px; }
+.list-tools-row { display: flex; gap: var(--space-sm); align-items: baseline; flex-wrap: wrap; }
+.list-tools-label {
+  font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+  font-weight: 500; color: var(--fg2); min-width: 40px;
+}
+.chip-row { display: flex; gap: 6px; flex-wrap: wrap; }
+/* A chip is a link, so it must not look like a button that submits. Text
+   weight and a hairline carry the state; violet is reserved, so the active
+   chip is ink-on-subtle rather than filled with the accent. */
+.chip {
+  display: inline-block; padding: 5px 11px; border-radius: var(--radius-sm);
+  border: var(--border-hairline) solid var(--rule-control);
+  font-size: 13px; color: var(--fg2); text-decoration: none; background: var(--bg);
+}
+.chip:hover { border-color: var(--fg1); color: var(--fg1); background: var(--bg-subtle); }
+.chip-on { color: var(--fg1); font-weight: 500; border-color: var(--fg1); background: var(--bg-subtle); }
+.chip:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+.list-tools-count { font-size: 13px; color: var(--fg2); margin: 0; }
+
+.empty-result {
+  padding: var(--space-lg) 0; display: flex; flex-direction: column;
+  align-items: flex-start; gap: var(--space-sm);
+}
+
+/* ============================================= delete ================= */
+/*
+   Deleting is the only irreversible thing here, so it reads like the
+   confirm-spend screen: the tally first, because the number is what makes
+   someone stop, and prose second. Red appears *only* here and only on the
+   committing control — the palette reserves violet for the primary action and
+   has no decorative red at all.
+*/
+.delete-tally {
+  border: var(--border-hairline) solid var(--rule);
+  border-radius: var(--radius-md); padding: var(--space-md);
+  margin-bottom: var(--space-md); background: var(--bg-subtle);
+}
+.delete-tally dl { display: flex; flex-wrap: wrap; gap: var(--space-md) var(--space-lg); margin: 0; }
+.delete-tally dt {
+  font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+  font-weight: 500; color: var(--fg2); margin: 0 0 4px;
+}
+.delete-tally dd { margin: 0; font-size: 24px; font-variant-numeric: tabular-nums; color: var(--fg1); }
+.delete-warning { color: var(--fg1); max-width: 62ch; }
+.delete-note { color: var(--fg2); max-width: 62ch; font-size: 14px; }
+.delete-form { display: flex; gap: 12px; align-items: center; margin-top: var(--space-md); flex-wrap: wrap; }
+.btn-danger { background: #A31515; color: #FFFFFF; border-color: #A31515; }
+.btn-danger:hover { background: #8A1111; border-color: #8A1111; color: #FFFFFF; }
+.btn-danger:active { background: #6E0D0D; }
+/* The row-level affordance is a text link, not a red button: a list of sixty
+   rows with sixty red buttons reads as a hazard, and the destructive step is
+   a page away regardless. */
+.link-danger { color: #A31515; font-size: 13px; margin-left: 10px; text-decoration: underline; text-underline-offset: 2px; }
+.link-danger:hover { color: #6E0D0D; }
+
 @media print {
   @page { margin: 18mm 16mm; }
 

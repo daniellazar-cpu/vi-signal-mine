@@ -109,6 +109,15 @@ class TopicStore:
             rows = c.execute("SELECT * FROM topics ORDER BY seq DESC").fetchall()
         return [self._row_to_topic(r) for r in rows]
 
+    def delete(self, topic_id: str) -> None:
+        """Remove the topic. Its runs are the run store's business — the two
+        are separate stores and there is no cascade to lean on."""
+        with self._conn() as c:
+            cur = c.execute("DELETE FROM topics WHERE topic_id = ?", (topic_id,))
+            c.commit()
+            if cur.rowcount == 0:
+                raise NoSuchTopic(topic_id, rule="topics")
+
     def update(self, topic_id: str, **fields: Any) -> Topic:
         current = self.get(topic_id)
         for key in fields:

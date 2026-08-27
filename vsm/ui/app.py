@@ -45,16 +45,21 @@ from vsm.modes.report import run_report
 from vsm.platform import assert_serveable, storage_is_durable
 from vsm.topics.model import BANDS
 from vsm.ui.content import (
+    DELETE_WARNING,
     DELIVERABLE_GROUPS,
     DELIVERABLE_TIERS,
     DELIVERABLES,
     EPHEMERAL_STORAGE_NOTICE,
     FIELD_GUIDE,
+    FILTER_HELP,
+    FILTER_LEDE,
+    FILTERS,
     FIRST_RUN_STEPS,
     GLOSSARY,
     MODES,
     PLOT_GUIDE,
     READ_ONLY_CONTROL_NOTE,
+    SORTS,
     TIERS,
     WHAT_IT_IS,
     explainer,
@@ -681,8 +686,50 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         if warm is not None and pairs:
             warm(pairs)
 
+    def _matches(topic: Any, needle: str) -> bool:
+        """Substring match across the fields someone would actually type.
+
+        Deliberately not the whole record: matching `never_say` or `questions`
+        would make a search for a competitor's name return the topics that
+        forbid mentioning it, which is the opposite of what was asked.
+        """
+        haystack = " ".join(filter(None, (
+            topic.name, topic.therapeutic_area, topic.brand, topic.molecule,
+            " ".join(topic.competitors),
+        ))).lower()
+        return all(word in haystack for word in needle.lower().split())
+
+    _SORT_KEYS = {
+        # `list()` is already newest-first, so "recent" is the identity sort and
+        # must stay stable rather than re-deriving an order from timestamps.
+        "recent": None,
+        "oldest": None,
+        "name": lambda r: r["topic"].name.lower(),
+        "activity": lambda r: (-r["snapshot_count"], r["topic"].name.lower()),
+        "spend": lambda r: (-r["spend_to_date"], r["topic"].name.lower()),
+        "volume": lambda r: (-(r["latest_volume"] or 0), r["topic"].name.lower()),
+    }
+
+    def _filtered(rows: list[dict[str, Any]], which: str) -> list[dict[str, Any]]:
+        if which == "watched":
+            return [r for r in rows if r["snapshot_count"] >= 1]
+        if which == "trend":
+            return [r for r in rows if r["snapshot_count"] >= 2]
+        if which == "empty":
+            return [r for r in rows if r["snapshot_count"] == 0]
+        return rows
+
     @app.get("/", response_class=HTMLResponse)
-    def topics_index(request: Request) -> HTMLResponse:
+    def topics_index(
+        request: Request, q: str = "", sort: str = "recent", show: str = "all",
+    ) -> HTMLResponse:
+        # Unknown values fall back rather than 400: this is a shareable URL and
+        # a stale bookmark should show the list, not an error page.
+        if sort not in _SORT_KEYS:
+            sort = "recent"
+        if show not in dict(FILTERS):
+            show = "all"
+        q = q.strip()
         topics = topic_store.list()
         # Two passes on purpose. The first settles which snapshots exist —
         # cheap, because every `for_topic` after the first is served from the
@@ -690,6 +737,13 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         # fetched in one concurrent batch. Interleaved, those reads were one
         # sequential round trip per snapshot, and with sixty topics that alone
         # was several seconds of a page that shows no run detail at all.
+        total = len(topics)
+        # Search is applied *before* any run lookup: a name match needs nothing
+        # from the run store, and on a store with no secondary index every
+        # topic excluded here is a fan-out avoided. With a narrow search this
+        # turns the most expensive page in the app into one of the cheapest.
+        if q:
+            topics = [t for t in topics if _matches(t, q)]
         runs_by_topic = {t.topic_id: run_store.for_topic(t.topic_id) for t in topics}
         _prefetch([
             (r.run_id, "signals.json")
@@ -698,9 +752,16 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             if r.mode == "mine" and r.status == "complete"
         ])
         rows = [_topic_row(t, runs_by_topic[t.topic_id]) for t in topics]
+        rows = _filtered(rows, show)
+        if sort == "oldest":
+            rows.reverse()
+        elif _SORT_KEYS[sort] is not None:
+            rows.sort(key=_SORT_KEYS[sort])
         return render(
             request, "topics.html", rows=rows, first_run_steps=FIRST_RUN_STEPS,
-            active_nav="topics",
+            active_nav="topics", sorts=SORTS, filters=FILTERS,
+            filter_help=FILTER_HELP, filter_lede=FILTER_LEDE,
+            q=q, sort=sort, show=show, total=total, shown=len(rows),
         )
 
     _BLANK_TOPIC_VALUES = {
@@ -896,6 +957,49 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             cap_usd=settings.run_cost_cap_usd, changes_band=(chosen != topic.spend_band),
             tiers=_deliverable_tiers_ctx(_empty_deliverable_cards()),
         )
+
+    @app.get("/topics/{topic_id}/delete", response_class=HTMLResponse)
+    def topic_delete_confirm(request: Request, topic_id: str) -> Any:
+        """A page, not a dialog, and a GET that changes nothing.
+
+        Deleting is the one irreversible thing this app can do, so it gets the
+        same treatment as committing spend: say exactly what goes, count it,
+        and make the destructive step a POST that cannot be reached by
+        following a link or by a crawler.
+        """
+        try:
+            topic = topic_store.get(topic_id)
+        except NoSuchTopic:
+            return error_page(request, 404, "Topic not found", f"No topic with id {topic_id!r}.")
+        runs = run_store.for_topic(topic_id)
+        return render(
+            request, "topic_delete.html", topic=topic,
+            counts={
+                "runs": len(runs),
+                "snapshots": len([r for r in runs if r.mode == "mine" and r.status == "complete"]),
+                "insights": len([r for r in runs if r.mode == "insight"]),
+                "reports": len([r for r in runs if r.mode == "report"]),
+            },
+            spend=round(sum(r.cost_usd for r in runs), 4),
+            warning=DELETE_WARNING,
+        )
+
+    @app.post("/topics/{topic_id}/delete")
+    def topic_delete(request: Request, topic_id: str) -> Any:
+        refusal = read_only_refusal(request)
+        if refusal is not None:
+            return refusal
+        try:
+            topic_store.get(topic_id)
+        except NoSuchTopic:
+            return error_page(request, 404, "Topic not found", f"No topic with id {topic_id!r}.")
+        # Runs first. If this fails halfway the topic is still there, so the
+        # delete can be retried; the other order would orphan the runs behind a
+        # topic that no longer exists and nothing would ever list them again.
+        deleted = run_store.delete_for_topic(topic_id)
+        topic_store.delete(topic_id)
+        logger.info("deleted topic %s and %d run(s)", topic_id, deleted)
+        return RedirectResponse(url="/", status_code=303)
 
     @app.post("/topics/{topic_id}/mine")
     def topic_mine(request: Request, topic_id: str, band: str = Form("")) -> Any:

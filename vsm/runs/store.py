@@ -8,6 +8,7 @@ over than a row.
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 import uuid
 from contextlib import closing
@@ -167,6 +168,25 @@ class RunStore:
         return [
             r for r in self.for_topic(topic_id, "mine") if r.status == "complete"
         ]
+
+    def delete_for_topic(self, topic_id: str) -> int:
+        """Every run for this topic, and every artifact directory those runs
+        wrote. Returns how many runs went.
+
+        The artifacts are the point. They are the bulk of what a topic
+        occupies, and dropping only the rows would leave the files on disk with
+        nothing left that knows their ids.
+        """
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT run_id FROM runs WHERE topic_id = ?", (topic_id,)
+            ).fetchall()
+            run_ids = [r["run_id"] for r in rows]
+            c.execute("DELETE FROM runs WHERE topic_id = ?", (topic_id,))
+            c.commit()
+        for run_id in run_ids:
+            shutil.rmtree(self.artifacts_dir(run_id), ignore_errors=True)
+        return len(run_ids)
 
     def artifacts_dir(self, run_id: str) -> Path:
         return self.var_dir / "runs" / run_id

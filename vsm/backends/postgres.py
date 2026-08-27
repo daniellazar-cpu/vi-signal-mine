@@ -146,6 +146,14 @@ class PostgresTopicStore:
             ).fetchall()
         return [self._row_to_topic(r) for r in rows]
 
+    def delete(self, topic_id: str) -> None:
+        with self._conn() as conn:
+            cur = conn.execute(
+                f"DELETE FROM {self.schema}.topics WHERE topic_id = %s", (topic_id,)
+            )
+            if cur.rowcount == 0:
+                raise NoSuchTopic(topic_id, rule="topics")
+
     def update(self, topic_id: str, **fields: Any) -> Topic:
         current = self.get(topic_id)
         for key in fields:
@@ -275,6 +283,25 @@ class PostgresRunStore:
         return [
             r for r in self.for_topic(topic_id, "mine") if r.status == "complete"
         ]
+
+    def delete_for_topic(self, topic_id: str) -> int:
+        """Runs and their artifacts. Artifacts first, deliberately: they are
+        keyed by ``run_id`` with no foreign key to lean on, so dropping the
+        runs first would leave nothing that knows which artifacts to remove."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"SELECT run_id FROM {self.schema}.runs WHERE topic_id = %s",
+                (topic_id,),
+            ).fetchall()
+        run_ids = [r[0] for r in rows]
+        if not run_ids:
+            return 0
+        self._blobs.delete_for_runs(run_ids)
+        with self._conn() as conn:
+            conn.execute(
+                f"DELETE FROM {self.schema}.runs WHERE topic_id = %s", (topic_id,)
+            )
+        return len(run_ids)
 
     def artifacts_dir(self, run_id: str) -> Path:
         return self._blobs.artifacts_dir(run_id)

@@ -477,3 +477,48 @@ DELIVERABLE_GROUPS = (
     ("analysis", "Analysis", "The findings behind the report, as data."),
     ("data", "Raw collection", "Everything gathered, with full provenance."),
 )
+
+
+#: How the topics index can be ordered. Server-side, because a list that is
+#: only sortable once JavaScript runs is not sortable on a printed page, in a
+#: shared link, or with a screen reader driving it.
+SORTS: tuple[tuple[str, str], ...] = (
+    ("recent", "Newest first"),
+    ("oldest", "Oldest first"),
+    ("name", "Name A–Z"),
+    ("activity", "Most snapshots"),
+    ("spend", "Highest spend"),
+    ("volume", "Largest volume"),
+)
+
+#: Coarse buckets, chosen because they answer the question people actually
+#: have when a list has grown noisy: which of these are real, and which did I
+#: create once and never run?
+FILTERS: tuple[tuple[str, str], ...] = (
+    ("all", "All topics"),
+    ("watched", "Has snapshots"),
+    ("trend", "Has a trend (2+)"),
+    ("empty", "Never run"),
+)
+
+FILTER_HELP = {
+    "all": "Everything in the store.",
+    "watched": "Mined at least once, so there is something to read.",
+    "trend": "Mined twice or more — the only topics where momentum and anomaly mean anything.",
+    "empty": "Created but never mined. Usually a false start, or a test.",
+}
+
+#: Shown above the list once it is long enough that scanning it is work.
+FILTER_LEDE = (
+    "Search matches the topic name, brand, molecule and therapeutic area. "
+    "Sort and filter are links, so the view you are looking at is the view you "
+    "can share or bookmark."
+)
+
+DELETE_WARNING = (
+    "Deleting a topic removes every snapshot, insight and report under it, and "
+    "every artifact those runs wrote. Downloads you have already taken are "
+    "yours and are unaffected. Nothing else references this topic, so nothing "
+    "else breaks — but the collected signal rows are gone, and re-mining "
+    "collects today's web, not the web as it was on the snapshot's date."
+)

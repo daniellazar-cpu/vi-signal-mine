@@ -674,6 +674,21 @@ class BlobTopicStore:
         topics.sort(key=lambda pair: pair[0], reverse=True)
         return [t for _seq, t in topics]
 
+    def delete(self, topic_id: str) -> None:
+        """Remove the topic's blob.
+
+        Resolves first so a missing topic raises rather than reporting a
+        cheerful success — the delete API is happy to be handed a url for
+        something that is not there, which would make a double submit look
+        like it worked.
+        """
+        pathname = f"{self._ns.root}/topics/{topic_id}.json"
+        url = self._ns._resolve(pathname)
+        if url is None or self._ns._http.get_content(url) is None:
+            raise NoSuchTopic(topic_id, rule="topics")
+        self._ns._http.delete([url])
+        self._ns._http.begin_request()   # the maps now hold a deleted record
+
     def update(self, topic_id: str, **fields: Any) -> Topic:
         current = self._ns.read_json(self._path(topic_id))
         if current is None:
@@ -827,6 +842,32 @@ class BlobRunStore:
     def artifacts_dir(self, run_id: str) -> Any:
         path_cls = _bound_run_artifact_path_class(self)
         return path_cls(run_id)
+
+    def delete_for_topic(self, topic_id: str) -> int:
+        """Every run for this topic and every artifact those runs wrote.
+
+        Artifacts are listed by their own prefix rather than by the names this
+        app happens to write: a run may hold an artifact from an older version
+        of the pipeline, and leaving it behind would keep the topic's storage
+        alive with nothing left that knows it exists.
+        """
+        runs = self.for_topic(topic_id)
+        if not runs:
+            return 0
+        urls: list[str] = []
+        for run in runs:
+            record = self._ns._resolve(f"{self._ns.root}/runs/{run.run_id}.json")
+            if record is not None:
+                urls.append(record)
+            for blob in self._ns._http.list_all(
+                f"{self._ns.root}/artifacts/{run.run_id}/"
+            ):
+                urls.append(blob["url"])
+        # One call: the delete endpoint takes a batch, and a run with ten
+        # artifacts should not be ten round trips.
+        self._ns._http.delete(urls)
+        self._ns._http.begin_request()   # the maps now hold deleted records
+        return len(runs)
 
     def prefetch_artifacts(self, pairs: "list[tuple[str, str]]") -> None:
         """Warm the request map with these ``(run_id, name)`` artifacts, in one

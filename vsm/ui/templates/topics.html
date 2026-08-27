@@ -16,6 +16,44 @@
 <p class="storage-notice">{{ read_only_control_note }}</p>
 {% endif %}
 
+{% if total > 0 %}
+<form class="list-tools" method="get" action="/" role="search">
+  <div class="list-tools-search">
+    <label for="q" class="visually-hidden">Search topics</label>
+    <input id="q" type="search" name="q" value="{{ q }}" placeholder="Search name, brand, molecule, area">
+    <button class="btn btn-ghost btn-sm" type="submit">Search</button>
+    {% if q or show != 'all' or sort != 'recent' %}
+    <a class="link-back" href="/">Clear</a>
+    {% endif %}
+  </div>
+  <div class="list-tools-row">
+    <span class="list-tools-label" id="sort-label">Sort</span>
+    <div class="chip-row" role="group" aria-labelledby="sort-label">
+      {% for key, label in sorts %}
+      <a class="chip {% if sort == key %}chip-on{% endif %}"
+         {% if sort == key %}aria-current="true"{% endif %}
+         href="/?q={{ q|urlencode }}&amp;show={{ show }}&amp;sort={{ key }}">{{ label }}</a>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="list-tools-row">
+    <span class="list-tools-label" id="show-label">Show</span>
+    <div class="chip-row" role="group" aria-labelledby="show-label">
+      {% for key, label in filters %}
+      <a class="chip {% if show == key %}chip-on{% endif %}"
+         {% if show == key %}aria-current="true"{% endif %}
+         title="{{ filter_help[key] }}"
+         href="/?q={{ q|urlencode }}&amp;sort={{ sort }}&amp;show={{ key }}">{{ label }}</a>
+      {% endfor %}
+    </div>
+  </div>
+  <p class="list-tools-count">
+    {% if shown == total %}{{ total }} topic{{ '' if total == 1 else 's' }}{% else %}{{ shown }} of {{ total }} topics{% endif %}
+    {% if show != 'all' %}<span class="muted">— {{ filter_help[show] }}</span>{% endif %}
+  </p>
+</form>
+{% endif %}
+
 {% if rows %}
 <div class="table-scroll" tabindex="0" role="region" aria-label="Topics">
 <table class="data-table topics-table">
@@ -63,11 +101,22 @@
         <a class="link-back" href="/topics/{{ row.topic.topic_id }}/edit">Edit</a>
         {% endif %}
         <a class="btn btn-ghost btn-sm" href="/topics/{{ row.topic.topic_id }}/confirm">Run snapshot</a>
+        {% if storage_is_durable() %}
+        <a class="link-danger" href="/topics/{{ row.topic.topic_id }}/delete">Delete</a>
+        {% endif %}
       </td>
     </tr>
     {% endfor %}
   </tbody>
 </table>
+</div>
+{% elif total > 0 %}
+{# Filtered to nothing. Distinct from the first-run state below: telling
+   someone with sixty topics how to create their first one is not help. #}
+<div class="empty-result">
+  <p class="hint-text">Nothing matches this view.</p>
+  <p class="page-caption">{{ filter_lede }}</p>
+  <a class="btn btn-ghost" href="/">Show all {{ total }} topics</a>
 </div>
 {% else %}
 <div class="first-run">

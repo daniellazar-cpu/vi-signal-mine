@@ -1,0 +1,39 @@
+{% extends "_base.html" %}
+{% block title %}Delete {{ topic.name }} — Vi Signal Mine{% endblock %}
+{% block content %}
+<div class="page">
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Irreversible</p>
+    <h1>Delete “{{ topic.name }}”?</h1>
+  </div>
+</section>
+
+{# The count comes before the warning on purpose: the number is what makes
+   someone stop, and a wall of prose above it gets skimmed past. #}
+<div class="delete-tally">
+  <dl>
+    <div><dt>Snapshots</dt><dd>{{ counts.snapshots }}</dd></div>
+    <div><dt>Insights</dt><dd>{{ counts.insights }}</dd></div>
+    <div><dt>Reports</dt><dd>{{ counts.reports }}</dd></div>
+    <div><dt>Runs in total</dt><dd>{{ counts.runs }}</dd></div>
+    <div><dt>Spent to date</dt><dd>{{ spend|usd(2) }}</dd></div>
+  </dl>
+</div>
+
+<p class="delete-warning">{{ warning }}</p>
+
+{% if counts.snapshots >= 2 %}
+<p class="delete-note">
+  This topic has {{ counts.snapshots }} snapshots, so it is one of the few where
+  momentum and anomaly mean anything. That history cannot be rebuilt — a fresh
+  sweep collects today’s web, not the web as it was on those dates.
+</p>
+{% endif %}
+
+<form method="post" action="/topics/{{ topic.topic_id }}/delete" class="delete-form">
+  <button class="btn btn-danger" type="submit">Delete this topic and its {{ counts.runs }} run{{ '' if counts.runs == 1 else 's' }}</button>
+  <a class="btn btn-ghost" href="/topics/{{ topic.topic_id }}">Keep it</a>
+</form>
+</div>
+{% endblock %}

@@ -55,6 +55,13 @@ class TopicStoreLike(Protocol):
 
     def update(self, topic_id: str, **fields: Any) -> Topic: ...
 
+    #: Remove the topic itself. The caller is responsible for its runs — see
+    #: ``RunStoreLike.delete_for_topic`` — because the two stores are separate
+    #: and a backend cannot cascade across them. Deleting a topic that is not
+    #: there raises ``NoSuchTopic``, so a double submit is loud rather than
+    #: silently "successful".
+    def delete(self, topic_id: str) -> None: ...
+
 
 @runtime_checkable
 class RunStoreLike(Protocol):
@@ -92,6 +99,14 @@ class RunStoreLike(Protocol):
     def write_artifact(self, run_id: str, name: str, payload: Any) -> Path: ...
 
     def read_artifact(self, run_id: str, name: str) -> Any: ...
+
+    #: Remove every run for ``topic_id`` **and every artifact those runs
+    #: wrote**, returning how many runs went. Artifacts are the point: they are
+    #: the bulk of what a topic occupies, and a backend that dropped only the
+    #: run records would leave them unreachable and permanent. Idempotent —
+    #: a topic with no runs is not an error, because the caller is deleting a
+    #: topic and "it had none" is a fine answer.
+    def delete_for_topic(self, topic_id: str) -> int: ...
 
 
 def open_stores(

@@ -180,6 +180,7 @@ _MUTATING_ROUTE_SHAPES = tuple(
         r"^/topics$",
         r"^/topics/[^/]+$",
         r"^/topics/[^/]+/mine$",
+        r"^/topics/[^/]+/delete$",
         r"^/runs/[^/]+/insight$",
         r"^/runs/[^/]+/report$",
     )

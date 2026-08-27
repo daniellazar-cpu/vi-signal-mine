@@ -135,3 +135,37 @@ def test_no_small_text_rule_reaches_for_the_divider_gray():
         assert "vi-gray-500" not in _fill_of(selector, css), (
             f"{selector} fills with the divider gray, which is 4.03:1 — use --fg2"
         )
+
+
+def test_the_one_red_in_the_palette_meets_aa_both_ways():
+    """Red appears only on the delete affordances — a text link in the topics
+    list and the committing button on the confirm page — so it has to work as
+    ink on white *and* as a fill under white text."""
+    tok = _tokens()
+    css = _strip_comments(_APP_CSS.read_text())
+
+    m = re.search(r"\.link-danger\s*\{([^}]*)\}", css)
+    assert m, ".link-danger not found"
+    ink = re.search(r"color\s*:\s*(#[0-9a-fA-F]{6})", m.group(1)).group(1)
+
+    b = re.search(r"\.btn-danger\s*\{([^}]*)\}", css)
+    assert b, ".btn-danger not found"
+    fill = re.search(r"background\s*:\s*(#[0-9a-fA-F]{6})", b.group(1)).group(1)
+    label = re.search(r"color\s*:\s*(#[0-9a-fA-F]{6})", b.group(1)).group(1)
+
+    assert contrast(ink, tok["--bg"]) >= 4.5, f"{ink} on page background"
+    assert contrast(label, fill) >= 4.5, f"{label} on {fill}"
+
+
+def test_red_is_confined_to_the_delete_affordances():
+    """The palette reserves violet for the one primary action and carries no
+    decorative red. A list of sixty rows with sixty red controls reads as a
+    hazard, so red must not spread beyond these two rules."""
+    css = _strip_comments(_APP_CSS.read_text())
+    reds = {
+        sel for sel, body in re.findall(r"([^{}]+)\{([^}]*)\}", css)
+        if re.search(r"#(a3|6e|8a)[0-9a-fA-F]{4}", body, re.I)
+    }
+    allowed = {"link-danger", "btn-danger"}
+    for sel in reds:
+        assert any(a in sel for a in allowed), f"red leaked into {sel.strip()!r}"
