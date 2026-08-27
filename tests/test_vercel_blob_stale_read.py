@@ -215,3 +215,72 @@ def test_ordinals_sort_after_values_written_by_the_old_counter():
     assert min(_next_ordinal() for _ in range(5)) > 9
 
 
+
+
+# ---------------------------------------------------------------- cold reads --
+#
+# The list API is only eventually consistent: "PUT a brand-new pathname, then
+# list that exact pathname" can come back empty. `_resolve` used it as a
+# fallback whenever the instance had no cached domain — and a cold container
+# that only *reads* has written nothing, so it always took that fallback.
+#
+# On production this made the report step fail about half the time: mine wrote
+# `signals.json` on one container, the report POST landed on a different cold
+# one, the list had not caught up, and `read_artifact` raised
+# `FileNotFoundError` — surfacing as "No snapshot to report on" for a snapshot
+# that existed. Deriving the host from the token removes the list from every
+# read path.
+
+
+def test_the_content_host_is_derived_from_the_token():
+    """Pinned against this deployment's real store: token store id
+    `tLMD7oDfiL8G8UPE` serves from `tlmd7odfil8g8upe.public.blob...`."""
+    from vsm.backends.vercel_blob import _domain_from_token
+
+    assert (_domain_from_token("vercel_blob_rw_tLMD7oDfiL8G8UPE_abc123secret")
+            == "tlmd7odfil8g8upe.public.blob.vercel-storage.com")
+
+
+@pytest.mark.parametrize("token", [
+    "fake-token-for-unit-test",
+    "vercel_blob_rw__secret",          # empty store id
+    "vercel_blob_rw_onlyfourparts",
+    "",
+    "vercel_blob_ro_STORE_secret",     # not a read-write token
+])
+def test_an_unrecognised_token_degrades_instead_of_guessing(token):
+    """A wrong host would 404 every read, which is worse than the lag it
+    replaces. Anything unfamiliar must fall back to lazy discovery."""
+    from vsm.backends.vercel_blob import _domain_from_token
+
+    assert _domain_from_token(token) is None
+
+
+def test_a_cold_read_only_instance_never_consults_the_list_api():
+    """The actual regression. A fresh instance that has written nothing must
+    still resolve a pathname without listing."""
+    from vsm.backends.vercel_blob import BlobRunStore
+
+    store = BlobRunStore("vercel_blob_rw_tLMD7oDfiL8G8UPE_abc123secret", root="vsm-cold")
+    listed: list[str] = []
+    store._ns._http.list_all = lambda prefix: listed.append(prefix) or []  # type: ignore[assignment]
+
+    url = store._ns._resolve("vsm-cold/artifacts/min-abc/signals.json")
+    assert url == (
+        "https://tlmd7odfil8g8upe.public.blob.vercel-storage.com"
+        "/vsm-cold/artifacts/min-abc/signals.json"
+    )
+    assert listed == [], f"a cold read still went to the list API: {listed}"
+
+
+def test_an_unrecognised_token_still_resolves_via_the_list_api():
+    """The fallback must remain wired, or an unfamiliar token would break
+    every read rather than merely being slower."""
+    from vsm.backends.vercel_blob import BlobRunStore
+
+    store = BlobRunStore("fake-token-for-unit-test", root="vsm-cold")
+    assert store._ns._domain is None
+    store._ns._http.list_all = lambda prefix: [  # type: ignore[assignment]
+        {"pathname": "vsm-cold/x.json", "url": "https://host.example/vsm-cold/x.json"}
+    ]
+    assert store._ns._resolve("vsm-cold/x.json") == "https://host.example/vsm-cold/x.json"

@@ -338,6 +338,43 @@ def _next_ordinal() -> int:
         return candidate
 
 
+#: The public read host is derivable from the token, with no network call.
+#: A ``BLOB_READ_WRITE_TOKEN`` is ``vercel_blob_rw_<storeId>_<secret>``, and the
+#: store's content host is ``<storeid lowercased>.public.blob.vercel-storage.com``
+#: — verified against this deployment's own store: token store id
+#: ``tLMD7oDfiL8G8UPE`` serves content from
+#: ``tlmd7odfil8g8upe.public.blob.vercel-storage.com``.
+_CONTENT_HOST_SUFFIX = ".public.blob.vercel-storage.com"
+
+
+def _domain_from_token(token: str) -> str | None:
+    """The store's content host, or ``None`` if the token is not the shape we
+    know — in which case the caller falls back to lazy discovery rather than
+    guessing a host that would 404 every read.
+
+    **Why this matters, and it is not an optimisation.** ``_resolve`` needs a
+    content URL for a pathname. Without a known domain it asks the *list* API,
+    which is only eventually consistent — "PUT a brand-new pathname, then list
+    that exact pathname" can come back empty. `_note_domain` covers a container
+    that has written something, but a **cold container that only reads** has
+    written nothing, so it fell through to the lagging list and reported a blob
+    that exists as missing.
+
+    That is what made the report step fail roughly half the time on production:
+    the mine step wrote ``signals.json`` on one container, the report POST landed
+    on a different, cold one, ``_resolve`` asked the list API, got nothing back
+    yet, and ``read_artifact`` raised ``FileNotFoundError`` — surfacing as the
+    honest but wrong "No snapshot to report on". Deriving the host removes the
+    list from every read path, so existence is decided by a direct, uncached GET
+    that 404s only when the blob is genuinely absent.
+    """
+    parts = token.split("_")
+    # vercel, blob, rw, <storeId>, <secret...>
+    if len(parts) < 5 or parts[:3] != ["vercel", "blob", "rw"] or not parts[3]:
+        return None
+    return parts[3].lower() + _CONTENT_HOST_SUFFIX
+
+
 class _BlobNamespace:
     """Shared plumbing for the topic and run stores: resolving a pathname to
     its content, and allocating a collision-free ``seq``. Composition, not
@@ -349,14 +386,14 @@ class _BlobNamespace:
     def __init__(self, token: str, root: str) -> None:
         self._http = _BlobHTTP(token)
         self.root = root
-        #: The store's own public read host, discovered lazily and cached
-        #: for the life of this instance — confirmed live that it does not
-        #: vary by pathname within one store. A cold instance (a fresh
-        #: process, e.g. a new serverless invocation) starts without it and
-        #: re-discovers on first use; that is the whole point of this
-        #: backend existing, so it must not depend on any process-local
-        #: cache to be correct.
-        self._domain: str | None = None
+        #: The store's own public read host. Derived from the token up front
+        #: (see `_domain_from_token`) so that a cold instance which only ever
+        #: *reads* never has to ask the eventually-consistent list API where its
+        #: own content lives. Falls back to ``None`` — lazy discovery via
+        #: `_note_domain` or `_resolve` — only for a token shape we do not
+        #: recognise, so an unfamiliar token degrades to the old behaviour
+        #: instead of guessing a host that would 404 every read.
+        self._domain: str | None = _domain_from_token(token)
 
     def _note_domain(self, put_result: dict | None) -> None:
         """Capture the domain from a successful PUT's own response, if not
