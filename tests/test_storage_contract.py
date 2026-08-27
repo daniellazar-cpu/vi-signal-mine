@@ -205,16 +205,19 @@ def test_blob_seq_allocation_has_no_collisions_under_real_concurrent_writers(tmp
     collision-freedom claim gets an actual concurrent race against the live
     API, not just the docstring's argument for why it should hold.
 
-    Eight threads all call ``start()`` on the same topic at once; if two
-    ever won a CAS race by landing on the same ``seq`` (the exact bug a
-    naive "read then write, no precondition" counter would have), two of
-    the eight stored records would carry an identical value and this fails.
-    Eight, not more: each round of this race costs a real HTTP round trip
-    (confirmed live, thanks to the very contention this test creates —
-    see `_CAS_MAX_RETRIES`'s and the CAS loop's own notes on what a
-    much wider burst costs to converge), and eight real concurrent writers
-    is already far more than this low-traffic internal tool sees in
-    practice while keeping this test's own runtime reasonable.
+    Eight threads all call ``start()`` on the same topic at once; if two ever
+    landed on the same ``seq``, two of the eight stored records would carry an
+    identical value and this fails. That assertion is unchanged by how the
+    ordinal is allocated, and is the reason this test survived the removal of
+    the compare-and-swap counter it was originally written against: ordering
+    breaks on a *tie*, whatever produced it. See ``_next_ordinal``'s docstring
+    for why a CAS over a shared counter blob could not be made reliable on this
+    backend, and ``tests/test_vercel_blob_stale_read.py`` for the hermetic
+    version of this same property.
+
+    Eight, not more: each ``start()`` here is a real HTTP write against the live
+    store, and eight concurrent writers is already far more than this
+    low-traffic internal tool sees in practice.
     """
     from concurrent.futures import ThreadPoolExecutor
 

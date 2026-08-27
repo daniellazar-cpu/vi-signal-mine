@@ -136,46 +136,82 @@ def test_get_content_sends_it(monkeypatch):
 
 
 
-def test_the_counter_advances_by_exactly_one_per_allocation(store):
-    """The property the whole run-id scheme rests on."""
+def test_the_ordinal_is_strictly_increasing():
+    """The one property the whole run-ordering scheme rests on."""
+    from vsm.backends.vercel_blob import _next_ordinal
+
+    got = [_next_ordinal() for _ in range(500)]
+    assert got == sorted(got)
+    assert len(set(got)) == len(got), "an ordinal repeated"
+
+
+def test_the_ordinal_never_ties_under_concurrency():
+    """The hazard `RunStoreLike` names is the tie, not the clock. Sixteen
+    threads allocating flat out must not produce one."""
+    import threading
+
+    from vsm.backends.vercel_blob import _next_ordinal
+
+    out: list[int] = []
+    lock = threading.Lock()
+
+    def work():
+        mine = [_next_ordinal() for _ in range(200)]
+        with lock:
+            out.extend(mine)
+
+    threads = [threading.Thread(target=work) for _ in range(16)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(out) == 16 * 200
+    assert len(set(out)) == len(out), (
+        f"{len(out) - len(set(out))} ties across 16 concurrent allocators"
+    )
+
+
+def test_a_clock_that_stalls_or_steps_backwards_still_advances(monkeypatch):
+    """`time.time_ns()` is not guaranteed monotonic — an NTP correction can move
+    it backwards, and a coarse timer can return the same value twice. Either
+    would produce a tie, which is the failure the contract forbids."""
+    import vsm.backends.vercel_blob as mod
+
+    frozen = [1_000_000_000]
+    monkeypatch.setattr(mod.time, "time_ns", lambda: frozen[0])
+    a, b, c = mod._next_ordinal(), mod._next_ordinal(), mod._next_ordinal()
+    assert a < b < c, (a, b, c)
+
+    frozen[0] = 1  # a large step backwards
+    d = mod._next_ordinal()
+    assert d > c, "a backwards clock produced a non-increasing ordinal"
+
+
+def test_allocating_an_ordinal_makes_no_network_call(store):
+    """The point of the change. The old counter needed a read *and* a
+    conditional write per allocation, against a store whose read lags its
+    write — so allocation could fail. This must touch nothing."""
     s, host = store
-    got = [s._ns._next_seq(_COUNTER) for _ in range(6)]
-    assert got == [1, 2, 3, 4, 5, 6], got
-    assert json.loads(host.stored)["seq"] == 6
+    calls = []
+    for name in ("get_content", "put", "list_all"):
+        import functools
+        orig = getattr(s._ns._http, name)
+        setattr(s._ns._http, name,
+                functools.partial(lambda n, *a, **k: calls.append(n), name))
+
+    from vsm.backends.vercel_blob import _next_ordinal
+
+    before = host.stored
+    [_next_ordinal() for _ in range(20)]
+    assert calls == [], f"allocation still talks to the store: {calls}"
+    assert host.stored == before
 
 
-def test_a_stale_cache_does_not_exhaust_the_retry_budget(store):
-    """The production failure, reproduced and then absent.
+def test_ordinals_sort_after_values_written_by_the_old_counter():
+    """Existing production records hold small values (1..9). They were created
+    first and must keep sorting first, or the deployed history reorders."""
+    from vsm.backends.vercel_blob import _next_ordinal
 
-    Every PUT here leaves the cache behind, so a cacheable read would see a
-    superseded value on *every* attempt and the loop could never win. The
-    assertion is that no precondition ever fails — not merely that a value
-    came back — because a loop that thrashed and eventually got lucky would
-    still be the bug.
-    """
-    s, host = store
-    for expected in (1, 2, 3, 4, 5):
-        assert s._ns._next_seq(_COUNTER) == expected
-    assert host.preconditions_failed == 0, (
-        f"{host.preconditions_failed} conditional writes failed with a single "
-        "caller — the read is being served from cache"
-    )
-    assert host.reads_served_stale == 0, (
-        f"{host.reads_served_stale} reads returned a superseded value"
-    )
+    assert min(_next_ordinal() for _ in range(5)) > 9
 
 
-def test_the_fake_host_would_actually_catch_a_cacheable_read(store):
-    """Guard on the guard. If `_CachingHost` did not really punish a cacheable
-    read, every test above would pass against the old code too — the exact
-    class of vacuous test this build has produced fifteen times."""
-    _, host = store
-    host.stored = b'{"seq": 9}'          # a write landed
-    body, etag = host.get({})            # a cacheable read
-    assert json.loads(body)["seq"] == 0, "the fake did not serve stale content"
-    assert host.reads_served_stale == 1
-    assert host.put(b'{"seq": 10}', etag) is False, (
-        "the fake accepted a stale ETag — it cannot detect the real bug"
-    )
-    body, _ = host.get({"cache-control": "no-cache"})
-    assert json.loads(body)["seq"] == 9, "no-cache did not revalidate"

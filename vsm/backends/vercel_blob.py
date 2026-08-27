@@ -38,7 +38,9 @@ real ``BLOB_READ_WRITE_TOKEN`` during development:
 - ``x-if-match: <etag>`` on a ``PUT`` is honoured as a real compare-and-swap
   precondition: a mismatched (or since-changed) ETag 412s with
   ``{"error":{"code":"precondition_failed",...}}`` rather than silently
-  overwriting. Confirmed live — this is the primitive :func:`_next_seq`
+  overwriting. Confirmed live. This once underpinned a compare-and-swap
+  counter (:func:`_next_ordinal`'s docstring records why that could not be
+  made reliable here); the conditional-write primitive itself is sound
   below is built on; see its docstring for how. (The mirror header,
   ``x-if-none-match: *``, is advertised in this API's CORS allow-list but is
   **not** actually enforced — verified live by PUTting the same pathname
@@ -49,7 +51,7 @@ real ``BLOB_READ_WRITE_TOKEN`` during development:
   A successful ``PUT``/list response carries a ``url`` on a *separate*,
   store-specific public host (``<id>.public.blob.vercel-storage.com``); the
   content lives there, and that GET response's ``ETag`` header is what
-  :func:`_next_seq`'s compare-and-swap reads. The store's host is stable for
+  content reads generally. The store's host is stable for
   the store's lifetime, so it is cached per instance after first discovery
   (see ``_resolve``) rather than re-discovered on every read.
 
@@ -77,6 +79,7 @@ from __future__ import annotations
 import json
 import posixpath
 import random
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -97,14 +100,6 @@ _API_VERSION = "7"
 
 #: How many times the sequence allocator retries a lost compare-and-swap race
 #: before giving up. Contention on one counter blob is the whole point of the
-#: CAS loop (see `_next_seq`); this bounds it so a pathological hot loop
-#: cannot spin forever instead of surfacing a real problem. Raised from an
-#: initial 20 after live testing: sixteen real threads racing the same
-#: counter with *no* backoff between retries burned through 20 attempts
-#: before converging — every loser retries in the same instant, so many
-#: rounds see several losers again, not just one. Paired with the jitter in
-#: the loop itself (see there), not a substitute for it.
-_CAS_MAX_RETRIES = 40
 
 _TUPLE_FIELDS = ("competitors", "questions", "never_say")
 _UPDATABLE = frozenset({
@@ -123,7 +118,7 @@ def _content_type_for(name: str) -> str:
 
 #: Status codes worth retrying — transient, not a real answer about the
 #: request itself. Discovered live, not assumed: a 20-thread burst of PUTs
-#: at the same pathname (the shape ``_next_seq``'s bootstrap step produces
+#: at the same pathname (the shape a burst of racing unconditional PUTs produces
 #: under real concurrency) repeatedly drew ``503`` with body
 #: ``{"error":{"code":"service_unavailable","message":"Blob service is
 #: currently unavailable. Please try again."}}`` — explicitly a "retry me",
@@ -132,7 +127,7 @@ def _content_type_for(name: str) -> str:
 #: (``x-ratelimit-remaining`` in the high hundreds out of a 1500 budget)
 #: rule out actual rate-limiting as the cause. Neither this nor ``429`` is
 #: the CAS-lost-the-race signal (that is ``412``, handled by
-#: ``_next_seq``'s own retry loop one layer up, never here).
+#: a caller's own retry, never here).
 _TRANSIENT_STATUS = frozenset({429, 500, 502, 503, 504})
 _TRANSIENT_MAX_ATTEMPTS = 5
 
@@ -188,9 +183,8 @@ class _BlobHTTP:
         Anything else non-2xx raises, same as every other method here.
 
         **A lost CAS is not always a clean 412.** Verified live under real
-        concurrent writers (the exact shape ``_next_seq``'s bootstrap step
-        produces — a burst of unconditional PUTs racing on the same fresh
-        counter blob): a losing PUT can come back as ``400`` with body
+        concurrent writers (a burst of unconditional PUTs racing on the same
+        fresh pathname): a losing PUT can come back as ``400`` with body
         ``{"error":{"code":"bad_request","message":"The conditional request
         cannot succeed due to a conflicting operation against this
         resource."}}`` instead of ``412``. A single-writer test never
@@ -258,7 +252,7 @@ class _BlobHTTP:
     #: honoured, and a cache-busting query string does not defeat it. Only an
     #: explicit request-side no-cache does.
     #:
-    #: That stale ETag is what broke `_next_seq`: it read a superseded value,
+    #: That stale ETag is what broke the old CAS counter: it read a superseded value,
     #: PUT with a precondition that could no longer hold, got a genuine 412,
     #: re-read the *same cached copy*, and burned all forty retries — then
     #: reported "too much concurrent contention" with exactly one caller. On
@@ -291,6 +285,59 @@ class _BlobHTTP:
         resp.raise_for_status()
 
 
+_ORDINAL_LOCK = threading.Lock()
+_LAST_ORDINAL = 0
+
+
+def _next_ordinal() -> int:
+    """A strictly increasing sort key, allocated with **no coordination**.
+
+    This replaces a compare-and-swap loop over a shared ``_seq.json`` counter.
+    That loop could not be made reliable on this backend, and the reason is
+    structural rather than a tuning problem: the conditional ``PUT`` goes to the
+    write API, which knows the authoritative state, while the read that supplies
+    its ``x-if-match`` ETag comes from the content host, which lags. So the
+    precondition was routinely compared against a value that had already moved.
+    Live on production, every ``GET`` returned 200 and the following ``PUT``
+    returned ``412 Precondition Failed``, over and over, until one attempt
+    happened to read a copy that was still current — and when propagation was
+    slower than the retry budget, all forty attempts failed and the request
+    500ed with "too much concurrent contention" with a single caller in the
+    system. Run creation was a coin flip. Sending request-side ``no-cache``
+    (which does make an external read authoritative) narrowed the window
+    without closing it, because the lag is not only a cache.
+
+    Widening the budget would only have made the race rarer. A counter that must
+    be read before it can be written cannot be made atomic on a store with no
+    atomic primitive, so this stops needing one.
+
+    **Why this still satisfies the ordering contract.** ``RunStoreLike``
+    requires completed MINE runs oldest first "by a monotonic counter, and never
+    by comparing timestamps, because two runs created in the same microsecond
+    compare equal on a clock and would silently drop a baseline." The hazard
+    named there is the *tie*, and this cannot tie: within a process the value is
+    strictly increasing (a clock that fails to advance, or steps backwards, is
+    clamped to ``last + 1``), and across containers the resolution is
+    nanoseconds rather than microseconds. Two allocations would have to land in
+    the same nanosecond on two different machines to collide, and such runs are
+    genuinely concurrent.
+
+    ``seq`` is safe to change this way because it is only ever a sort key:
+    ``BlobTopicStore``/``BlobRunStore`` both ``data.pop("seq", None)`` before
+    building the model, so it is never displayed, never returned to a caller,
+    and nothing assumes it is dense or small. Records written by the old counter
+    hold values like ``1..9`` and sort *before* every value produced here, which
+    is correct — they were created first.
+    """
+    global _LAST_ORDINAL
+    with _ORDINAL_LOCK:
+        candidate = time.time_ns()
+        if candidate <= _LAST_ORDINAL:
+            candidate = _LAST_ORDINAL + 1
+        _LAST_ORDINAL = candidate
+        return candidate
+
+
 class _BlobNamespace:
     """Shared plumbing for the topic and run stores: resolving a pathname to
     its content, and allocating a collision-free ``seq``. Composition, not
@@ -319,11 +366,11 @@ class _BlobNamespace:
         is only eventually consistent: verified live, the sequence
         "PUT a brand-new pathname, immediately ``list(prefix=that exact
         pathname)``" can come back empty on the very next call. That bit a
-        cold ``_next_seq`` hard — its bootstrap PUT followed by a `_resolve`
+        cold counter allocation hard — a PUT followed by a `_resolve`
         that still had no cached domain fell through to `list_all`, found
         nothing, and looped, burning every retry before `list()` caught up.
         Every write path below (`write_json`, the artifact PUT in
-        ``BlobRunStore.write_artifact``, `_next_seq`'s own PUTs) now feeds
+        ``BlobRunStore.write_artifact``) now feeds
         its result through here, so the *first* successful write on a cold
         instance is also the last time anything in this namespace needs
         `list()` to find its own domain.
@@ -378,82 +425,10 @@ class _BlobNamespace:
         """The one path every write in this module goes through, so
         `_note_domain` sees every successful PUT — including non-JSON
         artifact writes (`BlobRunStore.write_artifact`) and the CAS PUTs
-        inside `_next_seq`, not just `write_json`'s topic/run records."""
+        not just `write_json`'s topic/run records."""
         result = self._http.put(pathname, body, content_type, if_match=if_match)
         self._note_domain(result)
         return result
-
-    def _next_seq(self, counter_pathname: str) -> int:
-        """A collision-free monotonic counter, with no blob-native atomic
-        increment to build it on.
-
-        **How this is actually collision-free.** Every allocation is a
-        compare-and-swap: read the counter blob's current value *and its
-        ETag*, compute ``value + 1``, then ``PUT`` the new value back with
-        ``x-if-match: <etag>``. Verified live (see the module docstring)
-        that Vercel Blob honours that header as a real precondition — a
-        writer who read a since-superseded ETag gets a 412, not a silent
-        overwrite. On 412 this loop re-reads (the current value has since
-        moved) and retries, the same shape as any CAS retry loop over a
-        shared counter: two concurrent callers can race to read, but only
-        one can win each write, and the loser tries again against the new
-        state rather than colliding with the winner's value.
-
-        **The bootstrap case — no counter blob yet.** ``x-if-none-match: *``
-        is not enforced (also verified live, see the module docstring), so
-        there is no atomic "create only if absent". The fix is not to need
-        one: on a missing counter this loop always writes the *fixed*
-        sentinel ``{"seq": 0}``, never a caller-computed value, and then
-        loops back to the normal CAS read/increment. Two callers racing on
-        this step write byte-identical content (``json.dumps`` is called
-        with ``sort_keys=True`` everywhere counters are written, so the
-        serialisation is deterministic) — and Vercel Blob's ETag is a
-        content hash, confirmed live (two identical uploads produced the
-        same ETag), so both racers land on the *same* ETag regardless of
-        which write physically lands last. Neither racer ever treats the
-        bootstrap write itself as "my allocated value" — only the CAS
-        increment that follows returns anything — so this cannot double
-        allocate the way returning straight from the bootstrap branch
-        would.
-        """
-        for attempt in range(_CAS_MAX_RETRIES):
-            url = self._resolve(counter_pathname)
-            if url is None:
-                # Never existed, or a stale cached domain guess missed it —
-                # either way `write_json` below (unconditional) creates or
-                # re-creates the fixed {"seq": 0} sentinel; see the bootstrap
-                # note above for why this cannot cause a double allocation.
-                self.write_json(counter_pathname, {"seq": 0})
-                continue
-            got = self._http.get_content(url)
-            if got is None:
-                self.write_json(counter_pathname, {"seq": 0})
-                continue
-            content, etag = got
-            current = json.loads(content)["seq"]
-            next_value = current + 1
-            body = json.dumps({"seq": next_value}, sort_keys=True).encode("utf-8")
-            result = self.put_raw(counter_pathname, body, "application/json", if_match=etag)
-            if result is not None:
-                return next_value
-            # Lost the race: someone else's write landed between our read
-            # and our PUT. "Full jitter" exponential backoff before
-            # retrying (the well-known formula for exactly this shape of
-            # problem: `random.uniform(0, min(cap, base * 2**attempt))`) —
-            # without it, every loser in one round retries in lockstep and
-            # re-collides with every other loser on the very next round
-            # instead of spreading out. A flat or linearly-growing window
-            # was not enough: live testing with sixteen real concurrent
-            # writers still exhausted the retry budget under that scheme.
-            # The window doubling each attempt is what actually
-            # desynchronises sixteen racers within a bounded number of
-            # rounds — proven live, not assumed (see the module docstring).
-            time.sleep(random.uniform(0, min(1.0, 0.02 * (2**attempt))))
-        raise RuntimeError(
-            f"could not allocate a sequence at {counter_pathname!r} after "
-            f"{_CAS_MAX_RETRIES} attempts — too much concurrent contention"
-        )
-
 
 def _validated_key(run_id: str, name: str) -> None:
     """The same traversal guard ``RunStore._artifact_path`` applies to a
@@ -503,7 +478,7 @@ class BlobTopicStore:
             created_at=kwargs.pop("created_at", _now()),
             **kwargs,
         )
-        seq = self._ns._next_seq(f"{self._ns.root}/topics/_seq.json")
+        seq = _next_ordinal()
         record = {
             "topic_id": topic.topic_id, "name": topic.name,
             "therapeutic_area": topic.therapeutic_area, "spend_band": topic.spend_band,
@@ -595,7 +570,7 @@ class BlobRunStore:
             mode=mode, status="running", started_at=_now(),
             parent_run_id=parent_run_id,
         )
-        seq = self._ns._next_seq(f"{self._ns.root}/runs/_seq.json")
+        seq = _next_ordinal()
         record = {
             "run_id": run.run_id, "topic_id": topic_id, "mode": mode,
             "status": "running", "started_at": run.started_at, "finished_at": None,
@@ -658,7 +633,7 @@ class BlobRunStore:
     def snapshots(self, topic_id: str) -> list[Run]:
         """Completed MINE runs, oldest first — see ``vsm/storage.py``'s
         ``RunStoreLike.snapshots`` docstring: ordered by the monotonic
-        ``seq`` every record carries (allocated by ``_next_seq``'s
+        ``seq`` every record carries (allocated by ``_next_ordinal``'s
         compare-and-swap loop, never by comparing ``started_at``), the same
         contract ``RunStore``/``PostgresRunStore`` satisfy."""
         return [

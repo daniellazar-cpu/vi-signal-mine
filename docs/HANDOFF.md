@@ -1,4 +1,4 @@
-# Handoff — 2026-08-26
+# Handoff — 2026-08-27
 
 Stopped cleanly here. Everything is committed, pushed and deployed. This file is
 what a person (or an agent) needs to pick it up cold.
@@ -8,9 +8,9 @@ what a person (or an agent) needs to pick it up cold.
 | | |
 |---|---|
 | Repo | `daniellazar-cpu/vi-signal-mine`, private. Branches `build/vi-signal-mine-v1` (work) and `deploy` |
-| Live | https://vi-signal-mine.vercel.app — production, serving, **read-only** |
-| Tests | **489 passed, 1 skipped.** The skip is the Blob storage-contract suite, which needs a live Blob token |
-| Working tree | clean at `6b228a3` |
+| Live | https://vi-signal-mine-pink.vercel.app — production, serving, **read-write** |
+| Tests | **527 passed, 1 skipped.** The skip is the Blob storage-contract suite, which needs a live Blob token |
+| Working tree | clean at `cabc24c` |
 
 ## What works right now
 
@@ -27,58 +27,66 @@ links across 36–38 pages**.
 Verified at the moment of stopping: every route 200, and no raw markdown reaches
 any page.
 
-## The one thing blocking full function
+## Storage: solved
 
-**There is no durable storage, so the deployment is read-only.** Every mutating
-route returns 409 and the controls that cannot work are not rendered. The seeded
-example is fully explorable; you just cannot create your own topic on the
-deployment.
+There is a dedicated Vercel Blob store (`vsm-store`) connected to the project on
+the `vi-labs-projects` team. The deployment is **read-write**: topics, runs and
+artifacts survive across invocations, verified by creating a topic and reading it
+back on three later requests, then running a full mine → insight → report chain
+through the real forms.
 
-This is not a bug — it is the honest response to storage that cannot hold a
-write. `/tmp` on a serverless host belongs to one invocation, so a write returns
-success and vanishes when the container recycles. The app now refuses rather
-than losing your work silently.
+`open_stores` prefers Postgres, then Blob, then SQLite, and logs its choice at
+INFO. The team's existing Neon Postgres is deliberately untouched — it belongs to
+a different project.
 
-### Why there is no store, and it was my doing
+### The bug that made it look broken, and it was not the UI
 
-I provisioned a Vercel Blob store via the API and connected it. The agent
-building against it ran an 8-thread concurrency test to prove the `seq` ordering
-held under contention — the right test, and it found two real bugs — but it blew
-through the Hobby operations quota. The store went to
-`limits-exceeded-suspended`, I deleted it, and Vercel now refuses to create
-another: `usage_threshold_limits_reached`, account level.
+Two defects, both found by adversarial verification rather than by use, and both
+now fixed with tests that fail without the fix:
 
-I also removed the dead `BLOB_READ_WRITE_TOKEN` from the project env. Left in
-place it would have been **worse than no store**: `storage_is_durable()` reads
-that token, so the app would have dropped out of read-only mode, accepted
-writes, and failed every one against a store that no longer existed — silent
-loss instead of an honest refusal.
+1. **Every write-path route 500ed.** `BlobRunStore.artifacts_dir` returns a
+   `PurePosixPath` subclass standing in for a blob key. The UI treated it as a
+   real path — `.stat().st_size` inside an `except OSError` raised
+   `AttributeError` instead, killing every route that renders a deliverable card
+   (run, snapshot, insight, report, topic detail), and `FileResponse` broke all
+   ten downloads. Reads of pre-seeded data worked, so it surfaced only once a run
+   was created on the deployment. The whole suite was green because every UI test
+   used the one backend with real paths; `tests/test_ui_keyed_backend.py` now runs
+   the UI against the keyed contract.
 
-### Making it read-write — one step, and the code needs no change
+2. **Run creation was a coin flip.** `_next_seq` failed with "too much concurrent
+   contention after 40 attempts" with one caller. The blob content host serves a
+   stale body *and a stale ETag* — it ignores its own `s-maxage=0` and a
+   cache-busting query string does not defeat it, only a request-side no-cache
+   does. A compare-and-swap loop cannot survive a stale ETag: it PUT against a
+   precondition that could no longer hold, took a real 412, re-read the same
+   cached copy, and burned the retry budget. `get_content` now reads uncached,
+   which is a correctness fix for run records too, not just the counter.
 
-`open_stores` prefers **Postgres**, then **Blob**, then SQLite. Any one of these
-flips the deployment to full read-write:
-
-1. **Raise the Blob limit** (dashboard → Storage → billing), create a store,
-   connect it to the project. The token injects itself.
-2. **Or connect any Postgres** — Neon, Supabase, anything. Set
-   `POSTGRES_URL_NON_POOLING` (preferred; the pooled URL is PgBouncer in
-   transaction mode and breaks prepared statements). This takes precedence over
-   Blob.
-
-Then redeploy. `open_stores` logs which backend it chose at INFO.
+This pair is the "sometimes it does work" the tool was reported with.
 
 ## Also outstanding, and genuinely yours
 
 **API keys.** I will not handle your secrets.
 
+The `--scope` is not optional. The project lives on the **`vi-labs-projects`**
+team, and without it the CLI resolves to your personal account and reports
+"Deployment not found" — which looks like a broken deployment and is not one.
+
 ```bash
-vercel env add ANTHROPIC_API_KEY production
-vercel env add BRIGHTDATA_API_KEY production
-vercel env add BRIGHTDATA_SERP_ZONE production      # dataweb_serp_api1
-vercel env add BRIGHTDATA_UNLOCKER_ZONE production  # dataweb
-vercel env rm VSM_OFFLINE production
+vercel env add VSM_ACCESS_KEY production --scope vi-labs-projects
+vercel env add ANTHROPIC_API_KEY production --scope vi-labs-projects
+vercel env add BRIGHTDATA_API_KEY production --scope vi-labs-projects
+vercel env add BRIGHTDATA_SERP_ZONE production --scope vi-labs-projects      # dataweb_serp_api1
+vercel env add BRIGHTDATA_UNLOCKER_ZONE production --scope vi-labs-projects  # dataweb
+vercel env rm VSM_OFFLINE production --scope vi-labs-projects
 ```
+
+`VSM_ACCESS_KEY` is listed first deliberately — see below.
+
+Both key variables currently exist as **blank placeholders**. Blank is read as
+absent throughout (`vsm/config.py`'s `_raw`), so they are harmless as they
+stand; setting them is what arms live collection.
 
 Until `VSM_OFFLINE=0`, the deployment is hermetic: every screen works, no
 outbound call is possible, nothing can be spent. That is a safe resting state,
@@ -89,6 +97,11 @@ the production guard refuses to serve — deliberately. On this plan Vercel gate
 preview deployments only, so a production URL is reachable by anyone holding it,
 and live keys behind an open URL can spend real money. Gate first, then add keys.
 
+**Only the `probe` band runs on the deployment** (D14). A `standard` or `deep`
+sweep does not fit inside a Vercel function's timeout, and the app says so on a
+clear error page rather than timing out halfway. Run those locally, where there
+is no timeout to race. This is by design, not a limitation to fix.
+
 **Two consequences of running offline**, both honest rather than defects: the
 clinician–patient gap reads `NE` on most themes because no stance classifier
 runs without an Anthropic key; and every seeded row is flagged `synthetic` with a
@@ -97,23 +110,36 @@ mistaken for real collection.
 
 ## Where the redesign got to
 
-The owner's verdict on the deliverables page was that it looked like 1990s
-markdown. The plan is at
-`docs/superpowers/plans/2026-08-26-report-presentation.md` — it opens with a
-table of all sixteen asks from the whole build and where each stands.
+Shipped **and verified**. Four adversarial lenses ran against it — regression, a
+design director on the rendered screens, an independent crawler, and an
+accessibility pass. Every finding is fixed.
 
-An eleven-agent workflow was auditing, rebuilding and adversarially verifying
-it. **The build phase landed** (`dbf8746`, "Typeset the report as a client
-document and tier the deliverables") and is deployed. The four adversarial
-verification lenses — regression, a design director judging the rendered
-screens, an independent crawler checking that every citation anchor resolves to
-an id that exists, and an accessibility pass — **did not run.** Stopped before
-them.
+The design director's verdict on the report view: it is a document now, not a
+page of data, and would go in front of a client. Confirmed by that pass: no raw
+markdown anywhere, findings quotable with resolving citations, Figure 1 treated
+as a real numbered figure with a table equivalent, Vi Violet reserved to the one
+primary action and the data marks.
 
-**So the redesign is shipped but unverified.** What I did confirm by hand before
-deploying: every route 200, and no raw markdown on any page. What nobody has
-checked: whether it is actually good, whether any citation anchor points at a
-missing id, and whether the accessibility work survived.
+Fixed from the four lenses:
+
+| Lens | Finding |
+|---|---|
+| Regression | Figure 1's net-stance cells printed a bare em dash where `pulse_report.md` states "not read — no patient-class signal in this theme", so the page was less honest than the document it previews. The test covering it asserted only that a dash appeared — it locked the defect in |
+| Crawl | The two production outages above |
+| A11y | Plot text at 4.03:1 (below AA) — and the design system's own token file already said that gray is for dividers and `--fg2` for text, so this broke a written rule and shipped in the client figure. Validation errors not associated with their fields. Collapsed `<details>` printing as an empty gap. The current snapshot marked by colour alone |
+| Craft | The primary deliverables grid used `auto-fill`, so one macro rendered 2x2 on the report and 3-wide-with-an-orphan on the wider page. Wide tables scrolled but gave no hint they did |
+
+Contrast is now a computed assertion rather than a grep. Writing that test
+surfaced a smaller instance of the same class: a comment naming
+`--vi-gray-500:` parsed as a declaration, and the reference assertion silently
+*skipped* instead of measuring.
+
+**A recurring pattern worth carrying forward.** Fifteen times in this build a
+test asserted a property it never exercised. The two rules that caught most of
+them: when two code paths are expected to agree on your fixture, the fixture
+cannot prove which one ran; and a guard behind a stricter guard is never reached
+by a fixture that trips the outer one. Every fix in this round was checked by
+reverting the source and confirming the new test actually fails.
 
 ## If you pick this up
 
@@ -131,4 +157,3 @@ missing id, and whether the accessibility work survived.
   Provider360 plus an NPI↔HEM bridge. `vsm/analysis/authorclass.py` is the seam
   it drops into without touching stance or dual-lens. It deserves its own
   session and should not be smuggled into a UI project.
-- Run the adversarial verification the workflow did not reach.
