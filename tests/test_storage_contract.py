@@ -399,6 +399,53 @@ def test_artifact_name_cannot_escape_the_run_directory(run_store):
 # against the same location is what actually exercises that.
 
 
+def test_prefetch_never_changes_what_a_read_returns(topic_store, run_store):
+    """``prefetch_artifacts`` is an optimisation two backends implement and one
+    does not, so the property that matters is that it is *invisible*: every
+    read must return exactly what it would have returned without it, including
+    the absences and including a read-after-write in the same request.
+
+    In the shared suite because the two implementations are unrelated — one
+    batches HTTP GETs, the other is a single SQL statement with an UNNEST — and
+    each records absence separately, which is where this kind of cache goes
+    wrong.
+    """
+    topic = topic_store.create(name="pf", therapeutic_area="", spend_band="probe")
+    run = run_store.start(topic.topic_id, "mine")
+    run_store.write_artifact(run.run_id, "signals.json", [{"a": 1}])
+    run_store.write_artifact(run.run_id, "notes.md", "# hello")
+
+    warm = getattr(run_store, "prefetch_artifacts", None)
+    if warm is not None:
+        warm([(run.run_id, "signals.json"), (run.run_id, "notes.md"),
+              (run.run_id, "absent.json")])
+
+    assert run_store.read_artifact(run.run_id, "signals.json") == [{"a": 1}]
+    assert run_store.read_artifact(run.run_id, "notes.md") == "# hello"
+    with pytest.raises(FileNotFoundError):
+        run_store.read_artifact(run.run_id, "absent.json")
+
+    # The resume logic does exactly this: probe, find nothing, write. A recorded
+    # absence that outlives its own write would make the next read deny an
+    # artifact that is now there.
+    run_store.write_artifact(run.run_id, "absent.json", {"now": "here"})
+    assert run_store.read_artifact(run.run_id, "absent.json") == {"now": "here"}
+
+
+def test_prefetching_a_traversing_name_is_refused_not_raised(topic_store, run_store):
+    """Warming is best-effort: a caller handing it a bad pair has not done
+    anything wrong, and the read that follows reports the problem properly."""
+    topic = topic_store.create(name="pf2", therapeutic_area="", spend_band="probe")
+    run = run_store.start(topic.topic_id, "mine")
+
+    warm = getattr(run_store, "prefetch_artifacts", None)
+    if warm is None:
+        pytest.skip("this backend does not implement prefetch_artifacts")
+    warm([(run.run_id, "../escape.json")])           # must not raise
+    with pytest.raises((ValueError, FileNotFoundError)):
+        run_store.read_artifact(run.run_id, "../escape.json")
+
+
 def test_for_topics_matches_for_topic_on_every_backend(topic_store, run_store):
     """``for_topics`` exists so the topics index costs a constant number of
     round trips instead of one per topic. It is therefore a *second*

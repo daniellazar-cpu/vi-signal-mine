@@ -54,12 +54,23 @@ def _quoted_schema(schema: str) -> str:
     return schema
 
 
+#: Distinguishes "looked it up and it is not there" from "not looked up yet".
+#: Recording the absence matters as much as recording a hit: the deliverable
+#: cards probe ten names per run and several are legitimately missing, so
+#: without this those turn back into a query each.
+_ABSENT = object()
+_UNSET = object()
+
+
 class BlobArtifacts:
     """One Postgres table, keyed by ``(run_id, name)``."""
 
     def __init__(self, dsn: str, schema: str = "public") -> None:
         self.dsn = dsn
         self.schema = _quoted_schema(schema)
+        #: Request-scoped, ``(run_id, name)`` -> payload or `_ABSENT`. Warmed by
+        #: `prefetch_artifacts`, cleared by `begin_request`.
+        self._warm: dict[tuple[str, str], Any] = {}
         with psycopg.connect(self.dsn, autocommit=True) as conn:
             conn.execute(f"CREATE SCHEMA IF NOT EXISTS {self.schema}")
             conn.execute(
@@ -107,6 +118,10 @@ class BlobArtifacts:
                 "DO UPDATE SET payload=EXCLUDED.payload, updated_at=now()",
                 (run_id, name, text),
             )
+        # A warm entry for this key is now wrong — including a recorded absence,
+        # which is the common case here: the resume logic checks whether an
+        # artifact exists and writes it when it does not.
+        self._warm.pop((run_id, name), None)
         return self._path_cls(run_id) / name
 
     def delete_for_runs(self, run_ids: "list[str]") -> None:
@@ -124,16 +139,61 @@ class BlobArtifacts:
                 (list(run_ids),),
             )
 
+    def begin_request(self) -> None:
+        """Drop the request-scoped artifact map. Called once per HTTP request.
+
+        Not a cache with a lifetime: it is correct only inside one request, and
+        clearing it is the caller's job (``vsm/ui/app.py``'s middleware), not a
+        timer's.
+        """
+        self._warm.clear()
+
+    def prefetch_artifacts(self, pairs: "list[tuple[str, str]]") -> None:
+        """Fetch many artifacts in **one** query.
+
+        The pages that render deliverable cards ask for up to ten artifacts per
+        run, several of which are legitimately absent, and a run/insight/report
+        page was paying a query for each. Same shape as the blob backend's
+        method of the same name — purely an optimisation, safe to skip, and
+        ``read_artifact`` behaves identically whether or not it ran.
+
+        A ``(run_id, name)`` pair that does not exist is recorded as absent
+        rather than omitted, so the read that follows does not go back to the
+        database to be told the same thing again.
+        """
+        keys = []
+        for run_id, name in pairs:
+            try:
+                self._validated_key(run_id, name)
+            except ValueError:
+                continue
+            if (run_id, name) not in self._warm:
+                keys.append((run_id, name))
+        if not keys:
+            return
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"SELECT run_id, name, payload FROM {self.schema}.artifacts "
+                "WHERE (run_id, name) IN (SELECT * FROM UNNEST(%s::text[], %s::text[]))",
+                ([k[0] for k in keys], [k[1] for k in keys]),
+            ).fetchall()
+        found = {(r[0], r[1]): r[2] for r in rows}
+        for key in keys:
+            self._warm[key] = found.get(key, _ABSENT)
+
     def read_artifact(self, run_id: str, name: str) -> Any:
         self._validated_key(run_id, name)
-        with self._conn() as conn:
-            row = conn.execute(
-                f"SELECT payload FROM {self.schema}.artifacts WHERE run_id=%s AND name=%s",
-                (run_id, name),
-            ).fetchone()
-        if row is None:
+        warm = self._warm.get((run_id, name), _UNSET)
+        if warm is _UNSET:
+            with self._conn() as conn:
+                row = conn.execute(
+                    f"SELECT payload FROM {self.schema}.artifacts WHERE run_id=%s AND name=%s",
+                    (run_id, name),
+                ).fetchone()
+            warm = _ABSENT if row is None else row[0]
+        if warm is _ABSENT:
             raise FileNotFoundError(f"no artifact named {name!r} on run {run_id!r}")
-        text = row[0]
+        text = warm
         return json.loads(text) if name.endswith(".json") else text
 
 

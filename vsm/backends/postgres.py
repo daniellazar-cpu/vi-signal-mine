@@ -326,6 +326,16 @@ class PostgresRunStore:
             )
         return len(run_ids)
 
+    def begin_request(self) -> None:
+        """Forwarded to the artifact store's request-scoped map. Called by
+        `vsm/ui/app.py`'s middleware once per request."""
+        self._blobs.begin_request()
+
+    def prefetch_artifacts(self, pairs: "list[tuple[str, str]]") -> None:
+        """Forwarded to the artifact store, which answers it in one query. See
+        `vsm/backends/blob.py:BlobArtifacts.prefetch_artifacts`."""
+        self._blobs.prefetch_artifacts(pairs)
+
     def artifacts_dir(self, run_id: str) -> Path:
         return self._blobs.artifacts_dir(run_id)
 
