@@ -1,5 +1,5 @@
 {% extends "_base.html" %}
-{% from "_macros.html" import page_header, flow_rail, deliverable_downloads, tier_badge, info %}
+{% from "_macros.html" import page_header, flow_rail, deliverable_downloads, tier_badge, info, sources %}
 {% block title %}Insight — Vi Signal Mine{% endblock %}
 
 {% block top_rail %}
@@ -25,8 +25,7 @@
 {% call page_header("Insight",
      [run.started_at|dt,
       (topic.spend_band|sweep_size ~ " sweep") if topic is not none else "—",
-      run.cost_usd|usd(4),
-      run.run_id]
+      run.cost_usd|usd(4)]
      + ([('<a href="/runs/' ~ mine_run_id ~ '/snapshot">from the ' ~ run.started_at|dt ~ ' sweep</a>')|safe] if mine_run_id else [])) %}
   {% if run.status == "complete" and storage_is_durable() %}
   <form method="post" action="/runs/{{ run.run_id }}/report">
@@ -182,8 +181,8 @@
     {% if theme_rows %}
     <div class="table-scroll" tabindex="0" role="region" aria-label="Themes">
     <table class="data-table">
-      <caption class="visually-hidden">Every theme in this snapshot, with its venue mix, venue-kind mix and corroboration.</caption>
-      <thead><tr><th scope="col">Theme</th><th scope="col" class="num">Volume</th><th scope="col">Venue mix</th><th scope="col">Kind mix</th><th scope="col">Tier</th><th scope="col" class="num">Independent sources</th></tr></thead>
+      <caption class="visually-hidden">Every theme in this snapshot, with where it was found, what kind of sites, and how many independent sources support it.</caption>
+      <thead><tr><th scope="col">Theme</th><th scope="col" class="num">Volume</th><th scope="col">Venue mix</th><th scope="col">Kind mix</th><th scope="col" class="num">Sources {{ info('sources') }}</th></tr></thead>
       <tbody>
         {% for tr in theme_rows %}
         <tr>
@@ -191,8 +190,10 @@
           <td class="num">{{ tr.theme.volume }}</td>
           <td class="cell-sub">{% for v, n in tr.venue_mix %}{{ v }} ({{ n }}){% if not loop.last %}, {% endif %}{% else %}—{% endfor %}</td>
           <td class="cell-sub">{% for k, n in tr.kind_mix %}{{ kind_label(k) }} ({{ n }}){% if not loop.last %}, {% endif %}{% else %}—{% endfor %}</td>
-          <td>{{ tier_badge(tr.tier) }}</td>
-          <td class="num">{{ tr.sources }}</td>
+          {# Pips plus the number: the count is the label, so no category word
+             has to be learned. The old row carried both a "Tier" badge and the
+             count, which said the same thing twice. #}
+          <td class="num">{{ sources(tr.sources) }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -228,7 +229,7 @@
           {% else %}
           <tr>
             <th scope="row" class="cell-title">{{ sr.name }}</th>
-            <td colspan="2" class="muted">no signals resolved to an author class</td>
+            <td colspan="2" class="muted">no mentions could be attributed to a speaker</td>
             <td class="cell-sub">{{ sr.basis }}</td>
           </tr>
           {% endif %}

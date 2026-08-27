@@ -28,3 +28,23 @@ MODE_LABEL: dict[str, str] = {
     "insight": "Analysis",
     "report": "Report",
 }
+
+
+#: How well-supported a finding is, said as the count rather than as a category.
+#:
+#: "Corroborated" was a word invented in this codebase and surfaced raw; the
+#: owner's reaction to meeting it was "wtf is Corroborated". The count is the
+#: label, so there is nothing to learn: three sources is three sources.
+SOURCE_LABEL: dict[str, str] = {
+    "corroborated": "3+ sources",
+    "emerging": "2 sources",
+    "single_source": "1 source",
+}
+
+#: What each count means for what you may say, stated once as a legend rather
+#: than repeated per row. Advisory, never an instruction (guard G2).
+SOURCE_ADVICE: dict[str, str] = {
+    "corroborated": "safe to state as-is",
+    "emerging": "attribute it",
+    "single_source": "quote it, don't generalise",
+}

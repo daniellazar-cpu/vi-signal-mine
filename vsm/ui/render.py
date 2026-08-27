@@ -51,11 +51,7 @@ STRUCTURE = "rgba(0, 0, 0, 0.18)"
 VIOLET = "#4F31F5"
 NE_INK = "#140923"
 
-_TIER_LABEL = {
-    "corroborated": "Corroborated",
-    "emerging": "Emerging",
-    "single_source": "Single source",
-}
+from vsm.modes.vocabulary import SOURCE_LABEL as _TIER_LABEL
 # content.TIERS is the one place tier copy is authored; keys there use a
 # space ("single source") where run data uses an underscore. Normalising
 # once here lets the plot attach the same sentence as a native SVG <title>
@@ -275,7 +271,7 @@ def forest_plot_svg(rows: Sequence[Mapping[str, Any]]) -> str:
     parts.append(
         f'<text x="16" y="24" class="plot-legend-text">THEME</text>'
         f'<text x="{axis_x}" y="24" text-anchor="middle" class="plot-legend-text">'
-        f"DIVERGENCE — PATIENT MINUS CLINICIAN NET STANCE</text>"
+        f"GAP — PATIENT MINUS CLINICIAN</text>"
         f'<text x="{left_w + plot_w + 16}" y="24" class="plot-legend-text">SOURCES</text>'
         f'<text x="{total_w - 16}" y="24" text-anchor="end" class="plot-legend-text">TIER</text>'
     )

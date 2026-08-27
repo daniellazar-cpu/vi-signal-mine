@@ -88,14 +88,18 @@ def test_the_plot_legend_appears_beside_the_forest_plot(env):
     assert "say NE" not in body, "the raw token is back"
 
 
-def test_a_tier_key_is_present_where_tiers_are_shown(env):
-    """A reader must never meet 'corroborated' with no way to learn what it
-    means — the tier's own definition rides along as a title attribute."""
+def test_the_source_count_carries_its_meaning_where_it_is_shown(env):
+    """A reader must never meet a confidence signal with no way to learn what
+    it means. The old fix attached a definition of the word "corroborated";
+    the better fix was to stop using the word — the count *is* the label — and
+    to put what the count licenses behind the (i) beside it."""
     c, ts, rs, topic = env
     snap = _snapshot(rs, topic, _rows(2, 2))
     ins = run_insight(topic, snap.run_id, rs)
     body = c.get(f"/runs/{ins.run_id}/insight").text
-    assert "Three or more independent sources" in body
+    assert "Three or more independent sources" in body or "3+ sources" in body, (
+        "the reader has no way to learn what the count licenses"
+    )
 
 
 def test_the_stance_view_never_shows_a_blended_number(env):

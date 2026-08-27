@@ -1130,9 +1130,13 @@ a.tier-badge-corroborated:hover { background: var(--vi-violet-hover); border-col
 */
 
 /* ------------------------------------------------------------ page header -- */
+/* Grid, not flex: two columns with the second sized to its content guarantees
+   the actions stay on the right and the metadata line wraps inside its own
+   column instead. With flex-wrap the whole action block dropped to a new row
+   the moment the metadata got thirteen pixels too long. */
 .page-header {
-  display: flex; align-items: flex-start; justify-content: space-between;
-  gap: var(--space-md); flex-wrap: wrap;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start; gap: var(--space-sm) var(--space-md);
   padding-bottom: var(--space-sm);
   border-bottom: var(--border-hairline) solid var(--rule);
   margin-bottom: var(--space-md);
@@ -1145,9 +1149,12 @@ a.tier-badge-corroborated:hover { background: var(--vi-violet-hover); border-col
   display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline;
   margin: 6px 0 0; font-size: 13px; color: var(--fg2);
 }
-.page-meta > * + *::before { content: "·"; margin-right: 10px; color: var(--rule-strong, var(--fg2)); }
+/* Separators as a trailing mark on all but the last item, not a leading mark
+   on all but the first: when the line wraps, a leading middot lands at the
+   start of the new row and reads as a bullet point. */
+.page-meta > *:not(:last-child)::after { content: "·"; margin-left: 10px; color: var(--fg2); }
 .page-meta code, .page-meta .mono { font-family: var(--vi-mono, ui-monospace, monospace); font-size: 12px; }
-.page-actions { display: flex; gap: 8px; align-items: center; flex: none; }
+.page-actions { display: flex; gap: 12px; align-items: center; justify-self: end; }
 
 /* ------------------------------------------------------------- scorecard -- */
 /* The category-standard opener: a handful of metrics, value first, label
@@ -1291,6 +1298,9 @@ a.tier-badge-corroborated:hover { background: var(--vi-violet-hover); border-col
 @media (max-width: 699px) {
   .scorecard { grid-template-columns: repeat(2, 1fr); }
   .page-title { font-size: 22px; }
+  /* One column on a phone: side-by-side would crush both. */
+  .page-header { grid-template-columns: 1fr; }
+  .page-actions { justify-self: start; }
 }
 
 /* ============================================= dashboard ============== */

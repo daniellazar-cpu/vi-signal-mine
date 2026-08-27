@@ -254,11 +254,11 @@ def run_report(
 
     # ------------------------------------------------------- themes table --
     theme_lines = [
-        "| theme | volume | venue mix | kind mix | confidence tier | independent sources |",
-        "|---|---|---|---|---|---|",
+        "| theme | mentions | where found | kind of site | independent sources |",
+        "|---|---|---|---|---|",
     ]
     if not paired:
-        theme_lines.append("| _(no themes in this snapshot)_ | | | | | |")
+        theme_lines.append("| _(no themes in this snapshot)_ | | | | |")
     for theme, finding in paired:
         venues = ", ".join(
             f"{v} ({n})" for v, n in sorted(theme.get("venue_mix", {}).items())
@@ -266,10 +266,11 @@ def run_report(
         kinds = ", ".join(
             f"{k} ({n})" for k, n in sorted(theme.get("kind_mix", {}).items())
         ) or "—"
-        tier_label = finding.tier.replace("_", " ")
+        # No tier column: it and the count said the same thing, and the count
+        # is the one that needs no glossary.
         theme_lines.append(
             f"| {theme['name']} | {theme['volume']} | {venues} | {kinds} | "
-            f"{tier_label} | {finding.independent_sources} |"
+            f"{finding.independent_sources} |"
         )
         # The table cites every signal behind the count, even for a
         # single-source theme: the count is arithmetic and needs no
@@ -282,8 +283,13 @@ def run_report(
     corroborated_lines: list[str] = []
     for theme, finding in corroborated:
         sentence = (
-            f"**{theme['name']}** is corroborated on {finding.independent_sources} "
-            f"independent sources ({theme['volume']} signals)."
+            # Plain language in the client's own document: the count carries
+            # the confidence, so no invented category word has to be learned,
+            # and "signals" is an internal name for what a reader calls a
+            # mention.
+            f"**{theme['name']}** — {finding.independent_sources} independent "
+            f"sources, {theme['volume']} mention"
+            f"{'' if theme['volume'] == 1 else 's'}."
             + _momentum_phrase(momentum_by_name.get(theme["name"]))
         )
         corroborated_lines.append(guard_claim(sentence, finding.signal_ids, where="pulse_report.md"))
@@ -301,8 +307,10 @@ def run_report(
     for theme, finding in emerging:
         sentence = (
             f"**{theme['name']}** has {finding.independent_sources} independent "
-            f"sources ({theme['volume']} signals) — emerging, not yet corroborated "
-            f"at the {CORROBORATED_AT}-source bar."
+            f"sources, {theme['volume']} mention"
+            f"{'' if theme['volume'] == 1 else 's'} — below the "
+            f"{CORROBORATED_AT}-source bar, so attribute it rather than "
+            "stating it flat."
             + _momentum_phrase(momentum_by_name.get(theme["name"]))
         )
         emerging_lines.append(guard_claim(sentence, finding.signal_ids, where="pulse_report.md"))
@@ -350,9 +358,9 @@ def run_report(
     pulse_parts += [
         "## Themes observed",
         themes_block,
-        "## Corroborated findings",
+        "## Backed by 3 or more sources",
         corroborated_block,
-        "## Emerging (two-source) signals",
+        "## Backed by 2 sources",
         emerging_block,
         "## What changed since the prior snapshot",
         anomaly_block,
@@ -499,10 +507,10 @@ def run_report(
         "",
         "## Definitions",
         _INDEPENDENT_SOURCE_DEFINITION,
-        f"Confidence tiers: **corroborated** is {CORROBORATED_AT} or more independent "
-        "sources; **emerging** is exactly two; **single source** is one or zero, and "
-        "a single-source theme is reported as a count only — it never earns a claim "
-        "sentence in the body.",
+        f"How to read the source count: **{CORROBORATED_AT} or more** independent "
+        "sources is safe to state as-is; **two** should be attributed; **one** should "
+        "be quoted rather than generalised from, and appears as a count only — it "
+        "never earns a claim sentence in the body.",
         f"Author-class basis: {basis_line}.",
         "",
         "## Scope",
@@ -527,7 +535,7 @@ def run_report(
     appendix_lines += [
         "",
         "| signal_id | venue | venue kind | captured_at | collection method | URL |",
-        "|---|---|---|---|---|---|",
+        "|---|---|---|---|---|",
     ]
     for sid in sorted(cited):
         c = cited[sid]
@@ -557,7 +565,7 @@ def _report_user_prompt(topic: Topic, paired: Sequence[tuple[Mapping[str, Any], 
     lines = [
         f"Topic: {topic.name} ({topic.therapeutic_area}).",
         f"Brand: {topic.brand or '(none)'}. Molecule: {topic.molecule or '(none)'}.",
-        "Themes this snapshot, with their pre-computed confidence tier "
+        "Themes this snapshot, with how many independent sources support each "
         "(you must not change or restate a tier as your own finding):",
     ]
     for theme, finding in paired:

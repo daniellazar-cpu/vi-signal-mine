@@ -11,8 +11,7 @@
 {{ page_header("Snapshot",
      [run.started_at|dt,
       (topic.spend_band|sweep_size ~ " sweep") if topic is not none else "—",
-      run.cost_usd|usd(4),
-      run.run_id]) }}
+      run.cost_usd|usd(4)]) }}
 <p class="page-meta"><span class="status-badge status-{{ run.status }}">{{ run.status|replace("_", " ") }}</span></p>
 
 {% if coverage is not none %}

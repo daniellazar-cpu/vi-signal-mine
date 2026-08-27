@@ -141,9 +141,9 @@ PLOT_GUIDE = {
 
 #: What the confidence tiers mean, in the order a reader meets them.
 TIERS = (
-    ("corroborated", "Three or more independent sources. Can be stated as a finding."),
-    ("emerging", "Two independent sources. Worth watching, shown separately."),
-    ("single source", "One source. Kept in the data, never stated as a finding."),
+    ("3+ sources", "Three or more independent sources. Safe to state as-is."),
+    ("2 sources", "Two independent sources. Attribute it rather than stating it flat."),
+    ("1 source", "One source. Quote it, don't generalise from it."),
 )
 
 #: One line each. Only terms a first-time reader actually hits.
@@ -159,7 +159,7 @@ GLOSSARY = (
         "second snapshot can be compared to the first.",
     ),
     (
-        "Spend band",
+        "Sweep size",
         "How wide to search: probe, standard or deep. Each shows its estimated "
         "cost before you commit.",
     ),
@@ -200,7 +200,7 @@ GLOSSARY = (
 #: Shown on the empty state. Three steps, no more.
 FIRST_RUN_STEPS = (
     ("Name a topic", "A brand, a molecule, a category — whatever you want watched. That is the only thing required."),
-    ("Run a snapshot", "Pick a spend band. You see the estimate before anything is spent."),
+    ("Run a sweep", "Pick a sweep size. You see the estimate before anything is spent."),
     (
         "Run it again next week",
         "Momentum and anomalies need something to compare against. One snapshot "
@@ -331,7 +331,7 @@ DELIVERABLES = (
         ),
         "for_whom": "The client, as-is.",
         "sample": (
-            "**Cost of access** is corroborated on 12 independent sources "
+            "**Cost of access** — 12 independent sources, "
             "(14 signals). Volume is up 40% versus the prior snapshot "
             "(10 to 14)."
         ),

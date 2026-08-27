@@ -48,8 +48,8 @@
       <dd>{{ doc.theme_count }}</dd>
     </div>
     <div>
-      <dt>Confidence</dt>
-      <dd>{{ doc.tier_counts.corroborated }} corroborated · {{ doc.tier_counts.emerging }} emerging · {{ doc.tier_counts.single_source }} single source</dd>
+      <dt>Support</dt>
+      <dd>{{ doc.tier_counts.corroborated }} with 3+ sources · {{ doc.tier_counts.emerging }} with 2 · {{ doc.tier_counts.single_source }} with 1</dd>
     </div>
     <div>
       <dt>Sources cited</dt>
@@ -62,14 +62,14 @@
     {% if doc.snapshot_run_id %}<a href="/runs/{{ doc.snapshot_run_id }}/snapshot">the snapshot of {{ doc.snapshot_at|date_long }}</a>{% else %}a snapshot this instance can no longer read{% endif %}{% if doc.insight_run_id %}, analysed in <a href="/runs/{{ doc.insight_run_id }}/insight">the insight pass</a>{% endif %}.
   </p>
 
-  {# The tool's own telemetry — run id, spend band, what it cost — belongs at
+  {# The tool's own telemetry — run id, sweep size, what it cost — belongs at
      the foot of the cover at caption weight, not at cover weight beside the
      subject. It is provenance, and a client's report is not the place to
      advertise a supplier's unit economics. #}
   <p class="doc-provenance">
     Prepared by Vi Signal Mine · issued <time datetime="{{ run.started_at }}">{{ run.started_at|date_long }}</time>
     · run <span class="doc-runid">{{ run.run_id }}</span>
-    {% if topic is not none %}· {{ topic.spend_band }} band{% endif %}
+    {% if topic is not none %}· {{ topic.spend_band|sweep_size }} sweep{% endif %}
     · {{ run.cost_usd|usd(4) }} of model and search time
   </p>
 
@@ -94,7 +94,7 @@
 {% endif %}
 
 <section class="doc-section" id="findings">
-  <h2 class="doc-h">Corroborated findings</h2>
+  <h2 class="doc-h">Backed by 3 or more sources</h2>
   <p class="doc-section-note">A claim reaches this section on three or more independent sources. Every reference number resolves to a dated row with a URL in the <a href="#appendix">provenance appendix</a>.</p>
   {% if corroborated %}
   {% for f in corroborated %}
@@ -112,7 +112,7 @@
 </section>
 
 <section class="doc-section" id="emerging">
-  <h2 class="doc-h">Emerging — two independent sources</h2>
+  <h2 class="doc-h">Backed by 2 sources</h2>
   <p class="doc-section-note">Shown separately, and never as a finding: two sources is worth watching, not worth stating.</p>
   {% if emerging %}
   {% for f in emerging %}
@@ -149,7 +149,7 @@
       <th scope="col" class="num">Clinician net</th>
       <th scope="col" class="num">Patient net</th>
       <th scope="col">Divergence</th>
-      <th scope="col">Confidence</th>
+      <th scope="col" class="num">Sources</th>
     </tr></thead>
     <tbody>
       {% for r in figure.rows %}
@@ -179,11 +179,11 @@
   {% if theme_rows %}
   <div class="table-scroll" tabindex="0" role="region" aria-label="Themes observed">
   <table class="doc-table">
-    <caption>Every theme in this snapshot, with its volume, its confidence tier and the sources behind it. A theme is always reported — a count needs no corroboration; a claim about it does.</caption>
+    <caption>Every theme in this snapshot, with how many mentions it drew and how many independent sources back it. A theme is always reported: a count is arithmetic, whereas a claim about it needs support.</caption>
     <thead><tr>
       <th scope="col">Theme</th>
       <th scope="col" class="num">Volume</th>
-      <th scope="col">Confidence</th>
+      <th scope="col" class="num">Sources</th>
       <th scope="col" class="num">Independent sources</th>
       <th scope="col">Sources</th>
     </tr></thead>

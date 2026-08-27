@@ -96,22 +96,35 @@ def test_an_uncorroborated_finding_cannot_reach_the_body(env):
     insight = _pipeline(rs, topic, _rows(1))
     run = run_report(topic, insight.run_id, rs)
     body = rs.read_artifact(run.run_id, "pulse_report.md")
-    assert "single source" in body.lower() or "not corroborated" in body.lower()
+    # Asserted as the property rather than by the word "single source", which
+    # the vocabulary pass removed: the tier column and the source count said the
+    # same thing, and only one of them needed a glossary. What G6 actually
+    # forbids is a *claim sentence* about a one-source theme, so that is what
+    # this checks — the theme still appears in the counts table.
+    assert "| 1 |" in body, "the theme lost its row in the counts table"
+    claims = body.split("## Backed by 3 or more sources")
+    if len(claims) > 1:
+        section = claims[1].split("##")[0]
+        assert "independent sources," not in section, (
+            "a one-source theme earned a claim sentence"
+        )
 
 
 def test_a_corroborated_finding_reaches_the_report_body(env):
     """G6, the other direction. Four genuinely independent publishers clear
     the three-source bar, and the resulting claim — not just a count in the
     themes table, but the actual assertion about the theme — must reach the
-    main body with its tier visible. If the corroborated-claims section were
+    main body with its source count visible. If that section were
     broken (e.g. never populated), the fallback text says no theme has
     reached three sources yet, which does not contain this phrase."""
     ts, rs, topic = env
     insight = _pipeline(rs, topic, _rows(4))
     run = run_report(topic, insight.run_id, rs)
     body = rs.read_artifact(run.run_id, "pulse_report.md")
-    assert "corroborated on 4 independent sources" in body.lower()
-    corroborated_section = body.split("## Corroborated findings")[1].split("## Emerging")[0]
+    # The claim now states the count instead of naming a category: "wtf is
+    # Corroborated" was the owner's reaction to meeting the old word.
+    assert "4 independent sources" in body.lower()
+    corroborated_section = body.split("## Backed by 3 or more sources")[1].split("## Backed by 2")[0]
     assert "tolerability" in corroborated_section.lower()
 
 
@@ -125,12 +138,15 @@ def test_an_emerging_finding_appears_only_under_its_own_heading(env):
     run = run_report(topic, insight.run_id, rs)
     body = rs.read_artifact(run.run_id, "pulse_report.md")
 
-    corroborated_section = body.split("## Corroborated findings")[1].split("## Emerging")[0]
-    emerging_section = body.split("## Emerging")[1].split("## What changed")[0]
+    corroborated_section = body.split("## Backed by 3 or more sources")[1].split("## Backed by 2")[0]
+    emerging_section = body.split("## Backed by 2 sources")[1].split("## What changed")[0]
 
     assert "tolerability" not in corroborated_section.lower()
     assert "tolerability" in emerging_section.lower()
-    assert "emerging" in emerging_section.lower()
+    # The section states the count and what it licenses, rather than naming
+    # a category the reader would have to look up.
+    assert "2 independent sources" in emerging_section
+    assert "attribute it" in emerging_section
 
 
 def test_forecast_language_from_the_model_blocks_the_report(env):

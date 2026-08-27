@@ -74,7 +74,7 @@
       <td>
         <a class="topic-name-link" href="/topics/{{ row.topic.topic_id }}">{{ row.topic.name }}</a>
         <div class="cell-sub">
-          {% if row.topic.therapeutic_area %}{{ row.topic.therapeutic_area }} — {% endif %}{{ row.topic.spend_band }} band
+          {% if row.topic.therapeutic_area %}{{ row.topic.therapeutic_area }} — {% endif %}{{ row.topic.spend_band|sweep_size }} sweep
         </div>
       </td>
       <td class="num">

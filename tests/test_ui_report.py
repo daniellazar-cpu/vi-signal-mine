@@ -33,10 +33,12 @@ def test_every_cited_signal_id_is_a_link_to_its_url(env):
             assert row["url"] in body, row["signal_id"]
 
 
-def test_the_confidence_tier_is_visible_on_the_page(env):
+def test_the_source_count_is_visible_on_the_page(env):
     c, rs, rep, _ = env
     body = c.get(f"/runs/{rep.run_id}/report").text.lower()
-    assert "corroborated" in body
+    # The count is the label now; "corroborated" was invented in this
+    # codebase and the owner's reaction to meeting it was "wtf is that".
+    assert "independent sources" in body or "3 or more sources" in body
 
 
 def test_artifacts_download(env):

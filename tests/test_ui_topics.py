@@ -72,7 +72,7 @@ def test_how_page_renders_a_glossary_term_and_a_mode_name(client):
     body = c.get("/how").text
     assert "Momentum" in body  # a GLOSSARY term
     assert "Insight" in body  # a MODES name
-    assert "corroborated" in body.lower()  # a TIERS key
+    assert "3+ sources" in body  # a TIERS key, now stated as the count
 
 
 def test_the_empty_state_contains_the_three_first_run_steps(client):

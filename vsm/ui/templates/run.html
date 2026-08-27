@@ -11,8 +11,7 @@
 {{ page_header(MODE_LABELS.get(run.mode, run.mode|capitalize),
      [run.started_at|dt,
       (topic.spend_band|sweep_size ~ " sweep") if topic is not none else "—",
-      run.cost_usd|usd(4),
-      run.run_id]) }}
+      run.cost_usd|usd(4)]) }}
 <p class="page-meta">
   <span class="status-badge status-{{ run.status }}">{{ run.status|replace("_", " ") }}</span>
   <span>{{ ("finished " ~ run.finished_at|dt) if run.finished_at else "not finished" }}</span>

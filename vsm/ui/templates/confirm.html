@@ -14,15 +14,15 @@
 {{ title_block([
   ("Topic", topic.name),
   ("Therapeutic area", topic.therapeutic_area if topic.therapeutic_area else "not set — a general venue set"),
-  ("Spend band", band.name),
+  ("Sweep size", band.name|sweep_size),
   ("Run cost cap", cap_usd|usd(2)),
 ]) }}
 
 <section class="confirm-panel">
   {% if changes_band %}
   <p class="body-text field-note">
-    This changes the topic's spend band from <strong>{{ topic.spend_band }}</strong>
-    to <strong>{{ band.name }}</strong> — confirming will save that change before running.
+    This changes the sweep size from <strong>{{ topic.spend_band|sweep_size }}</strong>
+    to <strong>{{ band.name|sweep_size }}</strong> — confirming saves that before running.
   </p>
   {% endif %}
 
@@ -61,7 +61,7 @@
 
   {% if storage_is_durable() %}
   <div class="confirm-actions">
-    <a class="link-back" href="/topics/{{ topic.topic_id }}/edit">Change band or cancel</a>
+    <a class="link-back" href="/topics/{{ topic.topic_id }}/edit">Change size or cancel</a>
     <form method="post" action="/topics/{{ topic.topic_id }}/mine">
       <input type="hidden" name="band" value="{{ band.name }}">
       <button class="btn btn-commit" type="submit">Spend {{ estimate.total_usd|usd(2) }} — run snapshot</button>

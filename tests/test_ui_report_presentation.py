@@ -81,7 +81,7 @@ RAW_MARKDOWN_TOKENS = ("**", "## ", "|---|", "](http", "__", "~~")
 
 
 def test_no_raw_markdown_reaches_any_page(seeded):
-    """The named regression: `**cost** is corroborated on 12 independent
+    """The named regression: `**cost** — 12 independent
     sources.` rendered verbatim on `/deliverables`, and on five other
     surfaces that shared the same card.
 
@@ -106,7 +106,7 @@ def test_the_deliverable_samples_are_the_thing_that_would_have_leaked(seeded):
     """Non-vacuity guard for the test above: it would also pass if the
     samples had simply been deleted. They are on the page, and rendered."""
     body = seeded["client"].get("/deliverables").text
-    assert "is corroborated on 12 independent sources" in body
+    assert "12 independent sources" in body
     assert "<strong>Cost of access</strong>" in body
 
 
@@ -153,7 +153,10 @@ def test_the_report_opens_with_a_cover_not_a_tool_label(seeded):
     # confidence summary — the four things the plan names.
     assert re.search(r"Collected (on|\d)", body)
     assert "Rests on" in body
-    assert re.search(r"\d+ corroborated · \d+ emerging · \d+ single source", body)
+    # Stated as counts, not as invented category names.
+    assert re.search(r"\d+ with 3\+ sources · \d+ with 2 · \d+ with 1", body), body[:0] or (
+        re.search(r"\d+ corroborated", body) and "the old tier words are back"
+    )
     assert f'/runs/{seeded["snapshot"].run_id}/snapshot' in body
 
 

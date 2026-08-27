@@ -119,11 +119,7 @@ class ProductionRefusalMiddleware:
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 _STATIC_DIR = Path(__file__).parent / "static"
 
-_TIER_LABELS = {
-    "corroborated": "Corroborated",
-    "emerging": "Emerging",
-    "single_source": "Single source",
-}
+from vsm.modes.vocabulary import SOURCE_LABEL as _TIER_LABELS
 _KIND_LABELS = {
     "hcp_discussion": "Clinician discussion",
     "patient_community": "Patient community",
@@ -1526,7 +1522,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         designed = {
             "Themes observed",
             "Corroborated findings",
-            "Emerging (two-source) signals",
+            "Backed by 2 sources",
             "Patient vs. HCP divergence",
         }
         lead_html_parts: list[str] = []
@@ -1577,10 +1573,12 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             return out, ""
 
         corroborated, corroborated_note = _designed_findings(
-            "corroborated", "Corroborated findings"
+            # The section heading a client reads. "Corroborated" was invented
+            # here; the count is the label and needs no glossary.
+            "corroborated", "Backed by 3 or more sources"
         )
         emerging, emerging_note = _designed_findings(
-            "emerging", "Emerging (two-source) signals"
+            "emerging", "Backed by 2 sources"
         )
 
         # ---- the themes table ------------------------------------------
