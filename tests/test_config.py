@@ -112,3 +112,20 @@ def test_a_genuinely_wrong_choice_still_raises():
     """The guard must not have been loosened into uselessness."""
     with pytest.raises(ConfigError, match="VSM_MINER"):
         Settings.from_env({"VSM_MINER": "sometimes"})
+
+
+def test_the_var_dir_default_is_writable_on_vercel():
+    """A blank VSM_VAR_DIR in a dashboard overrides vercel.json's correct value,
+    and a relative path lands under Vercel's read-only /var/task where every
+    write fails. Found in the real deployment's env, not imagined."""
+    assert Settings.from_env({"VSM_VAR_DIR": "", "VERCEL_ENV": "production"}).var_dir == Path("/tmp/vsm-var")
+    assert Settings.from_env({"VERCEL": "1"}).var_dir == Path("/tmp/vsm-var")
+
+
+def test_the_var_dir_default_stays_relative_locally():
+    """A local install must be untouched by the platform special case."""
+    assert Settings.from_env({}).var_dir == Path("var")
+
+
+def test_an_explicit_var_dir_still_wins_everywhere():
+    assert Settings.from_env({"VSM_VAR_DIR": "/custom", "VERCEL_ENV": "production"}).var_dir == Path("/custom")

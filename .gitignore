@@ -10,3 +10,4 @@ var/
 # impeccable scratch (decision mocks, local config)
 .impeccable/
 .vercel
+.env*

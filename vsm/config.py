@@ -65,6 +65,28 @@ def _choice(env: Mapping[str, str], key: str, allowed: tuple[str, ...], default:
     return value
 
 
+def _default_var_dir(env: Mapping[str, str]) -> str:
+    """Where to write when nobody said — and the one writable path on Vercel.
+
+    ``var`` is right locally and wrong on a serverless function: the code is
+    unpacked under a read-only ``/var/task``, so a relative path makes every
+    write fail. ``vercel.json`` declares ``VSM_VAR_DIR=/tmp/vsm-var`` for
+    exactly that reason, but a dashboard variable **overrides** ``vercel.json``,
+    so an operator who creates ``VSM_VAR_DIR`` as an empty placeholder silently
+    removes the only correct value. That is not hypothetical: it is the state
+    this deployment was found in.
+
+    The platform check is duplicated from ``vsm.platform.is_vercel`` rather than
+    imported, because ``vsm.platform`` imports this module — taking the
+    dependency the other way would make the cycle real. Kept to one line so the
+    duplication cannot drift into a second opinion about anything else.
+    """
+    on_vercel = bool(str(env.get("VERCEL_ENV", "")).strip()) or str(
+        env.get("VERCEL", "")
+    ).strip() == "1"
+    return "/tmp/vsm-var" if on_vercel else "var"
+
+
 def _money(env: Mapping[str, str], key: str, default: str) -> float:
     """A dollar figure, refusing to start on a value that is not a number.
 
@@ -108,7 +130,7 @@ class Settings:
             brightdata_unlocker_zone=_raw(env, "BRIGHTDATA_UNLOCKER_ZONE", "dataweb"),
             llm_model=_raw(env, "VSM_LLM_MODEL", "claude-opus-5"),
             run_cost_cap_usd=_money(env, "VSM_RUN_COST_CAP_USD", "5.0"),
-            var_dir=Path(_raw(env, "VSM_VAR_DIR", "var")),
+            var_dir=Path(_raw(env, "VSM_VAR_DIR", _default_var_dir(env))),
         )
 
     @property
