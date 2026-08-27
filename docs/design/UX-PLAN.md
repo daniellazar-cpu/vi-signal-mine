@@ -689,3 +689,74 @@ should stay key-agnostic rather than hard-coding two.
 **Q5 — `intent_score`, `action`, `distribution_mode`.** Confirmed: nothing
 outside the mining layer reads any of them. Cutting all three from the interface
 is safe. They stay in the JSON export.
+
+---
+
+## 12. Owner's correction: layer it, do not cut it
+
+Supersedes §5's word budget and much of §8, in the owner's words:
+
+> "There are so many UI components you can use to handle that — expanding
+> windows, sidebars, tooltips, read-mores and many others. No need to cut where
+> it's meaty, but don't puke on me the whole bible at once in the same colour,
+> font and size and hope I'll be able to curate something."
+
+**The diagnosis was wrong in one important way.** The problem was never the
+amount of information. It was that all of it arrived at once, at the same
+weight, so the reader had to do the triage the interface should have done. A
+900-word cap solves that by destroying material that is often the most valuable
+thing on the page — the *why* behind a number.
+
+So: **keep the substance, rank it.** Every screen has three layers.
+
+| Layer | What it holds | Always visible? |
+|---|---|---|
+| **1 — Answer** | The figure and the one clause naming what it is | Yes. Largest type on the screen |
+| **2 — Support** | The comparison, the count, the direction, the confidence | Yes, at `meta` weight beside or beneath layer 1 |
+| **3 — Depth** | Method, caveats, definitions, the rows, the rationale, the full prose | **Behind a control.** Never on arrival |
+
+Nothing is deleted to reach layer 3. It moves.
+
+### The components, all native and all JavaScript-free
+
+| Component | Mechanism | Use for |
+|---|---|---|
+| Expanding section | `<details>` / `<summary>` | Method, caveats, "how this was counted", the long-form finding |
+| Exclusive accordion | `<details name="group">` | A theme list where opening one closes the last |
+| Tooltip / popover | `popover` attribute + `popovertarget` | Term definitions at first use. Real dismissible popovers, no script |
+| Deep-linked expansion | `:target` | A citation that opens the exact row it refers to |
+| Evidence rail | Layout (§0) | `n`, sweep date, source count, link to rows |
+| Read-more | `<details>` inside a paragraph | Long excerpts and statements |
+| Inline definition | `<abbr>` + popover | A word the reader may not know, once |
+
+`<details>` caveat, learned the hard way: a **closed** `<details>` does not
+render its content slot at all, so it cannot be forced open with CSS at a
+breakpoint. Choose its default state server-side and never try to override it
+per viewport. In print, force `open` in the markup rather than in the
+stylesheet.
+
+### Differentiation is the actual deliverable
+
+"The same colour, font and size" is the defect. Every screen must separate its
+layers on **at least three** of these axes simultaneously:
+
+- **Size** — the §4 type scale, `figure-xl` down to `meta`
+- **Weight** — bold for the claim, regular for support, never both at once
+- **Colour** — full-strength ink for layer 1, secondary for layer 2, and the
+  single accent reserved for one action per screen
+- **Position** — content column versus evidence rail
+- **Enclosure** — a hairline or ground tint marking a layer-3 container
+- **Density** — generous leading on layer 1, tight on layer 3
+
+A screen where a finding and a footnote are set identically has failed
+regardless of its word count.
+
+### What this changes in this plan
+
+- §5's "under 900 words" is **withdrawn** as a target. The rule that survives is
+  narrower and still right: *nothing may describe a number already on screen.*
+- §8's cuts 1, 6 and 7 (how-it-works, the deliverables catalogue,
+  `pulse_report.md`) are **withdrawn**. That material moves to layer 3 rather
+  than being deleted.
+- §8's cuts 9–13 stand: those are fields nothing reads and prose nobody can act
+  on, which is deletion of noise, not of substance.
