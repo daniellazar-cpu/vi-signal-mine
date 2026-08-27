@@ -15,14 +15,14 @@ def client(tmp_path):
 
 def test_empty_state_explains_that_momentum_needs_two_snapshots(client):
     c, _, _ = client
-    body = c.get("/").text
+    body = c.get("/topics").text
     assert "two snapshots" in body.lower() or "more than once" in body.lower()
 
 
 def test_a_topic_appears_on_the_list(client):
     c, ts, _ = client
     ts.create(name="OIC pulse", therapeutic_area="gastroenterology", spend_band="standard")
-    assert "OIC pulse" in c.get("/").text
+    assert "OIC pulse" in c.get("/topics").text
 
 
 def test_creating_a_topic_redirects_to_the_list(client):
@@ -51,7 +51,7 @@ def test_a_single_snapshot_shows_no_trend_line(client):
     run = rs.start(t.topic_id, "mine")
     rs.write_artifact(run.run_id, "signals.json", [])
     rs.finish(run.run_id, "complete", cost_usd=0.01)
-    body = c.get("/").text
+    body = c.get("/topics").text
     assert "<polyline" not in body
 
 
@@ -81,7 +81,7 @@ def test_the_empty_state_contains_the_three_first_run_steps(client):
     from vsm.ui.content import FIRST_RUN_STEPS
 
     c, _, _ = client
-    body = c.get("/").text
+    body = c.get("/topics").text
     # Assert against the content module, never a literal: copy is edited far
     # more often than markup, and a test that pins the words fails on every
     # wording change while proving nothing about the rendering.
@@ -95,7 +95,7 @@ def test_the_page_requests_nothing_from_the_network(client):
     """No CDN, no external font, no build step — it must work on a plane."""
     c, ts, _ = client
     ts.create(name="OIC", therapeutic_area="gi", spend_band="probe")
-    body = c.get("/").text
+    body = c.get("/topics").text
     assert "//fonts.googleapis" not in body
     assert "https://cdn" not in body
     assert "http://" not in body.replace("http://www.w3.org", "")
@@ -212,7 +212,7 @@ def test_the_read_only_banner_is_absent_when_a_database_url_resolves(client, mon
     monkeypatch.setenv("VERCEL", "1")
     monkeypatch.setenv("DATABASE_URL", "postgresql://example/db")
     c, _, _ = client
-    assert EPHEMERAL_STORAGE_NOTICE not in c.get("/").text
+    assert EPHEMERAL_STORAGE_NOTICE not in c.get("/topics").text
 
 
 def test_the_read_only_banner_is_absent_on_a_local_run_with_no_database(client, monkeypatch):
@@ -227,7 +227,7 @@ def test_the_read_only_banner_is_absent_on_a_local_run_with_no_database(client, 
     for var in ("POSTGRES_URL_NON_POOLING", "POSTGRES_URL", "DATABASE_URL"):
         monkeypatch.delenv(var, raising=False)
     c, _, _ = client
-    assert EPHEMERAL_STORAGE_NOTICE not in c.get("/").text
+    assert EPHEMERAL_STORAGE_NOTICE not in c.get("/topics").text
 
 
 def test_new_topic_button_is_absent_when_not_durable(client, monkeypatch):
@@ -236,12 +236,12 @@ def test_new_topic_button_is_absent_when_not_durable(client, monkeypatch):
     (tests/test_read_only_mode.py), so its one entry point must not render."""
     _not_durable(monkeypatch)
     c, _, _ = client
-    assert 'href="/topics/new"' not in c.get("/").text
+    assert 'href="/topics/new"' not in c.get("/topics").text
 
 
 def test_new_topic_button_is_present_when_durable(client):
     c, _, _ = client
-    assert 'href="/topics/new"' in c.get("/").text
+    assert 'href="/topics/new"' in c.get("/topics").text
 
 
 def test_the_create_form_does_not_render_when_not_durable(client, monkeypatch):
@@ -285,13 +285,13 @@ def test_the_edit_link_is_absent_from_the_topics_list_when_not_durable(client, m
     _not_durable(monkeypatch)
     c, ts, _ = client
     t = ts.create(name="OIC", therapeutic_area="gi", spend_band="probe")
-    assert f'href="/topics/{t.topic_id}/edit"' not in c.get("/").text
+    assert f'href="/topics/{t.topic_id}/edit"' not in c.get("/topics").text
 
 
 def test_the_edit_link_is_present_on_the_topics_list_when_durable(client):
     c, ts, _ = client
     t = ts.create(name="OIC", therapeutic_area="gi", spend_band="probe")
-    assert f'href="/topics/{t.topic_id}/edit"' in c.get("/").text
+    assert f'href="/topics/{t.topic_id}/edit"' in c.get("/topics").text
 
 
 # --- The spend-band highlight follows the checked radio (defect 2) ------

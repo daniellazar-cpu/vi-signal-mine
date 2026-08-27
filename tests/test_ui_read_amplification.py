@@ -94,7 +94,7 @@ def test_the_index_asks_for_every_topic_s_runs_in_one_call(counted):
     n_topics = len(ts.list())
     assert n_topics >= 6, "fixture needs several topics for this to mean anything"
 
-    assert client.get("/").status_code == 200
+    assert client.get("/topics").status_code == 200
 
     per_topic = rs.calls.get("for_topic", 0) + rs.calls.get("snapshots", 0)
     assert rs.calls.get("for_topics", 0) == 1, f"expected one batched call: {rs.calls}"
@@ -120,7 +120,7 @@ def test_the_index_reads_one_signals_artifact_per_snapshot_not_more(counted):
     snapshot — if this starts scaling with topics, the sparkline is re-reading
     other topics' data."""
     client, ts, rs = counted
-    client.get("/")
+    client.get("/topics")
     snapshots = sum(len(rs._real.snapshots(t.topic_id)) for t in ts.list())
     assert rs.calls.get("read_artifact", 0) <= snapshots, (
         f"{rs.calls.get('read_artifact', 0)} artifact reads for {snapshots} snapshots"
@@ -160,7 +160,7 @@ def test_the_index_settles_snapshots_once_and_reuses_them(counted):
     """The index needs each topic's runs twice — once to know which snapshots
     to prefetch, once to build the row. It must fetch them once."""
     client, ts, rs = counted
-    client.get("/")
+    client.get("/topics")
     assert rs.calls.get("for_topics", 0) == 1, rs.calls
     assert rs.calls.get("for_topic", 0) == 0, rs.calls
 

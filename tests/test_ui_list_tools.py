@@ -49,7 +49,7 @@ def _names(body: str) -> list[str]:
 
 def test_search_narrows_by_name(app):
     c, _, _ = app
-    names = _names(c.get("/?q=never+run").text)
+    names = _names(c.get("/topics?q=never+run").text)
     assert names and all("Never run" in n for n in names), names
 
 
@@ -57,24 +57,24 @@ def test_search_matches_brand_not_only_name(app):
     """Someone hunting for a competitor's topic types the brand, not the title
     they gave it months ago."""
     c, _, _ = app
-    assert _names(c.get("/?q=Zephyrex").text) == ["Never run beta"]
+    assert _names(c.get("/topics?q=Zephyrex").text) == ["Never run beta"]
 
 
 def test_search_matches_therapeutic_area(app):
     c, _, _ = app
-    assert _names(c.get("/?q=oncology").text) == ["Never run alpha"]
+    assert _names(c.get("/topics?q=oncology").text) == ["Never run alpha"]
 
 
 def test_search_is_all_words_not_any(app):
     """"never beta" must not return every topic containing either word — with
     sixty topics an any-match search is no narrower than no search."""
     c, _, _ = app
-    assert _names(c.get("/?q=never+beta").text) == ["Never run beta"]
+    assert _names(c.get("/topics?q=never+beta").text) == ["Never run beta"]
 
 
 def test_search_reports_how_much_it_hid(app):
     c, ts, _ = app
-    body = c.get("/?q=Zephyrex").text
+    body = c.get("/topics?q=Zephyrex").text
     assert f"of {len(ts.list())} topics" in body
 
 
@@ -82,18 +82,18 @@ def test_search_reports_how_much_it_hid(app):
 
 def test_sort_by_name_is_alphabetical(app):
     c, _, _ = app
-    names = _names(c.get("/?sort=name").text)
+    names = _names(c.get("/topics?sort=name").text)
     assert names == sorted(names, key=str.lower), names
 
 
 def test_oldest_is_the_exact_reverse_of_newest(app):
     c, _, _ = app
-    assert _names(c.get("/?sort=oldest").text) == list(reversed(_names(c.get("/?sort=recent").text)))
+    assert _names(c.get("/topics?sort=oldest").text) == list(reversed(_names(c.get("/topics?sort=recent").text)))
 
 
 def test_sort_by_activity_puts_the_most_watched_first(app):
     c, ts, rs = app
-    order = _names(c.get("/?sort=activity").text)
+    order = _names(c.get("/topics?sort=activity").text)
     counts = []
     for name in order:
         topic = next(t for t in ts.list() if t.name == name)
@@ -104,7 +104,7 @@ def test_sort_by_activity_puts_the_most_watched_first(app):
 def test_an_unknown_sort_shows_the_list_rather_than_an_error(app):
     """These are shareable URLs; a stale bookmark should degrade, not 400."""
     c, ts, _ = app
-    r = c.get("/?sort=by-vibes&show=nonsense")
+    r = c.get("/topics?sort=by-vibes&show=nonsense")
     assert r.status_code == 200
     assert len(_names(r.text)) == len(ts.list())
 
@@ -113,12 +113,12 @@ def test_an_unknown_sort_shows_the_list_rather_than_an_error(app):
 
 def test_filter_empty_shows_only_topics_never_mined(app):
     c, _, _ = app
-    assert sorted(_names(c.get("/?show=empty").text)) == ["Never run alpha", "Never run beta"]
+    assert sorted(_names(c.get("/topics?show=empty").text)) == ["Never run alpha", "Never run beta"]
 
 
 def test_filter_watched_excludes_them(app):
     c, _, _ = app
-    names = _names(c.get("/?show=watched").text)
+    names = _names(c.get("/topics?show=watched").text)
     assert names and not any("Never run" in n for n in names), names
 
 
@@ -126,10 +126,10 @@ def test_filter_trend_needs_two_snapshots(app):
     """The distinction that matters analytically: momentum and anomaly mean
     nothing on a single snapshot, so "has a trend" is not "has been run"."""
     c, ts, rs = app
-    for name in _names(c.get("/?show=trend").text):
+    for name in _names(c.get("/topics?show=trend").text):
         topic = next(t for t in ts.list() if t.name == name)
         assert len(rs.snapshots(topic.topic_id)) >= 2, name
-    assert "One sweep only" not in _names(c.get("/?show=trend").text)
+    assert "One sweep only" not in _names(c.get("/topics?show=trend").text)
 
 
 def test_filtering_to_nothing_is_not_the_first_run_screen(app):
@@ -137,7 +137,7 @@ def test_filtering_to_nothing_is_not_the_first_run_screen(app):
     help. The empty *result* state is a different thing from the empty *store*
     state, and conflating them is the classic version of this bug."""
     c, _, _ = app
-    body = c.get("/?q=zzzznotathing").text
+    body = c.get("/topics?q=zzzznotathing").text
     assert "Nothing matches this view" in body
     assert "Show all" in body
     assert "step-num" not in body, "showed the first-run walkthrough instead"
@@ -145,7 +145,7 @@ def test_filtering_to_nothing_is_not_the_first_run_screen(app):
 
 def test_the_current_sort_and_filter_are_marked_for_assistive_tech(app):
     c, _, _ = app
-    body = c.get("/?sort=name&show=empty").text
+    body = c.get("/topics?sort=name&show=empty").text
     on = re.findall(r'<a class="chip chip-on"[^>]*aria-current="true"', body)
     assert len(on) == 2, "the active sort and filter should both be marked"
 
@@ -154,7 +154,7 @@ def test_the_links_preserve_the_other_two_settings(app):
     """Changing the sort must not silently drop the search — the commonest way
     a filter toolbar wastes someone's time."""
     c, _, _ = app
-    body = c.get("/?q=never&show=empty&sort=name").text
+    body = c.get("/topics?q=never&show=empty&sort=name").text
     for href in re.findall(r'class="chip[^"]*"[^>]*href="([^"]+)"', body):
         assert "q=never" in href, href
 
@@ -187,7 +187,8 @@ def test_deleting_removes_the_topic_its_runs_and_its_artifacts(app):
 
     r = c.post(f"/topics/{topic.topic_id}/delete", follow_redirects=False)
     assert r.status_code == 303
-    assert r.headers["location"] == "/"
+    # Back to the list it was deleted from, not the dashboard.
+    assert r.headers["location"] == "/topics"
 
     with pytest.raises(NoSuchTopic):
         ts.get(topic.topic_id)

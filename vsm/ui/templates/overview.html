@@ -1,0 +1,167 @@
+{% extends "_base.html" %}
+{% block title %}Overview — Vi Signal Mine{% endblock %}
+{% block content %}
+{#
+  The landing screen. Deliberately almost wordless: four panel headings, four
+  counter labels, and a one-line empty state per panel. Every other page in this
+  app spends a quarter of its words explaining itself, which is what made the
+  tool read as prose about intelligence rather than intelligence.
+
+  Each panel answers one question and is ranked, capped at six, and linked to its
+  own detail. No panel explains what it is — the heading is the explanation, and
+  a reader who needs more has "How it works" in the nav.
+#}
+<div class="page page-wide">
+
+<section class="dash-head">
+  <h1>Overview</h1>
+  {# No synthetic notice here: `_base.html` already shows one banner for the
+     whole page, and two warnings about the same thing is how a warning stops
+     being read. #}
+</section>
+
+<div class="counter-strip">
+  {% for c in counters %}
+  <a class="counter" href="{{ c.href }}">
+    <span class="counter-value">{% if c.money %}{{ c.value|usd(2) }}{% else %}{{ c.value }}{% endif %}</span>
+    <span class="counter-label">{{ c.label }}</span>
+    <span class="counter-note">{{ c.note }}</span>
+  </a>
+  {% endfor %}
+</div>
+
+{% if analysed_topics == 0 %}
+{# Not the same as "no topics". A store can hold twenty topics and have nothing
+   analysed, in which case telling someone how to create their first topic is
+   the wrong instruction. #}
+<div class="dash-cold">
+  <p>Nothing has been analysed yet, so there is nothing to compare or corroborate.</p>
+  <a class="btn btn-primary" href="/topics">Go to topics</a>
+</div>
+{% endif %}
+
+<div class="dash-grid">
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>What moved</h2>
+      {% if moved_total > moved|length %}<span class="panel-more">{{ moved|length }} of {{ moved_total }}</span>{% endif %}
+    </div>
+    {% if moved %}
+    <table class="panel-table">
+      <caption class="visually-hidden">Themes whose signal volume changed most against the prior snapshot.</caption>
+      <thead><tr>
+        <th scope="col">Theme</th>
+        <th scope="col">Topic</th>
+        <th scope="col" class="num">Was</th>
+        <th scope="col" class="num">Now</th>
+        <th scope="col" class="num">Change</th>
+      </tr></thead>
+      <tbody>
+        {% for r in moved %}
+        <tr>
+          <th scope="row"><a href="/runs/{{ r.run_id }}/insight">{{ r.theme }}</a></th>
+          <td class="panel-topic">{{ r.topic.name }}</td>
+          <td class="num">{{ r.volume_prior }}</td>
+          <td class="num">{{ r.volume_now }}</td>
+          <td class="num delta {{ 'delta-up' if r.delta_pct > 0 else 'delta-down' }}">{{ r.delta_pct|pct }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="panel-empty">Needs a topic swept twice — one snapshot has nothing to move against.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Clinicians vs patients</h2>
+      {% if divergence_total > divergence|length %}<span class="panel-more">{{ divergence|length }} of {{ divergence_total }}</span>{% endif %}
+    </div>
+    {% if divergence %}
+    <table class="panel-table">
+      <caption class="visually-hidden">Themes where the two audiences read most differently, widest gap first.</caption>
+      <thead><tr>
+        <th scope="col">Theme</th>
+        <th scope="col">Topic</th>
+        <th scope="col" class="num">Clinician</th>
+        <th scope="col" class="num">Patient</th>
+        <th scope="col" class="num">Gap</th>
+      </tr></thead>
+      <tbody>
+        {% for r in divergence %}
+        <tr>
+          <th scope="row"><a href="/runs/{{ r.run_id }}/insight">{{ r.theme }}</a></th>
+          <td class="panel-topic">{{ r.topic.name }}</td>
+          <td class="num">{{ r.hcp_net|net_short('hcp') }}</td>
+          <td class="num">{{ r.patient_net|net_short('patient') }}</td>
+          <td class="num strong">{{ r.divergence|net }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+    {% if not_comparable %}
+    <p class="panel-foot">{{ not_comparable }} theme{{ '' if not_comparable == 1 else 's' }} only one side discussed — no gap, and silence is not agreement.</p>
+    {% elif not divergence %}
+    <p class="panel-empty">Needs an insight pass, which is where the two audiences get separated.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Safe to say</h2>
+      {% if sayable_total > sayable|length %}<span class="panel-more">{{ sayable|length }} of {{ sayable_total }}</span>{% endif %}
+    </div>
+    {% if sayable %}
+    <table class="panel-table">
+      <caption class="visually-hidden">Findings on three or more independent sources, so they can be stated to a client.</caption>
+      <thead><tr>
+        <th scope="col">Finding</th>
+        <th scope="col">Topic</th>
+        <th scope="col" class="num">Sources</th>
+      </tr></thead>
+      <tbody>
+        {% for r in sayable %}
+        <tr>
+          <th scope="row"><a href="/runs/{{ r.run_id }}/insight">{{ r.statement }}</a></th>
+          <td class="panel-topic">{{ r.topic.name }}</td>
+          <td class="num strong">{{ r.sources }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+    {% if emerging %}
+    <p class="panel-foot">{{ emerging }} more on fewer than three independent sources — not yet stateable.</p>
+    {% elif not sayable %}
+    <p class="panel-empty">Needs an insight pass to score findings against the three-source threshold.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Needs attention</h2>
+      {% if attention_total > attention|length %}<span class="panel-more">{{ attention|length }} of {{ attention_total }}</span>{% endif %}
+    </div>
+    {% if attention %}
+    <ul class="attention-list">
+      {% for r in attention %}
+      <li>
+        <span class="attention-topic"><a href="/topics/{{ r.topic.topic_id }}">{{ r.topic.name }}</a></span>
+        <span class="attention-why">{{ r.why }}</span>
+        {% if storage_is_durable() %}
+        <a class="btn btn-ghost btn-sm attention-action" href="{{ r.href }}">{{ r.action }}</a>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="panel-empty">Nothing waiting.</p>
+    {% endif %}
+  </section>
+
+</div>
+</div>
+{% endblock %}

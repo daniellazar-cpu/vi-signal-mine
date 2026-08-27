@@ -1090,7 +1090,150 @@ a.tier-badge-corroborated:hover { background: var(--vi-violet-hover); border-col
    fabricated-run warning that vanishes on the way to the printer is worse
    than useless, and every tab panel on the insight screen, four of which are
    `display: none` on screen and would otherwise print blank. */
-/* ============================================= list tools ============= */
+.confirm-cap {
+  font-size: 13px; color: var(--fg2); margin: var(--space-sm) 0 0;
+  display: flex; gap: 12px; flex-wrap: wrap; align-items: baseline;
+}
+
+.promise { margin-top: var(--space-md); }
+.promise-head { font-size: 15px; font-weight: 500; margin: 0 0 8px; }
+.promise-list {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px var(--space-md);
+}
+.promise-list li {
+  display: flex; justify-content: space-between; gap: 10px; align-items: baseline;
+  padding: 7px 0; border-bottom: var(--border-hairline) solid var(--rule); font-size: 14px;
+}
+.promise-state { font-size: 12px; color: var(--fg2); flex: none; }
+.promise-foot { margin: 12px 0 0; font-size: 13px; }
+@media (max-width: 699px) { .promise-list { grid-template-columns: 1fr; } }
+
+/* ============================================= dashboard ============== */
+/*
+   The overview. Density is the design here: four counters and four ranked
+   panels, and the only prose is one empty-state line per panel. The rest of
+   this app spent a quarter of its words explaining itself, which is what made
+   it read as writing about intelligence rather than intelligence.
+
+   No colour carries meaning. Vi Violet stays reserved for the one primary
+   action, and the red introduced for delete stays there — so direction is shown
+   by sign and weight, which also survives greyscale printing and colour
+   blindness without a legend.
+*/
+.dash-head { margin-bottom: var(--space-md); }
+.dash-head h1 { margin: 0; }
+.dash-synthetic {
+  margin: 8px 0 0; font-size: 13px; color: var(--fg2);
+  border-left: 1px solid var(--rule); padding-left: 10px;
+}
+
+/* Counters read as one instrument panel, not four cards: hairlines between,
+   no boxes. A card per number is the hero-metric template and it wastes the
+   width these four could share. */
+.counter-strip {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  border-top: var(--border-hairline) solid var(--fg1);
+  border-bottom: var(--border-hairline) solid var(--rule);
+  margin-bottom: var(--space-lg);
+}
+.counter {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: var(--space-sm) var(--space-sm) var(--space-sm) 0;
+  text-decoration: none; color: inherit;
+  border-right: var(--border-hairline) solid var(--rule);
+}
+.counter:last-child { border-right: 0; }
+.counter:hover { background: var(--bg-subtle); }
+.counter:focus-visible { outline: 2px solid var(--signal); outline-offset: -2px; }
+.counter-value {
+  font-size: 34px; line-height: 1.05; letter-spacing: -0.02em;
+  color: var(--fg1); font-variant-numeric: tabular-nums;
+}
+.counter-label {
+  font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+  font-weight: 500; color: var(--fg1);
+}
+.counter-note { font-size: 12px; color: var(--fg2); }
+
+.dash-cold {
+  display: flex; align-items: center; gap: var(--space-md); flex-wrap: wrap;
+  padding: var(--space-md) 0 var(--space-lg);
+}
+.dash-cold p { margin: 0; color: var(--fg2); max-width: 52ch; }
+
+/* Two up on a laptop. The panels are independent answers, so they read as
+   columns rather than a single scroll of stacked tables. */
+.dash-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-lg) var(--space-lg);
+}
+.panel { min-width: 0; }
+.panel-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  padding-bottom: 8px; border-bottom: var(--border-hairline) solid var(--fg1);
+}
+.panel-head h2 { margin: 0; font-size: 15px; font-weight: 500; letter-spacing: -0.01em; }
+.panel-more { font-size: 12px; color: var(--fg2); font-variant-numeric: tabular-nums; }
+
+.panel-table { width: 100%; border-collapse: collapse; }
+.panel-table th, .panel-table td {
+  text-align: left; padding: 9px 10px 9px 0; vertical-align: baseline;
+  border-bottom: var(--border-hairline) solid var(--rule);
+  font-weight: 400;
+}
+.panel-table thead th {
+  font-size: 10px; letter-spacing: 0.09em; text-transform: uppercase;
+  color: var(--fg2); font-weight: 500; padding-top: 8px;
+}
+.panel-table tbody th[scope="row"] { color: var(--fg1); padding-right: var(--space-sm); }
+.panel-table tbody th[scope="row"] a { color: inherit; text-decoration: none; }
+.panel-table tbody th[scope="row"] a:hover { text-decoration: underline; text-underline-offset: 2px; }
+.panel-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.panel-table .strong { color: var(--fg1); font-weight: 500; }
+.panel-topic { color: var(--fg2); font-size: 13px; }
+.panel-table tbody tr:last-child th, .panel-table tbody tr:last-child td { border-bottom: 0; }
+
+/* Direction by sign and weight, never by hue. `delta-down` is not red: red in
+   this app means "this deletes something", and a falling theme is not an
+   error — sometimes it is the good news. */
+.delta { font-variant-numeric: tabular-nums; }
+.delta-up { color: var(--fg1); font-weight: 500; }
+.delta-down { color: var(--fg2); }
+
+.panel-empty, .panel-foot {
+  margin: 12px 0 0; font-size: 13px; color: var(--fg2); max-width: 56ch;
+}
+
+.attention-list { list-style: none; margin: 0; padding: 0; }
+.attention-list li {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 11px 0; border-bottom: var(--border-hairline) solid var(--rule);
+}
+.attention-list li:last-child { border-bottom: 0; }
+.attention-topic { flex: 1 1 auto; min-width: 0; }
+.attention-topic a { color: var(--fg1); }
+.attention-why { font-size: 13px; color: var(--fg2); }
+.attention-action { flex: none; }
+
+@media (max-width: 899px) {
+  .dash-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 699px) {
+  /* Two by two rather than four across: at 375px, four columns give each
+     number about 80px, which is not enough for a dollar figure. */
+  .counter-strip { grid-template-columns: repeat(2, 1fr); }
+  .counter { padding-right: var(--space-sm); }
+  .counter:nth-child(2) { border-right: 0; }
+  .counter:nth-child(-n+2) { border-bottom: var(--border-hairline) solid var(--rule); }
+  .counter-value { font-size: 28px; }
+  /* The panel tables are narrow-column data; let them scroll rather than
+     crushing the theme name to two characters. */
+  .panel-table { display: block; overflow-x: auto; white-space: nowrap; }
+  .panel-table tbody th[scope="row"] { white-space: normal; min-width: 14ch; }
+}
+
+/* ============================================= list tools ============= *//* ============================================= list tools ============= */
 /*
    Search, sort and filter for the topics list. All of it is links and a plain
    GET form: the view you are looking at is a URL you can share, bookmark or

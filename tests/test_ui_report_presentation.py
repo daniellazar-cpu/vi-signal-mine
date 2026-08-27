@@ -124,8 +124,17 @@ def test_every_deliverable_excerpt_renders_as_markup_not_source(seeded):
 
 def test_a_produced_run_shows_a_real_excerpt_of_its_own_artifact(seeded):
     """After a run the card shows the run's own output, not the authored
-    illustration — and says which it is showing."""
-    body = seeded["client"].get(seeded["report_path"]).text
+    illustration — and says which it is showing.
+
+    Checked on the topic page rather than the report page. The full card
+    treatment was on five screens at ~300 words each, and on a *finished* report
+    it showed the reader an excerpt of the document they were already reading.
+    The preview now lives where the question it answers is still open — the
+    topic page and `/deliverables` — and finished runs carry a download list
+    instead. `test_a_finished_run_lists_downloads_rather_than_previewing_them`
+    below pins that split.
+    """
+    body = seeded["client"].get(f"/topics/{seeded['topic'].topic_id}").text
     assert "From this run" in body
 
 
@@ -427,7 +436,11 @@ def test_a_filename_is_never_the_headline(seeded):
 
 
 def test_a_download_is_a_control_with_states_and_its_filename_beside_it(seeded):
-    body = seeded["client"].get(seeded["report_path"]).text
+    """On the topic page: it is where the card treatment lives now *and* has
+    real artifacts behind it. `/deliverables` has the cards but nothing
+    downloadable — it is the not-run-yet catalogue — so the control's states
+    could only be checked somewhere both are true."""
+    body = seeded["client"].get(f"/topics/{seeded['topic'].topic_id}").text
     controls = re.findall(r'<a class="btn btn-ghost btn-sm deliv-download"[^>]*>(.*?)</a>', body, re.S)
     assert len(controls) >= 4, f"expected download controls, found {len(controls)}"
     for control in controls:
@@ -597,3 +610,30 @@ def test_the_net_filter_degrades_rather_than_lying():
     assert net_stance_text(None) == "—"
     assert net_stance_text(None, "patient").startswith("not read")
     assert net_stance_text(0.0, "patient") == "+0.00"
+
+
+def test_a_finished_run_lists_downloads_rather_than_previewing_them(seeded):
+    """The split this pass introduced, pinned in both directions.
+
+    The deliverables preview exists to answer "what will I get before I spend
+    anything". On a finished run that question is answered by the page itself,
+    so the cards were ~300 words restating what was already on screen — and the
+    same block sat on five separate screens.
+    """
+    paths = [seeded["report_path"],
+             f"/runs/{seeded['insight'].run_id}/insight",
+             f"/runs/{seeded['snapshot'].run_id}/snapshot"]
+    for path in paths:
+        body = seeded["client"].get(path).text
+        assert 'class="downloads-list"' in body, f"{path} has no download list"
+        assert 'class="deliv-card"' not in body, f"{path} still renders preview cards"
+        # And the list must actually link the artifacts, not just look like one.
+        assert "/artifact/" in body, path
+
+
+def test_the_preview_still_exists_where_the_question_is_open(seeded):
+    """The other half: removing it everywhere would have deleted a feature that
+    was asked for. A topic page and `/deliverables` keep the full treatment."""
+    for path in ("/deliverables", f"/topics/{seeded['topic'].topic_id}"):
+        body = seeded["client"].get(path).text
+        assert 'class="deliv-card' in body, f"{path} lost the preview"

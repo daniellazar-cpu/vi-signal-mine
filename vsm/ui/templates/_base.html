@@ -47,9 +47,12 @@ not extended.
       <span class="app-mark-name">Signal Mine</span>
     </a>
     <nav class="app-top-nav">
-      <a href="/"{% if active_nav is defined and active_nav == "topics" %} class="current" aria-current="page"{% endif %}>Topics</a>
-      <a href="/deliverables"{% if active_nav is defined and active_nav == "deliverables" %} class="current" aria-current="page"{% endif %}>What you get</a>
-      <a href="/how"{% if active_nav is defined and active_nav == "how" %} class="current" aria-current="page"{% endif %}>How this works</a>
+      {# Two working screens first, documentation last. The old order put two
+         explanatory pages ahead of the only one that does anything. #}
+      <a href="/"{% if active_nav is defined and active_nav == "overview" %} class="current" aria-current="page"{% endif %}>Overview</a>
+      <a href="/topics"{% if active_nav is defined and active_nav == "topics" %} class="current" aria-current="page"{% endif %}>Topics</a>
+      <a href="/deliverables"{% if active_nav is defined and active_nav == "deliverables" %} class="current" aria-current="page"{% endif %}>Deliverables</a>
+      <a href="/how"{% if active_nav is defined and active_nav == "how" %} class="current" aria-current="page"{% endif %}>How it works</a>
     </nav>
   </header>
   {% if not storage_is_durable() %}
@@ -61,7 +64,11 @@ not extended.
   {% if synthetic is defined and synthetic %}
   <div class="synthetic-banner" role="note" aria-label="demonstration data">
     <span class="synthetic-banner-mark" aria-hidden="true"></span>
-    <p><strong>Demonstration data.</strong> This run used the offline synthetic miner — every signal below was fabricated for rehearsal, not collected from the web. Do not treat any figure, excerpt or citation on this page as real, and never hand it to a client.</p>
+    {# 13 words, down from 46. This banner is on every page that carries
+       fabricated rows, so its length was paid on every one of them — and a
+       warning long enough to skim is a warning people skim. The full
+       explanation lives on "How it works". #}
+    <p><strong>Demonstration data</strong> — every figure below is fabricated. Never hand this to a client.</p>
   </div>
   {% endif %}
   {% block top_rail %}{% endblock %}

@@ -1,5 +1,5 @@
 {% extends "_base.html" %}
-{% from "_macros.html" import title_block, flow_rail, deliverable_tiers %}
+{% from "_macros.html" import title_block, flow_rail, deliverable_downloads %}
 {% block title %}Snapshot — Vi Signal Mine{% endblock %}
 
 {% block top_rail %}
@@ -149,7 +149,7 @@
 
 <h2>Deliverables</h2>
 <p class="body-text field-note">What this topic can produce, from here on — the signal ledger and coverage are already real; the rest fills in as insight and report run.</p>
-{{ deliverable_tiers(deliv_tiers) }}
+{{ deliverable_downloads(deliv_tiers) }}
 
 <div class="form-actions form-actions-end">
   {% if storage_is_durable() %}

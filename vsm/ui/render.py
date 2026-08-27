@@ -115,6 +115,22 @@ def net_stance_text(value: float | None, which: str | None = None) -> str:
     return f"{sign}{value:.2f}"
 
 
+def net_stance_short(value: float | None, which: str | None = None) -> str:
+    """The same fact as :func:`net_stance_text`, in two words instead of nine.
+
+    A dashboard cell cannot carry "not read — no clinician-class signal in this
+    theme", and a bare em dash is the defect that function exists to prevent. So
+    the compact form still says *that it was not read* rather than implying a
+    zero, and the full reason is one click away on the insight page the row
+    links to. `which` is accepted and unused so the two filters are
+    interchangeable at a call site.
+    """
+    if value is None:
+        return "not read"
+    sign = "+" if value >= 0 else ""
+    return f"{sign}{value:.2f}"
+
+
 def fmt_dt(value: str | None) -> str:
     """A dated frame's label. Never guesses a format that doesn't parse."""
     if not value:
@@ -904,6 +920,18 @@ def markdown_paragraphs(text: str | None) -> list[str]:
     return [" ".join(b) for b in blocks if b]
 
 
+#: A block containing any of these is the fabrication banner, not a sample.
+#: Every synthetic artifact *opens* with it — correctly, since a downloaded file
+#: must carry its own warning — so an excerpt taken from the top showed it
+#: instead of the output. With ten cards on a page that was the same forty words
+#: ten times over, under a page banner that had already said it once, which is
+#: how a warning stops being read.
+_NOTICE_MARKERS = (
+    "fabricated by the offline",
+    "Synthetic demonstration run",
+)
+
+
 def markdown_excerpt_html(text: str | None, *, limit: int = 260, min_len: int = 48) -> str:
     """A short, rendered excerpt of a markdown artifact.
 
@@ -921,6 +949,7 @@ def markdown_excerpt_html(text: str | None, *, limit: int = 260, min_len: int = 
     if not text:
         return ""
     blocks: list[tuple[str, list[str]]] = []
+    # Note the excerpt skips the fabrication banner; the artifact keeps it.
     for line in text.replace("\r\n", "\n").split("\n"):
         s_line = line.strip()
         if not s_line:
@@ -936,7 +965,10 @@ def markdown_excerpt_html(text: str | None, *, limit: int = 260, min_len: int = 
             blocks.append((kind, [s_line]))
         else:
             blocks[-1][1].append(s_line)
-    candidates = [(k, ls) for k, ls in blocks if ls]
+    candidates = [
+        (k, ls) for k, ls in blocks
+        if ls and not any(m in " ".join(ls) for m in _NOTICE_MARKERS)
+    ]
     if not candidates:
         return ""
     chosen = next(

@@ -41,7 +41,7 @@
 {% macro flow_rail(topic, flow, current) %}
 <div class="flow-rail" role="navigation" aria-label="topic stages">
   <div class="flow-rail-crumb">
-    <a href="/">Topics</a>
+    <a href="/topics">Topics</a>
     <span class="flow-rail-sep" aria-hidden="true">/</span>
     {% if topic is not none %}
     <a href="/topics/{{ topic.topic_id }}" class="flow-rail-topic">{{ topic.name }}</a>
@@ -146,6 +146,55 @@
     {% if d.available %}{{ download_control(d) }}{% else %}<span class="deliv-status">Not run yet</span><span class="deliv-file">{{ d.file }}</span>{% endif %}
   </div>
 </li>
+{% endmacro %}
+
+{% macro deliverable_promise(tiers, heading_level=2) %}
+{#
+  What you will get, as names — not a catalogue.
+
+  The owner asked for the deliverables to be visible *before* running, and this
+  screen is one of the two places they named. The full card treatment honoured
+  that and cost ~350 words of a 700-word page, on the one screen where a person
+  is deciding about a number. Names keep the promise; "What you get" carries the
+  detail one click away.
+#}
+<div class="promise">
+  <h{{ heading_level }} class="promise-head">What lands when this finishes</h{{ heading_level }}>
+  <ul class="promise-list">
+    {% for t in tiers %}{% for d in (t.cards if t.key == "primary" else t.member_groups|map(attribute="cards")|sum(start=[])) %}
+    <li>{{ d.name }} <span class="promise-state">Not run yet</span></li>
+    {% endfor %}{% endfor %}
+  </ul>
+  <p class="promise-foot"><a class="link-back" href="/deliverables">What each one is</a></p>
+</div>
+{% endmacro %}
+
+{% macro deliverable_downloads(tiers, heading_level=2) %}
+{#
+  The compact form, for a run that has already produced its artifacts. The full
+  `deliverable_tiers` preview exists to answer "what will I get before I spend
+  anything" — and on a *completed* run that question is already answered by the
+  page you are looking at, so the cards became ~300 words of sample excerpts and
+  tier ledes restating what was right there. This block was on five screens.
+
+  Here the useful thing is only: which files exist, how big, and get them.
+#}
+<div class="downloads">
+  <div class="downloads-head">
+    <h{{ heading_level }}>Downloads</h{{ heading_level }}>
+    <a class="link-back" href="/deliverables">What each one is</a>
+  </div>
+  <ul class="downloads-list">
+    {% for t in tiers %}{% for d in (t.cards if t.key == "primary" else t.member_groups|map(attribute="cards")|sum(start=[])) %}
+    {% if d.available %}
+    <li>
+      <a href="{{ d.href }}">{{ d.name }}</a>
+      <span class="downloads-file">{{ d.file }}{% if d.size_label %} · {{ d.size_label }}{% endif %}</span>
+    </li>
+    {% endif %}
+    {% endfor %}{% endfor %}
+  </ul>
+</div>
 {% endmacro %}
 
 {% macro deliverable_tiers(tiers, show_more_link=True, heading_level=2) %}

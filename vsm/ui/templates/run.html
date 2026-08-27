@@ -1,5 +1,5 @@
 {% extends "_base.html" %}
-{% from "_macros.html" import title_block, flow_rail, deliverable_tiers %}
+{% from "_macros.html" import title_block, flow_rail, deliverable_downloads %}
 {% block title %}{{ run.mode|capitalize }} run — Vi Signal Mine{% endblock %}
 
 {% block top_rail %}
@@ -53,7 +53,7 @@
 
 <h2>Deliverables</h2>
 <p class="body-text field-note">The full set this topic can produce — real where this flow has reached that stage, pending where it has not yet.</p>
-{{ deliverable_tiers(deliv_tiers) }}
+{{ deliverable_downloads(deliv_tiers) }}
 
 <div class="form-actions">
   {% if run.mode == "mine" %}

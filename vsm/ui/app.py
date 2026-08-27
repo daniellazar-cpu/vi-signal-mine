@@ -45,6 +45,7 @@ from vsm.modes.mine import run_mine
 from vsm.modes.report import run_report
 from vsm.platform import assert_serveable, storage_is_durable
 from vsm.topics.model import BANDS
+from vsm.ui.overview import artifacts_to_warm, build_overview
 from vsm.ui.content import (
     DELETE_WARNING,
     DELIVERABLE_GROUPS,
@@ -75,6 +76,7 @@ from vsm.ui.render import (
     markdown_paragraphs,
     markdown_sections,
     markdown_to_html,
+    net_stance_short,
     net_stance_text,
     pct,
     sparkline_svg,
@@ -532,6 +534,9 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
     env.filters["usd"] = usd
     env.filters["pct"] = pct
     env.filters["net"] = net_stance_text
+    # The compact variant, for cells too narrow for the full reason. Still
+    # says "not read" rather than showing a dash — see net_stance_short.
+    env.filters["net_short"] = net_stance_short
     env.filters["dt"] = fmt_dt
     env.filters["date_long"] = fmt_date_long
     env.globals["tier_label"] = _tier_label
@@ -773,6 +778,28 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
     _ROW_CAP = 50
 
     @app.get("/", response_class=HTMLResponse)
+    def overview(request: Request) -> HTMLResponse:
+        """The landing screen: what the tool found, not what the tool is.
+
+        This used to be the topics table, so everything a person opens the tool
+        to learn — what moved, where the two audiences disagree, what has become
+        sayable — was three clicks in and only ever for one topic at a time. The
+        answers were in the artifacts the whole while.
+
+        Overview first, then zoom: every panel is a ranked six with a link to
+        the full detail, and each row links to the run it came from, so nothing
+        here is a number without a provenance trail behind it.
+        """
+        topics = topic_store.list()
+        runs_by_topic = run_store.for_topics([t.topic_id for t in topics])
+        # One batch for every artifact the aggregator is about to read. This
+        # screen touches every topic, which is exactly the shape that made the
+        # old index take eleven seconds when it was done a read at a time.
+        _prefetch(artifacts_to_warm(runs_by_topic))
+        ctx = build_overview(topics, runs_by_topic, run_store.read_artifact)
+        return render(request, "overview.html", active_nav="overview", **ctx)
+
+    @app.get("/topics", response_class=HTMLResponse)
     def topics_index(
         request: Request, q: str = "", sort: str = "recent", show: str = "all",
         # `show_all`, not `all`: a parameter named `all` shadows the builtin for
@@ -960,7 +987,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             competitors=_split_lines(competitors), questions=_split_lines(questions),
             never_say=_split_lines(never_say),
         )
-        return RedirectResponse(url="/", status_code=303)
+        return RedirectResponse(url="/topics", status_code=303)
 
     @app.post("/topics/{topic_id}", response_class=HTMLResponse)
     async def topics_update(
@@ -1002,7 +1029,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             competitors=_split_lines(competitors), questions=_split_lines(questions),
             never_say=_split_lines(never_say),
         )
-        return RedirectResponse(url="/", status_code=303)
+        return RedirectResponse(url="/topics", status_code=303)
 
     @app.get("/topics/{topic_id}/confirm", response_class=HTMLResponse)
     def topic_confirm(request: Request, topic_id: str, band: str = "") -> HTMLResponse:
@@ -1065,7 +1092,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         deleted = run_store.delete_for_topic(topic_id)
         topic_store.delete(topic_id)
         logger.info("deleted topic %s and %d run(s)", topic_id, deleted)
-        return RedirectResponse(url="/", status_code=303)
+        return RedirectResponse(url="/topics", status_code=303)
 
     @app.post("/topics/{topic_id}/mine")
     def topic_mine(request: Request, topic_id: str, band: str = Form("")) -> Any:

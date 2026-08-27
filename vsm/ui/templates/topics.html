@@ -17,13 +17,13 @@
 {% endif %}
 
 {% if total > 0 %}
-<form class="list-tools" method="get" action="/" role="search">
+<form class="list-tools" method="get" action="/topics" role="search">
   <div class="list-tools-search">
     <label for="q" class="visually-hidden">Search topics</label>
     <input id="q" type="search" name="q" value="{{ q }}" placeholder="Search name, brand, molecule, area">
     <button class="btn btn-ghost btn-sm" type="submit">Search</button>
     {% if q or show != 'all' or sort != 'recent' %}
-    <a class="link-back" href="/">Clear</a>
+    <a class="link-back" href="/topics">Clear</a>
     {% endif %}
   </div>
   <div class="list-tools-row">
@@ -32,7 +32,7 @@
       {% for key, label in sorts %}
       <a class="chip {% if sort == key %}chip-on{% endif %}"
          {% if sort == key %}aria-current="true"{% endif %}
-         href="/?q={{ q|urlencode }}&amp;show={{ show }}&amp;sort={{ key }}">{{ label }}</a>
+         href="/topics?q={{ q|urlencode }}&amp;show={{ show }}&amp;sort={{ key }}">{{ label }}</a>
       {% endfor %}
     </div>
   </div>
@@ -43,7 +43,7 @@
       <a class="chip {% if show == key %}chip-on{% endif %}"
          {% if show == key %}aria-current="true"{% endif %}
          title="{{ filter_help[key] }}"
-         href="/?q={{ q|urlencode }}&amp;sort={{ sort }}&amp;show={{ key }}">{{ label }}</a>
+         href="/topics?q={{ q|urlencode }}&amp;sort={{ sort }}&amp;show={{ key }}">{{ label }}</a>
       {% endfor %}
     </div>
   </div>
@@ -113,7 +113,7 @@
 {% if capped %}
 <p class="list-cap">
   Showing the first {{ row_cap }} of {{ matched }} — narrow it with search or a
-  filter above, or <a href="/?q={{ q|urlencode }}&amp;sort={{ sort }}&amp;show={{ show }}&amp;all=1">show all {{ matched }}</a>.
+  filter above, or <a href="/topics?q={{ q|urlencode }}&amp;sort={{ sort }}&amp;show={{ show }}&amp;all=1">show all {{ matched }}</a>.
 </p>
 {% elif uncapped and matched > row_cap %}
 <p class="list-cap">Showing all {{ matched }} topics.</p>
@@ -124,7 +124,7 @@
 <div class="empty-result">
   <p class="hint-text">Nothing matches this view.</p>
   <p class="page-caption">{{ filter_lede }}</p>
-  <a class="btn btn-ghost" href="/">Show all {{ total }} topics</a>
+  <a class="btn btn-ghost" href="/topics">Show all {{ total }} topics</a>
 </div>
 {% else %}
 <div class="first-run">

@@ -1,5 +1,5 @@
 {% extends "_base.html" %}
-{% from "_macros.html" import flow_rail, deliverable_tiers, tier_badge, ref_marks %}
+{% from "_macros.html" import flow_rail, deliverable_downloads, tier_badge, ref_marks %}
 {% block title %}Pulse report — {% if topic is not none %}{{ topic.name }} — {% endif %}Vi Signal Mine{% endblock %}
 
 {% block top_rail %}
@@ -272,7 +272,7 @@
 <section class="doc-section doc-no-print" id="files">
   <h2 class="doc-h">The files this run produced</h2>
   <p class="doc-section-note">Each of these is exactly what downloads — the document above is the first of them, typeset. <a href="/deliverables">What you get</a> describes all ten.</p>
-  {{ deliverable_tiers(deliv_tiers, true, 3) }}
+  {{ deliverable_downloads(deliv_tiers, 3) }}
 </section>
 </article>
 {% endblock %}

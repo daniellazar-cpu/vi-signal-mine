@@ -1,5 +1,5 @@
 {% extends "_base.html" %}
-{% from "_macros.html" import title_block, flow_rail, deliverable_tiers, tier_badge %}
+{% from "_macros.html" import title_block, flow_rail, deliverable_downloads, tier_badge %}
 {% block title %}Insight — Vi Signal Mine{% endblock %}
 
 {% block top_rail %}
@@ -221,6 +221,6 @@
 
 <h2>Deliverables</h2>
 <p class="body-text field-note">The findings above, as the artifacts they land in — the analysis group is real; the report becomes real once you generate it.</p>
-{{ deliverable_tiers(deliv_tiers) }}
+{{ deliverable_downloads(deliv_tiers) }}
 </div>
 {% endblock %}
