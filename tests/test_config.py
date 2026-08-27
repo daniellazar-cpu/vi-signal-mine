@@ -1,5 +1,9 @@
+from pathlib import Path
+
 import pytest
+
 from vsm.config import Settings
+from vsm.errors import ConfigError
 
 
 def test_offline_defaults_to_true():
@@ -51,5 +55,60 @@ def test_miner_auto_resolves_on_key_presence():
 def test_unknown_mode_is_rejected_loudly():
     from vsm.errors import ConfigError
 
+    with pytest.raises(ConfigError, match="VSM_MINER"):
+        Settings.from_env({"VSM_MINER": "sometimes"})
+
+
+# --- blank env vars mean "use the default", never "this is the value" -------
+#
+# A real production outage: the hosting dashboard held VSM_MINER with an empty
+# value, `_choice` read "" as an invalid mode, and the app raised at import so
+# every single request 500'd. These pin the whole class, because the crash was
+# the mildest of the five failures an empty var could cause.
+
+
+def test_a_blank_choice_falls_back_to_the_default():
+    """The exact outage: VSM_MINER="" killed the app at import."""
+    assert Settings.from_env({"VSM_MINER": ""}).miner_mode == "auto"
+    assert Settings.from_env({"VSM_MINER": "   "}).miner_mode == "auto"
+    assert Settings.from_env({"VSM_DRAFTER": ""}).drafter_mode == "auto"
+
+
+def test_a_blank_offline_flag_still_means_offline():
+    """The most dangerous of the five. Read naively, VSM_OFFLINE="" evaluates
+    false and silently disarms the master switch that makes outbound calls
+    impossible — the app would look configured and be able to spend money."""
+    assert Settings.from_env({"VSM_OFFLINE": ""}).offline is True
+    assert Settings.from_env({"VSM_OFFLINE": "   "}).offline is True
+
+
+def test_a_blank_cost_cap_falls_back_rather_than_crashing():
+    """float("") raises ValueError, which killed the app the same way."""
+    assert Settings.from_env({"VSM_RUN_COST_CAP_USD": ""}).run_cost_cap_usd == 5.0
+
+
+def test_a_malformed_cost_cap_still_refuses_to_start():
+    """Blank is no value; garbage is a mistake. A cap that cannot be parsed
+    must never quietly become something permissive."""
+    with pytest.raises(ConfigError, match="VSM_RUN_COST_CAP_USD"):
+        Settings.from_env({"VSM_RUN_COST_CAP_USD": "cheap"})
+
+
+def test_a_blank_var_dir_does_not_become_the_working_directory():
+    """Path("") is Path("."), which would scatter run artifacts into cwd."""
+    assert Settings.from_env({"VSM_VAR_DIR": ""}).var_dir == Path("var")
+
+
+def test_blank_zones_and_model_fall_back():
+    s = Settings.from_env(
+        {"BRIGHTDATA_SERP_ZONE": "", "BRIGHTDATA_UNLOCKER_ZONE": "", "VSM_LLM_MODEL": ""}
+    )
+    assert s.brightdata_serp_zone == "dataweb_serp_api1"
+    assert s.brightdata_unlocker_zone == "dataweb"
+    assert s.llm_model == "claude-opus-5"
+
+
+def test_a_genuinely_wrong_choice_still_raises():
+    """The guard must not have been loosened into uselessness."""
     with pytest.raises(ConfigError, match="VSM_MINER"):
         Settings.from_env({"VSM_MINER": "sometimes"})

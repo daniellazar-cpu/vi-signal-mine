@@ -22,17 +22,64 @@ _DRAFTER_MODES = ("auto", "llm")
 _TRUE = ("1", "true", "yes", "on")
 
 
+def _raw(env: Mapping[str, str], key: str, default: str) -> str:
+    """The value of ``key``, treating blank as **absent** rather than as a value.
+
+    Every reader below goes through this, and it exists because of a real
+    outage. A hosting dashboard will happily hold an environment variable with
+    an empty value, and a platform may inject a declared-but-unset variable as
+    ``""``. Read naively, ``VSM_MINER=""`` is not "unset" — it is the string
+    ``""``, which is not a valid mode, so :func:`_choice` raised at import time
+    and the entire application failed to start on every request.
+
+    The crash was the mild version. The same naive read made
+    ``VSM_RUN_COST_CAP_USD=""`` a ``ValueError`` from ``float("")``,
+    ``VSM_VAR_DIR=""`` resolve to the working directory, and — worst —
+    ``VSM_OFFLINE=""`` evaluate as *false*, silently disarming the master
+    switch that is supposed to make outbound calls impossible.
+
+    An operator who clears a field means "use the default". Blank is not a
+    value, and the one place to say so is here.
+    """
+    value = env.get(key)
+    if value is None:
+        return default
+    value = str(value).strip()
+    return value if value else default
+
+
 def _flag(env: Mapping[str, str], key: str, default: str) -> bool:
-    return str(env.get(key, default)).strip().lower() in _TRUE
+    return _raw(env, key, default).lower() in _TRUE
 
 
 def _choice(env: Mapping[str, str], key: str, allowed: tuple[str, ...], default: str) -> str:
-    value = str(env.get(key, default)).strip().lower()
+    """One of ``allowed``, blank meaning the default.
+
+    A genuinely wrong value still raises — ``VSM_MINER=sometimes`` is a
+    mistake worth stopping for, and failing loudly at startup beats guessing.
+    Blank is not a wrong value; it is no value.
+    """
+    value = _raw(env, key, default).lower()
     if value not in allowed:
-        raise ConfigError(
-            f"{key}={value!r} is not one of {allowed}", rule="config"
-        )
+        raise ConfigError(f"{key}={value!r} is not one of {allowed}", rule="config")
     return value
+
+
+def _money(env: Mapping[str, str], key: str, default: str) -> float:
+    """A dollar figure, refusing to start on a value that is not a number.
+
+    Separate from the others because the failure mode is specific: a cap that
+    cannot be parsed must never fall back to something permissive. A malformed
+    cap is a mistake to stop for; a blank one means the default.
+    """
+    value = _raw(env, key, default)
+    try:
+        return float(value)
+    except ValueError:
+        raise ConfigError(
+            f"{key}={value!r} is not a number, and a spend cap must be one",
+            rule="config",
+        ) from None
 
 
 @dataclass(frozen=True)
@@ -57,11 +104,11 @@ class Settings:
             drafter_mode=_choice(env, "VSM_DRAFTER", _DRAFTER_MODES, "auto"),
             anthropic_api_key=(env.get("ANTHROPIC_API_KEY") or "").strip() or None,
             brightdata_api_key=(env.get("BRIGHTDATA_API_KEY") or "").strip() or None,
-            brightdata_serp_zone=env.get("BRIGHTDATA_SERP_ZONE", "dataweb_serp_api1"),
-            brightdata_unlocker_zone=env.get("BRIGHTDATA_UNLOCKER_ZONE", "dataweb"),
-            llm_model=env.get("VSM_LLM_MODEL", "claude-opus-5"),
-            run_cost_cap_usd=float(env.get("VSM_RUN_COST_CAP_USD", "5.0")),
-            var_dir=Path(env.get("VSM_VAR_DIR", "var")),
+            brightdata_serp_zone=_raw(env, "BRIGHTDATA_SERP_ZONE", "dataweb_serp_api1"),
+            brightdata_unlocker_zone=_raw(env, "BRIGHTDATA_UNLOCKER_ZONE", "dataweb"),
+            llm_model=_raw(env, "VSM_LLM_MODEL", "claude-opus-5"),
+            run_cost_cap_usd=_money(env, "VSM_RUN_COST_CAP_USD", "5.0"),
+            var_dir=Path(_raw(env, "VSM_VAR_DIR", "var")),
         )
 
     @property
