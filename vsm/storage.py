@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Any, Mapping, Protocol, runtime_checkable
 
@@ -152,3 +153,57 @@ def open_stores(
         TopicStore(settings.db_path),
         RunStore(settings.db_path, settings.var_dir),
     )
+
+
+def read_required(store: Any, run_id: str, name: str,
+                  *, attempts: int = 6, base_delay: float = 0.25) -> Any:
+    """An artifact the caller **knows** must exist, read through a transient
+    absence.
+
+    Not a general retry, and deliberately not built into ``read_artifact``: a
+    great deal of this app reads artifacts whose absence is a legitimate answer
+    — ``_existing_artifact`` in ``vsm/modes/insight.py`` uses a failed read to
+    decide whether a resumed run may skip a pass, and the deliverable cards
+    probe ten names per run of which several are genuinely absent. Retrying
+    those would add seconds to every page in exchange for nothing. So the
+    distinction lives at the call site, where it is known.
+
+    **Why this is needed at all.** On the Vercel Blob backend a blob is not
+    readable from every edge the instant its write returns. Measured on
+    production: the report step failed roughly half the time with "No snapshot
+    to report on", while the very artifacts it could not read returned 200 to an
+    external check made immediately afterwards — from a different region than
+    the one the function ran in. The write had landed and simply was not visible
+    yet where the reader stood. So the read was correct, the conclusion drawn
+    from it ("this artifact is gone, tell the user to mine again") was not.
+
+    Only ``vsm/backends/vercel_blob.py`` has this property, and it is the only
+    thing that declares ``reads_may_lag``. The filesystem store reads a file it
+    just wrote, and ``vsm/backends/blob.py`` — despite the name — is a
+    key-value *table* on the same Postgres database, so both read their own
+    writes and take the single-attempt path.
+
+    Bounded on purpose. Six attempts with full exponential backoff is about 7.75
+    seconds in the worst case, comfortably inside a serverless function's
+    ceiling, and a genuine absence still surfaces as ``FileNotFoundError`` — it
+    is just slower to conclude, which is the right trade when the alternative is
+    telling someone their data is lost while it is sitting in the store.
+    """
+    # A backend that reads its own writes has nothing to wait for: there, a
+    # failed read means the artifact is genuinely absent, and retrying only
+    # makes that conclusion slower — and taxes every test that deletes an
+    # artifact on purpose. Opt in, so the cost sits with the one backend that
+    # has the property.
+    if not getattr(store, "reads_may_lag", False):
+        return store.read_artifact(run_id, name)
+
+    last: FileNotFoundError | None = None
+    for attempt in range(attempts):
+        try:
+            return store.read_artifact(run_id, name)
+        except FileNotFoundError as exc:
+            last = exc
+            if attempt < attempts - 1:
+                time.sleep(base_delay * (2 ** attempt))
+    assert last is not None  # the loop cannot exit without raising or returning
+    raise last

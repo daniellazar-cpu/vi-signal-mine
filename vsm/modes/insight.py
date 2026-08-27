@@ -45,6 +45,7 @@ from dataclasses import asdict
 from typing import Any
 
 from vsm.analysis.anomaly import detect_anomalies, narrate
+from vsm.storage import read_required
 from vsm.analysis.authorclass import VenueResolver
 from vsm.analysis.cluster import Theme, cluster_themes
 from vsm.analysis.corroborate import corroborate
@@ -190,7 +191,10 @@ def run_insight(
     run = _existing_insight_run(store, topic.topic_id, snapshot_run_id) or store.start(
         topic.topic_id, "insight", parent_run_id=snapshot_run_id, **start_overrides
     )
-    signals = store.read_artifact(snapshot_run_id, "signals.json")
+    # Mandatory — unlike `_existing_artifact` above and the momentum loop
+    # below, where a missing artifact is a legitimate answer. See
+    # vsm/storage.py:read_required for the propagation lag this absorbs.
+    signals = read_required(store, snapshot_run_id, "signals.json")
     # The safety rail. Computed once, from the snapshot this INSIGHT run
     # analyses, and threaded into every artifact written below — see
     # _tagged() and vsm.mining.signals.any_synthetic.

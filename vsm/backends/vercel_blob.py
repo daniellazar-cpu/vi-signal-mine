@@ -541,6 +541,12 @@ class BlobTopicStore:
     tests derive one per ``tmp_path``.
     """
 
+    #: A blob is not readable from every edge the instant its write returns —
+    #: measured on production, and the reason `vsm/storage.py:read_required`
+    #: exists. Declaring it here rather than having that helper sniff the class
+    #: keeps the knowledge with the backend that has the property.
+    reads_may_lag = True
+
     def begin_request(self) -> None:
         """Forwarded to the HTTP layer's request-scoped identity map. Called by
         `vsm/ui/app.py`'s middleware once per request; see
@@ -636,6 +642,12 @@ class BlobRunStore:
     conditionally for exactly this reason — see that function's own
     docstring.
     """
+
+    #: A blob is not readable from every edge the instant its write returns —
+    #: measured on production, and the reason `vsm/storage.py:read_required`
+    #: exists. Declaring it here rather than having that helper sniff the class
+    #: keeps the knowledge with the backend that has the property.
+    reads_may_lag = True
 
     def begin_request(self) -> None:
         """Forwarded to the HTTP layer's request-scoped identity map. Called by

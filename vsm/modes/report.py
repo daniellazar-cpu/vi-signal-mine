@@ -43,6 +43,7 @@ from __future__ import annotations
 from typing import Any, Mapping, Sequence
 
 from vsm.analysis.corroborate import CORROBORATED_AT, Finding
+from vsm.storage import read_required
 from vsm.analysis.momentum import NO_BASELINE
 from vsm.guards.advisory import assert_advisory
 from vsm.guards.citations import Citation, bind_citations
@@ -186,15 +187,19 @@ def run_report(
             f"insight run {insight_run_id!r} has no parent snapshot to report on"
         )
 
-    signals = store.read_artifact(mine_run_id, "signals.json")
+    # `read_required`, not a plain read: a transient 404 from a blob that has
+    # not propagated to this region yet used to surface to the user as "No
+    # snapshot to report on" — telling them their snapshot was lost while it
+    # sat in the store. See vsm/storage.py:read_required.
+    signals = read_required(store, mine_run_id, "signals.json")
     ledger: dict[str, Mapping[str, Any]] = {str(s["signal_id"]): s for s in signals}
     # The safety rail. One fabricated row is enough to mark every artifact
     # this call writes — see vsm.mining.signals.any_synthetic.
     synthetic = any_synthetic(signals)
 
-    raw_findings = store.read_artifact(insight_run_id, "findings.json")
+    raw_findings = read_required(store, insight_run_id, "findings.json")
     findings = [_finding_from_dict(d) for d in raw_findings]
-    raw_themes = store.read_artifact(insight_run_id, "themes.json")
+    raw_themes = read_required(store, insight_run_id, "themes.json")
     # INSIGHT builds exactly one Finding per Theme, in the same order
     # (`corroborate([...for t in themes], by_id)`) — zipping is safe and
     # avoids re-matching themes to findings by name, which breaks the moment
@@ -202,13 +207,13 @@ def run_report(
     paired = list(zip(raw_themes, findings))
 
     momentum_by_name = {
-        m["theme_name"]: m for m in store.read_artifact(insight_run_id, "momentum.json")
+        m["theme_name"]: m for m in read_required(store, insight_run_id, "momentum.json")
     }
-    anomaly_rows = store.read_artifact(insight_run_id, "anomaly.json")
+    anomaly_rows = read_required(store, insight_run_id, "anomaly.json")
     duallens_by_id = {
-        g["theme_id"]: g for g in store.read_artifact(insight_run_id, "duallens.json")
+        g["theme_id"]: g for g in read_required(store, insight_run_id, "duallens.json")
     }
-    stance_rows = store.read_artifact(insight_run_id, "stance.json")
+    stance_rows = read_required(store, insight_run_id, "stance.json")
     basis = stance_rows[0]["basis"] if stance_rows else "venue"
 
     cited: dict[str, Citation] = {}
