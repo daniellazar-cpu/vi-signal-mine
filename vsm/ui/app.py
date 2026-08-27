@@ -294,6 +294,17 @@ def _deliverable_cards(
 ) -> list[dict[str, Any]]:
     """Every deliverable, real where a producing run exists and has written it."""
     run_by_group = {"data": mine_run, "analysis": insight_run, "report": report_run}
+    # Warm every artifact this is about to look for, in one concurrent batch.
+    # The loop below reads up to ten names per run and several are legitimately
+    # absent, so sequentially it was ten round trips to render one card set —
+    # on every run, snapshot, insight and report page.
+    warm = getattr(run_store, "prefetch_artifacts", None)
+    if warm is not None:
+        warm([
+            (run.run_id, d["file"])
+            for d in DELIVERABLES
+            if (run := run_by_group.get(d["group"])) is not None
+        ])
     cards: list[dict[str, Any]] = []
     for d in DELIVERABLES:
         run = run_by_group.get(d["group"])
@@ -589,6 +600,11 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         # report, the catalog page points at it. A page that describes a
         # document and cannot show you one is the shape of brochure this
         # whole pass exists to stop being.
+        # Newest topic first, and stop at the first one that has a report.
+        # This used to scan *every* topic and keep the last match, so the page
+        # paid a full run-store fan-out per topic and then threw all but one
+        # away — 10.3 seconds for a page with no run data on it. `list()` is
+        # already newest-first, so the first hit is also the best example.
         example = None
         for topic in topic_store.list():
             reports = [
@@ -597,6 +613,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             ]
             if reports:
                 example = {"run_id": reports[-1].run_id, "topic_name": topic.name}
+                break
         return render(
             request, "deliverables.html", tiers=tiers, example=example,
             active_nav="deliverables",
@@ -604,14 +621,19 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
 
     # --------------------------------------------------------------- topics --
 
-    def _topic_row(topic: Any) -> dict[str, Any]:
+    def _topic_row(topic: Any, all_runs: list[Any] | None = None) -> dict[str, Any]:
         # One pass, not two. `snapshots()` is a filter over `for_topic()`, so
         # calling both asked a store with no secondary index to list and read
         # every run blob twice per row — and this runs once per topic on the
         # index. Deriving the snapshots here keeps the filter identical (the
         # backend's own `snapshots()` is `mode == "mine" and status ==
         # "complete"`, in `for_topic` order) while halving the traffic.
-        all_runs = run_store.for_topic(topic.topic_id)
+        # `all_runs` is passed in by the index, which has already had to settle
+        # which snapshots exist in order to prefetch their artifacts. Fetching
+        # again here would be a second call per topic for a value the caller is
+        # holding.
+        if all_runs is None:
+            all_runs = run_store.for_topic(topic.topic_id)
         snapshots = [r for r in all_runs if r.mode == "mine" and r.status == "complete"]
         spend = round(sum(r.cost_usd for r in all_runs), 4)
         volumes: list[int] = []
@@ -648,9 +670,34 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
                 begin()
         return await call_next(request)
 
+    def _prefetch(pairs: list[tuple[str, str]]) -> None:
+        """Ask the store to warm several artifacts at once, if it can.
+
+        `getattr` because this is an optimisation only the blob backend needs
+        and only it implements — the filesystem store reads a local file and
+        has nothing to overlap. Every read still works identically without it.
+        """
+        warm = getattr(run_store, "prefetch_artifacts", None)
+        if warm is not None and pairs:
+            warm(pairs)
+
     @app.get("/", response_class=HTMLResponse)
     def topics_index(request: Request) -> HTMLResponse:
-        rows = [_topic_row(t) for t in topic_store.list()]
+        topics = topic_store.list()
+        # Two passes on purpose. The first settles which snapshots exist —
+        # cheap, because every `for_topic` after the first is served from the
+        # request map — then every `signals.json` the sparklines need is
+        # fetched in one concurrent batch. Interleaved, those reads were one
+        # sequential round trip per snapshot, and with sixty topics that alone
+        # was several seconds of a page that shows no run detail at all.
+        runs_by_topic = {t.topic_id: run_store.for_topic(t.topic_id) for t in topics}
+        _prefetch([
+            (r.run_id, "signals.json")
+            for runs in runs_by_topic.values()
+            for r in runs
+            if r.mode == "mine" and r.status == "complete"
+        ])
+        rows = [_topic_row(t, runs_by_topic[t.topic_id]) for t in topics]
         return render(
             request, "topics.html", rows=rows, first_run_steps=FIRST_RUN_STEPS,
             active_nav="topics",

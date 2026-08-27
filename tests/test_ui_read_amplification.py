@@ -56,11 +56,22 @@ def counted(tmp_path, monkeypatch):
     monkeypatch.delenv("BLOB_READ_WRITE_TOKEN", raising=False)
     ts = TopicStore(tmp_path / "db")
     real = RunStore(tmp_path / "db", tmp_path / "var")
+    # The demo seed has to run first — it is a no-op on a store that already
+    # holds a topic.
     seed_demo_topic(ts, real, env={})
-    # A handful of extra topics, so a per-topic cost shows up as a multiple.
     for i in range(5):
         ts.create(topic_id=f"top-extra{i}", name=f"Extra {i}",
                   therapeutic_area="", spend_band="probe")
+    # Then the newest topic gets a completed report of its own. `list()` is
+    # newest-first, so this one is examined *first* — which is what makes
+    # "stops at the first match" distinguishable from "scans everything and
+    # keeps the last". With the only report on the oldest topic the two
+    # behaviours are indistinguishable, and a test that cannot tell them apart
+    # is decoration, not coverage.
+    ts.create(topic_id="top-newest", name="Newest with a report",
+              therapeutic_area="", spend_band="probe")
+    rep = real.start("top-newest", "report")
+    real.finish(rep.run_id, "complete", 0.0)
     rs = CountingRunStore(real)
     return TestClient(create_app(topic_store=ts, run_store=rs)), ts, rs
 
@@ -101,4 +112,44 @@ def test_the_index_reads_one_signals_artifact_per_snapshot_not_more(counted):
     snapshots = sum(len(rs._real.snapshots(t.topic_id)) for t in ts.list())
     assert rs.calls.get("read_artifact", 0) <= snapshots, (
         f"{rs.calls.get('read_artifact', 0)} artifact reads for {snapshots} snapshots"
+    )
+
+
+def test_the_deliverables_page_stops_at_the_first_topic_with_a_report(counted):
+    """It shows a link to one example report. It used to scan *every* topic and
+    keep the last match, paying a full run-store fan-out per topic and throwing
+    all but one away — 10.3 seconds on production for a page that displays no
+    run data at all.
+
+    Asserted as "stops at the first match" rather than "scans fewer than all",
+    because in this fixture the only topic with a report happens to be the
+    oldest, so scanning every topic *is* correct here. The bug was continuing
+    past a match, and that is what this pins.
+    """
+    client, ts, rs = counted
+    order = ts.list()                      # the order the page iterates
+    first_with_report = next(
+        (i for i, t in enumerate(order)
+         if any(r.mode == "report" and r.status == "complete"
+                for r in rs._real.for_topic(t.topic_id))),
+        None,
+    )
+    assert first_with_report is not None, "fixture has no completed report"
+
+    rs.calls.clear()
+    assert client.get("/deliverables").status_code == 200
+    assert rs.calls.get("for_topic", 0) == first_with_report + 1, (
+        f"scanned {rs.calls.get('for_topic', 0)} topics; the first with a "
+        f"report is at index {first_with_report}, so it should have stopped there"
+    )
+
+
+def test_the_index_settles_snapshots_once_and_reuses_them(counted):
+    """The index needs each topic's runs twice — once to know which snapshots
+    to prefetch, once to build the row. It must not ask the store twice."""
+    client, ts, rs = counted
+    n_topics = len(ts.list())
+    client.get("/")
+    assert rs.calls.get("for_topic", 0) == n_topics, (
+        f"{rs.calls.get('for_topic', 0)} calls for {n_topics} topics"
     )

@@ -82,6 +82,7 @@ import random
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import Any
@@ -99,6 +100,11 @@ _API_BASE = "https://blob.vercel-storage.com"
 #: Distinguishes "read it, and it was a 404" from "not read yet" in the
 #: request-scoped map, so a genuine absence is memoised too rather than being
 #: re-fetched on every one of hundreds of duplicate lookups.
+#: Concurrency for `get_many`. Eight is enough to collapse ~180 sequential
+#: reads into a fraction of a second without giving a small serverless
+#: function more sockets and threads than it can usefully hold.
+_FETCH_WORKERS = 8
+
 _MISSING = object()
 
 _API_VERSION = "7"
@@ -164,6 +170,15 @@ class _BlobHTTP:
         #: Cleared by `begin_request`; see `get_content` for why it exists and
         #: why it must not outlive one request.
         self._seen: dict[str, Any] = {}
+        #: Request-scoped listing map, prefix -> blobs. The index calls
+        #: `for_topic` once per topic and each call listed the *same* prefix,
+        #: so with 61 topics that was 61 identical round trips for one page.
+        self._listed: dict[str, list[dict]] = {}
+        #: `get_many` fetches on worker threads and they all touch the two maps
+        #: above. Dict writes are individually safe under the GIL, but
+        #: check-then-set is not, and a duplicated fetch is exactly what these
+        #: maps exist to prevent.
+        self._lock = threading.Lock()
 
     def _send(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         """One request, retried up to ``_TRANSIENT_MAX_ATTEMPTS`` times on a
@@ -241,13 +256,25 @@ class _BlobHTTP:
         """Every blob under ``prefix``, following ``cursor`` pagination —
         verified live that a page's ``hasMore``/``cursor`` behave exactly
         like that: a second page requested with the first page's cursor
-        returns the next slice, not a repeat."""
+        returns the next slice, not a repeat.
+
+        Memoised for the request, for the same reason `get_content` is: the
+        topics index calls `for_topic` once per topic and every one of those
+        listed the *identical* prefix, so 61 topics meant 61 identical round
+        trips for a single page render.
+        """
+        with self._lock:
+            hit = self._listed.get(prefix)
+        if hit is not None:
+            return hit
         blobs: list[dict] = []
         cursor: str | None = None
         while True:
             page = self.list_page(prefix, cursor=cursor)
             blobs.extend(page.get("blobs", []))
             if not page.get("hasMore"):
+                with self._lock:
+                    self._listed[prefix] = blobs
                 return blobs
             cursor = page.get("cursor")
 
@@ -276,7 +303,7 @@ class _BlobHTTP:
     _NO_CACHE = {"cache-control": "no-cache, no-store, max-age=0", "pragma": "no-cache"}
 
     def begin_request(self) -> None:
-        """Drop the identity map. Called once per HTTP request.
+        """Drop the request-scoped maps. Called once per HTTP request.
 
         The map below is **not** a TTL cache and must never become one: it is
         correct only for the span of one request, and a container reused for a
@@ -284,7 +311,9 @@ class _BlobHTTP:
         read. Clearing is therefore the caller's responsibility, wired in
         `vsm/ui/app.py`'s middleware rather than left to a timer.
         """
-        self._seen.clear()
+        with self._lock:
+            self._seen.clear()
+            self._listed.clear()
 
     def get_content(self, url: str) -> tuple[bytes, str | None] | None:
         """``(content, etag)`` for an already-known full blob URL, or
@@ -309,17 +338,52 @@ class _BlobHTTP:
         pathname (see `put`) so a read-after-write inside one request cannot go
         stale.
         """
-        hit = self._seen.get(url)
+        with self._lock:
+            hit = self._seen.get(url)
         if hit is not None:
             return None if hit is _MISSING else hit
         resp = self._send("GET", url, headers=self._NO_CACHE)
         if resp.status_code == 404:
-            self._seen[url] = _MISSING
+            with self._lock:
+                self._seen[url] = _MISSING
             return None
         resp.raise_for_status()
         got = (resp.content, resp.headers.get("etag"))
-        self._seen[url] = got
+        with self._lock:
+            self._seen[url] = got
         return got
+
+    def get_many(self, urls: "list[str]") -> "dict[str, tuple[bytes, str | None] | None]":
+        """Every url, fetched concurrently.
+
+        A flat key-value store with no secondary index has to answer "which
+        runs belong to this topic?" by reading every run record, and doing that
+        one request at a time is what made this app slow: 61 topics with ~180
+        run records took **11.6 seconds** to render the home page, essentially
+        all of it spent waiting on sequential round trips of ~60ms each.
+
+        These are independent GETs against a CDN, so there is nothing to
+        serialise them for. The pool is small on purpose — a serverless
+        function has little CPU, and the work is entirely I/O wait, so more
+        threads buy latency but also memory and connection churn.
+
+        Results come from and land in the same request-scoped map
+        `get_content` uses, so a url already read costs nothing here, and a url
+        read here is free for the rest of the request.
+        """
+        with self._lock:
+            todo = [u for u in dict.fromkeys(urls) if u not in self._seen]
+        if todo:
+            workers = min(_FETCH_WORKERS, len(todo))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                # `get_content` does its own locking and memoising, so the
+                # results are picked up from the map below rather than here.
+                list(pool.map(self.get_content, todo))
+        with self._lock:
+            return {
+                u: (None if self._seen.get(u) is _MISSING else self._seen.get(u))
+                for u in urls
+            }
 
     def delete(self, urls: list[str]) -> None:
         if not urls:
@@ -594,12 +658,14 @@ class BlobTopicStore:
         return self._row_to_topic(data)
 
     def list(self) -> list[Topic]:
-        blobs = self._ns._http.list_all(f"{self._ns.root}/topics/")
+        blobs = [
+            b for b in self._ns._http.list_all(f"{self._ns.root}/topics/")
+            if not b["pathname"].endswith("/_seq.json")
+        ]
+        fetched = self._ns._http.get_many([b["url"] for b in blobs])
         topics: list[tuple[int, Topic]] = []
         for blob in blobs:
-            if blob["pathname"].endswith("/_seq.json"):
-                continue
-            got = self._ns._http.get_content(blob["url"])
+            got = fetched.get(blob["url"])
             if got is None:
                 continue  # deleted between the list and this read
             content, _etag = got
@@ -723,12 +789,16 @@ class BlobRunStore:
         the correctness this buys (``seq`` read from the one place it is
         ever written) is worth more here than the read amplification costs.
         """
-        blobs = self._ns._http.list_all(f"{self._ns.root}/runs/")
+        blobs = [
+            b for b in self._ns._http.list_all(f"{self._ns.root}/runs/")
+            if not b["pathname"].endswith("/_seq.json")
+        ]
+        # One concurrent batch, not a read per run. This loop is the app's
+        # single most expensive operation — see `_BlobHTTP.get_many`.
+        fetched = self._ns._http.get_many([b["url"] for b in blobs])
         rows: list[tuple[int, Run]] = []
         for blob in blobs:
-            if blob["pathname"].endswith("/_seq.json"):
-                continue
-            got = self._ns._http.get_content(blob["url"])
+            got = fetched.get(blob["url"])
             if got is None:
                 continue
             content, _etag = got
@@ -757,6 +827,32 @@ class BlobRunStore:
     def artifacts_dir(self, run_id: str) -> Any:
         path_cls = _bound_run_artifact_path_class(self)
         return path_cls(run_id)
+
+    def prefetch_artifacts(self, pairs: "list[tuple[str, str]]") -> None:
+        """Warm the request map with these ``(run_id, name)`` artifacts, in one
+        concurrent batch.
+
+        Purely an optimisation, and safe to skip: every ``read_artifact`` below
+        works exactly the same whether or not this ran first. It exists because
+        callers that need many artifacts at once — the topics index reads one
+        ``signals.json`` per snapshot to draw a sparkline, and a run page probes
+        ten artifact names per card — were paying a sequential round trip each.
+
+        Silent on a bad pair rather than raising: a caller asking to warm
+        something that turns out not to exist has not done anything wrong, and
+        the read that follows will report the absence properly.
+        """
+        urls = []
+        for run_id, name in pairs:
+            try:
+                _validated_key(run_id, name)
+            except ValueError:
+                continue
+            url = self._ns._resolve(self._artifact_path(run_id, name))
+            if url is not None:
+                urls.append(url)
+        if urls:
+            self._ns._http.get_many(urls)
 
     def write_artifact(self, run_id: str, name: str, payload: Any) -> Any:
         _validated_key(run_id, name)
