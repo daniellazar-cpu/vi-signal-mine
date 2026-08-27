@@ -27,78 +27,53 @@ links across 36–38 pages**.
 Verified at the moment of stopping: every route 200, and no raw markdown reaches
 any page.
 
-## Storage — and the honest recommendation
+## Storage: Postgres
 
-There is a dedicated Vercel Blob store (`vsm-store`) connected to the project on
-the **`vi-labs-projects`** team. Topics, runs and artifacts survive across
-invocations. The full chain — topic, mine, insight, report — ran **8/8 green** on the
-deployment after the last of these fixes, having been 2/10 before them.
+The deployment runs on a **Neon Postgres** (`neon-rose-compass`), provisioned
+through the Vercel marketplace and connected to the project on the
+**`vi-labs-projects`** team. `open_stores` already preferred Postgres, so the
+switch was configuration plus two fixes below. The Blob store is still attached
+and is now the fallback; the data in it is orphaned and can be deleted.
 
-### Use Postgres instead. This is the main recommendation of the day.
+This was the main recommendation of the previous pass, and it was the right one:
+five defects fixed earlier that day were all consequences of using an object
+store as a database, and Postgres removes the conditions rather than mitigating
+them.
 
-`open_stores` already prefers Postgres over Blob, and the Postgres backend is
-built and tested. Switching is one environment variable and a redeploy:
+### The near-miss, recorded because it is not obvious
+
+Setting a database URL was, on its own, enough to take the deployment down
+completely. Vercel installs **only** the core dependency list from
+`pyproject.toml` — optional extras are never resolved there — and `psycopg` was
+deliberately an extra. `open_stores` would have found a URL, imported the
+Postgres backend, and raised `ModuleNotFoundError` on every request. Caught
+before deploying only because env changes do not take effect until the next
+build.
+
+- `psycopg[binary]` is a core dependency now. The original reasoning (a local
+  install and the hermetic suite must work without a driver) still holds — having
+  the driver installed connects to nothing.
+- `open_stores` falls back to the next backend with an error log naming the
+  missing module, rather than propagating the import failure. A configured
+  database with no driver is a deployment mistake; serving nothing is not the
+  right answer to it.
+
+### The Postgres backend had never run against a real database
+
+It had only ever been exercised against SQLite and fakes. The storage contract
+suite now passes against Neon, and the first run found a bug no fake could have:
+`for_topics` shipped with `SELECT *` where the table carries a `seq` column its
+row-mapper does not take — ten values unpacked into nine.
+
+To run it yourself:
 
 ```bash
-vercel env add POSTGRES_URL_NON_POOLING production --scope vi-labs-projects
+VSM_TEST_DATABASE_URL="$(grep -m1 '^POSTGRES_URL_NON_POOLING=' .env.local | cut -d= -f2-)" .venv/bin/python -m pytest -q tests/test_storage_contract.py
 ```
 
-Use the **non-pooling** URL: the pooled one is PgBouncer in transaction mode and
-breaks prepared statements. Any Postgres works — Neon, Supabase. The team has a
-Neon on a *different* project; the backend takes a `schema=`, so it can be
-shared without collision.
-
-**Why it matters.** Vercel Blob is an object store being used as a database, and
-five separate defects fixed today were all consequences of that one choice:
-
-| What broke | Because |
-|---|---|
-| Run creation was a coin flip | A compare-and-swap counter cannot be atomic on a store with no atomic primitive. Every `GET` returned 200, the following conditional `PUT` returned 412, forty times |
-| Records read back stale | The content host serves a stale body *and* ETag, ignores its own `s-maxage=0`, and a cache-busting query string does not defeat it |
-| A cold container reported existing blobs as missing | No secondary index, so discovery went through the list API, which is eventually consistent |
-| The home page 504ed | No secondary index, so "this topic's runs" means reading *every* run blob's content. 13,144 GETs for one render |
-| The report step failed intermittently | A blob is not readable from every edge the instant its write returns. Caught in the act: on a failing run, every artifact the function could not read returned 200 to an external check moments later — from a different region |
-
-Each has a fix and a test that fails without it. But they are five workarounds
-for a substrate mismatch, and a relational database with a primary key, an
-index, a real sequence and read-your-writes deletes all five problems rather
-than mitigating them. **Recommend doing this before the tool goes in front of
-anyone.**
-
-### What the Blob path cost, recorded so it is not re-learned
-
-- `seq` is a nanosecond hybrid clock with an in-process monotonic clamp, not a
-  counter. Safe only because `seq` is a pure sort key — both blob stores
-  `data.pop("seq")` before building the model. See `_next_ordinal`.
-- Content reads send request-side `no-cache`, and there is a **request-scoped**
-  identity map in front of them. It is not a TTL cache and must not become one:
-  it is correct only within one request, and serverless containers are reused.
-  Cleared by middleware in `vsm/ui/app.py`.
-- The content host is derived from the token
-  (`vercel_blob_rw_<storeId>_<secret>` -> `<storeid>.public.blob.…`) so no read
-  path consults the list API.
-- `vsm/storage.py:read_required` retries a read the caller knows must succeed,
-  opt-in per backend via `reads_may_lag`. Two traps, both hit:
-  it must **clear the identity map between attempts**, or it retries against the
-  memoised miss and does nothing (that is how its first version shipped, and
-  production stayed at 2/10); and the waiting budget must belong to the
-  *operation*, not the read — `run_report` needs seven artifacts, so a per-read
-  budget multiplied the wait by seven and pushed a genuine absence past the
-  60-second ceiling, while shrinking the per-read budget simply brought the
-  original failure back. `ReadDeadline` is shared across all seven.
-- Reads whose absence is a legitimate answer must stay plain: `_existing_artifact`
-  (resume), the momentum loop, and the deliverable cards' ten-name probe. A test
-  asserts the first two do not retry.
-
-### The bug that made it look broken, and it was not the UI
-
-`BlobRunStore.artifacts_dir` returns a `PurePosixPath` standing in for a key.
-The UI treated it as a real path — `.stat().st_size` inside an `except OSError`
-raised `AttributeError` instead, killing every route that renders a deliverable
-card, and `FileResponse` broke all ten downloads. Reads of pre-seeded data
-worked, so it surfaced only once a run was created on the deployment. The whole
-suite was green because every UI test used the one backend with real paths;
-`tests/test_ui_keyed_backend.py` now runs the UI against the keyed contract.
+`.env.local` is written by `vercel env pull` and is gitignored. Use the
+**non-pooling** URL — the pooled one is PgBouncer in transaction mode and breaks
+prepared statements.
 
 ## Also outstanding, and genuinely yours
 
@@ -150,40 +125,43 @@ mistaken for real collection.
 
 ## Speed
 
-Every page was slow, and none of it was compute.
+Every page was slow, and none of it was compute — it was storage round trips.
 
 | Page | Before | After |
 |---|---|---|
-| Topics index | 11.6s | 0.72s |
-| `/deliverables` | 10.3s | 0.69s |
-| A topic page | 4.7s | 0.79s |
-| Report | — | 0.81s |
+| Topics index (1 topic) | 11.6s* | 0.68s |
+| Topics index (101 topics) | — | 0.73s |
+| `/deliverables` | 10.3s | 0.63s |
+| Topic page | 4.7s | 0.72s |
+| Snapshot / insight / report | — | 0.85 – 1.12s |
 
-Two separate contributions, worth keeping apart because only one of them
-survives the store growing again:
+\* measured at 61 topics on the Blob backend.
 
-**The fixes, ~4x at any size** (measured at 61 topics: index 11.6s → 3.0s). A
-flat key-value store with no secondary index answers "which runs belong to this
-topic?" by reading every run record. That much is inherent. Doing it one request
-at a time, and re-doing it per topic, was not:
+Four rounds, and the order matters because each exposed the next:
 
-- prefix listings memoised per request — the index called `for_topic` once per
-  topic and every call listed the *same* prefix, 61 identical round trips
-- `get_many`, a small thread pool for content reads, which are independent GETs
-  against a CDN with nothing to serialise them for
-- `prefetch_artifacts`, so the index's per-snapshot `signals.json` reads and a
-  run page's ten card probes each go out in one batch
-- `/deliverables` stops at the first topic with a report; it used to scan every
-  topic and keep the last, on a page that shows no run data at all
-- search is applied *before* any run lookup, so a narrow query turns the most
-  expensive page into one of the cheapest
+1. **Stop re-reading.** Prefix listings and content reads memoised per request.
+   The index called `for_topic` once per topic and every call listed the *same*
+   prefix — 61 identical round trips for one render. `/deliverables` scanned
+   every topic and kept the last match, on a page that shows no run data at all.
+2. **Stop serialising.** `get_many` puts independent CDN reads on a small pool;
+   `prefetch_artifacts` batches the index's per-snapshot `signals.json` and each
+   run page's ten card probes. Blob index: 11.6s → 3.0s at 61 topics.
+3. **Stop scaling with the list.** Postgres alone was faster but still linear —
+   0.96s at 10 topics, 1.84s at 40, about 30ms each, because the page still
+   asked per topic. `for_topics` answers the whole index in one query. Measured
+   flat afterwards: **0.73s at 101 topics**, no upward trend.
+4. **Batch artifacts on Postgres too.** `prefetch_artifacts` existed only on the
+   blob backend, so after the migration the card-rendering pages were back to a
+   query per artifact. One `UNNEST` statement instead; ~25% off those pages.
 
-**The rest is a smaller store.** 61 verification topics of mine are deleted, and
-that alone took the index from 3.0s to 0.58s. If the store grows to hundreds of
-topics the index will get slow again — the reads scale with the number of runs
-and only the constant factor was fixed. **That is the strongest practical
-argument for the Postgres switch above**, where "this topic's runs" is an index
-lookup rather than a scan.
+Search is also the cheapest speedup available and worth knowing about: it is
+applied *before* any run lookup, so a narrow query skips the work entirely.
+
+**What is still linear:** nothing on the index. The artifact-heavy pages
+(snapshot, insight, report) read a fixed number of artifacts per run, so they do
+not grow with the store either. The report view's own content reads do not go
+through `prefetch_artifacts` — that is the remaining ~0.3s on the slowest page,
+and the obvious next thing if it ever matters.
 
 ## Managing the list
 
