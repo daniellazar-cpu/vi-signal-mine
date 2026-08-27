@@ -1,5 +1,5 @@
 {% extends "_base.html" %}
-{% from "_macros.html" import title_block, flow_rail, deliverable_downloads, tier_badge, define %}
+{% from "_macros.html" import title_block, flow_rail, deliverable_downloads, tier_badge, info %}
 {% block title %}Insight — Vi Signal Mine{% endblock %}
 
 {% block top_rail %}
@@ -54,29 +54,45 @@
    cannot be compared — available, not addressed to you on arrival. #}
 {% set widest = forest_rows | selectattr("divergence", "ne", None) | sort(attribute="divergence") | list %}
 {% set ne_rows = forest_rows | selectattr("divergence", "equalto", None) | list %}
-<div class="answer">
+<div class="card">
+  <div class="card-body">
   {% if widest %}
   {% set top = (widest | last) if (widest | last).divergence | abs >= (widest | first).divergence | abs else (widest | first) %}
-  <p class="l1">Clinicians and patients read <strong>{{ top.name }}</strong> most differently.</p>
-  <p class="l2">
-    {{ define('gap') }} of <strong>{{ top.divergence|net }}</strong> ·
-    clinician {{ top.hcp_net|net_short('hcp') }} · patient {{ top.patient_net|net_short('patient') }} ·
-    {{ widest|length }} theme{{ '' if widest|length == 1 else 's' }} comparable
-    {%- if ne_rows %}, {{ ne_rows|length }} with {{ define('no comparison') }}{% endif %}
-  </p>
+  <p class="card-lead">Clinicians and patients read <strong>{{ top.name }}</strong> most differently.</p>
+  <div class="scorecard">
+    <div class="metric">
+      <span class="metric-label">Gap {{ info('gap') }}</span>
+      <span class="metric-value">{{ top.divergence|net }}</span>
+      <span class="metric-sub">on the widest theme</span>
+    </div>
+    <div class="metric">
+      <span class="metric-label">Clinician tone {{ info('tone') }}</span>
+      <span class="metric-value metric-value-sm">{{ top.hcp_net|net_short('hcp') }}</span>
+    </div>
+    <div class="metric">
+      <span class="metric-label">Patient tone</span>
+      <span class="metric-value metric-value-sm">{{ top.patient_net|net_short('patient') }}</span>
+    </div>
+    <div class="metric">
+      <span class="metric-label">Comparable {{ info('no comparison') }}</span>
+      <span class="metric-value metric-value-sm">{{ widest|length }}<span class="metric-sub" style="display:inline"> of {{ forest_rows|length }} themes</span></span>
+      {% if ne_rows %}<span class="metric-sub">{{ ne_rows|length }} raised by one side only</span>{% endif %}
+    </div>
+  </div>
   {% else %}
-  <p class="l1">No theme can be compared across the two audiences yet.</p>
-  <p class="l2">Every theme in this sweep was raised by one side only — that is not agreement, it means the other side did not raise it.</p>
+  <p class="card-lead">No theme can be compared across the two audiences yet.</p>
+  <p class="metric-sub">Every theme was raised by one side only. That is not agreement — the other side did not raise it.</p>
   {% endif %}
+  </div>
 </div>
 
 <div class="forest-plot-wrap">
   {{ forest_svg|safe }}
 </div>
 
-<details class="l3">
+<details class="disclosure">
   <summary>How to read this</summary>
-  <div class="l3-body">
+  <div class="disclosure-body">
     <p>{{ plot_guide.lede }}</p>
     <dl class="plot-legend-key">
       {% for mark, desc in plot_guide.marks %}
@@ -86,9 +102,9 @@
   </div>
 </details>
 {% if ne_rows %}
-<details class="l3">
+<details class="disclosure">
   <summary>Why {{ ne_rows|length }} theme{{ '' if ne_rows|length == 1 else 's' }} can't be compared</summary>
-  <div class="l3-body">
+  <div class="disclosure-body">
     <p>{{ plot_guide.why_ne }}</p>
     <ul>
       {% for r in ne_rows %}<li><strong>{{ r.name }}</strong> — {{ r.reason }}</li>{% endfor %}

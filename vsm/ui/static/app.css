@@ -1109,120 +1109,189 @@ a.tier-badge-corroborated:hover { background: var(--vi-violet-hover); border-col
 .promise-foot { margin: 12px 0 0; font-size: 13px; }
 @media (max-width: 699px) { .promise-list { grid-template-columns: 1fr; } }
 
-/* ============================================= layers ================= */
+/* ====================================== conventional components ======= */
 /*
-   The three-layer system. The owner's diagnosis of the old interface was that
-   everything arrived "in the same colour, font and size" and left them to
-   curate it. The fix is not fewer words — cutting destroys the *why* behind a
-   number, which is usually the most valuable thing on the page. The fix is
-   rank.
+   Standard analytics-product components, not a bespoke system. The previous
+   pass invented its own `l1`/`l2`/`l3` layer vocabulary; this is not a niche
+   product and the category solved these problems long ago. What follows is the
+   set GA4, Amplitude, Mixpanel, Stripe and Linear all converge on, named the
+   way everyone names them, so the next person to open this file recognises it.
 
-     Layer 1  the answer          largest, full-strength ink, generous leading
-     Layer 2  the support         meta size, secondary ink, tight
-     Layer 3  the depth           behind a control, enclosed, tighter still
+     page-header    breadcrumb, title, actions, one metadata line
+     scorecard      a row of metrics, each with a value, a label and a delta
+     card           a titled section with an optional action and footer
+     info           the (i) affordance beside a label, opening a tooltip
+     delta          a signed change chip against a named baseline
+     disclosure     "Show details" — depth kept, not deleted
+     empty-state    one line and one action
 
-   Every screen must separate its layers on at least three axes at once — size,
-   weight, colour, position, enclosure, density. A screen where a finding and a
-   footnote are set identically has failed however few words it has.
+   The three-level hierarchy the owner asked for is expressed *through* these
+   rather than as its own scheme: metric value, metric label, tooltip body.
 */
 
-.l1 {
-  font-size: var(--t-h2-size, 24px); line-height: 1.25; letter-spacing: -0.015em;
-  color: var(--fg1); font-weight: 500; margin: 0;
+/* ------------------------------------------------------------ page header -- */
+.page-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: var(--space-md); flex-wrap: wrap;
+  padding-bottom: var(--space-sm);
+  border-bottom: var(--border-hairline) solid var(--rule);
+  margin-bottom: var(--space-md);
 }
-.l1-figure {
-  font-size: 44px; line-height: 1; letter-spacing: -0.025em;
+.page-header-main { min-width: 0; }
+.page-title { font-size: 26px; line-height: 1.15; letter-spacing: -0.02em; margin: 0; font-weight: 500; }
+/* One line, not a five-field grid. Everything factual about the page, at meta
+   weight, separated by middots — the standard subtitle treatment. */
+.page-meta {
+  display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline;
+  margin: 6px 0 0; font-size: 13px; color: var(--fg2);
+}
+.page-meta > * + *::before { content: "·"; margin-right: 10px; color: var(--rule-strong, var(--fg2)); }
+.page-meta code, .page-meta .mono { font-family: var(--vi-mono, ui-monospace, monospace); font-size: 12px; }
+.page-actions { display: flex; gap: 8px; align-items: center; flex: none; }
+
+/* ------------------------------------------------------------- scorecard -- */
+/* The category-standard opener: a handful of metrics, value first, label
+   under it, change against a *named* baseline beside it. */
+.scorecard {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 1px; background: var(--rule); margin-bottom: var(--space-lg);
+  border: var(--border-hairline) solid var(--rule);
+}
+.metric { background: var(--bg); padding: var(--space-sm); min-width: 0; }
+.metric-label {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+  font-weight: 500; color: var(--fg2); margin-bottom: 6px;
+}
+.metric-value {
+  font-size: 30px; line-height: 1.05; letter-spacing: -0.02em;
   color: var(--fg1); font-variant-numeric: tabular-nums; display: block;
 }
-.l2 {
-  font-size: 13px; line-height: 1.45; color: var(--fg2); margin: 6px 0 0;
-  font-variant-numeric: tabular-nums;
-}
-.l2 strong { color: var(--fg1); font-weight: 500; }
+.metric-value-sm { font-size: 20px; }
+.metric-sub { font-size: 12px; color: var(--fg2); margin-top: 5px; display: block; }
 
-/* Layer 3 is enclosed as well as smaller: the hairline and the ground tint are
-   what say "this is available, not addressed to you right now". */
-.l3 { margin-top: var(--space-sm); }
-.l3 > summary {
-  display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
-  list-style: none; font-size: 12px; letter-spacing: 0.06em;
-  text-transform: uppercase; font-weight: 500; color: var(--fg2);
-  padding: 7px 0; min-height: 34px;
+/* ------------------------------------------------------------------ card -- */
+.card {
+  border: var(--border-hairline) solid var(--rule);
+  margin-bottom: var(--space-lg); background: var(--bg);
 }
-.l3 > summary::-webkit-details-marker,
-.l3 > summary::details-marker { display: none; }
-.l3 > summary::after {
+.card-header {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: var(--space-sm); flex-wrap: wrap;
+  padding: var(--space-sm); border-bottom: var(--border-hairline) solid var(--rule);
+}
+.card-title {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 14px; font-weight: 500; margin: 0; letter-spacing: -0.005em;
+}
+.card-actions { display: flex; gap: 10px; align-items: baseline; font-size: 13px; }
+.card-body { padding: var(--space-sm); }
+.card-body > :first-child { margin-top: 0; }
+.card-body > :last-child { margin-bottom: 0; }
+/* The headline sentence a card leads with, when it has one. Bigger than body,
+   smaller than a page title — the "insight statement" pattern. */
+.card-lead { font-size: 18px; line-height: 1.35; margin: 0 0 8px; color: var(--fg1); font-weight: 400; }
+.card-lead strong { font-weight: 500; }
+.card-footer {
+  padding: 10px var(--space-sm); border-top: var(--border-hairline) solid var(--rule);
+  font-size: 13px; color: var(--fg2); background: var(--bg-subtle);
+}
+
+/* ------------------------------------------------------------------ info -- */
+/*
+   The (i) beside a label, opening a tooltip. This is *the* convention for
+   explaining a metric — GA4, Amplitude, Stripe and Mixpanel all use it, and a
+   reader already knows what it does without being told.
+
+   Native `popover` + `popovertarget`: dismissible, Esc and click-away, no
+   JavaScript. Replaces the previous pass's dotted underline on a word, which
+   was an invented affordance nobody recognises.
+*/
+.info {
+  width: 15px; height: 15px; flex: none; padding: 0; cursor: help;
+  border: 1px solid var(--fg2); border-radius: 50%; background: none;
+  color: var(--fg2); font-size: 10px; font-weight: 600; line-height: 1;
+  font-family: var(--vi-font-family); font-style: italic;
+  display: inline-flex; align-items: center; justify-content: center;
+  vertical-align: middle;
+}
+.info:hover { border-color: var(--fg1); color: var(--fg1); }
+.info:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+.tooltip {
+  max-width: 34ch; padding: var(--space-sm);
+  border: var(--border-hairline) solid var(--fg1); border-radius: var(--radius-sm);
+  background: var(--bg); color: var(--fg1); font-size: 13px; line-height: 1.5;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.10);
+}
+.tooltip::backdrop { background: transparent; }
+.tooltip p { margin: 0; }
+.tooltip p + p { margin-top: 8px; color: var(--fg2); }
+.tooltip-term { font-weight: 500; }
+
+/* ----------------------------------------------------------------- delta -- */
+/* Always against a named baseline. A delta with no "vs what" is the commonest
+   lie in this category. Direction is a glyph plus a sign, never colour alone. */
+.delta {
+  display: inline-flex; align-items: baseline; gap: 4px;
+  font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.delta-up { color: var(--fg1); font-weight: 500; }
+.delta-down { color: var(--fg2); }
+.delta-none { color: var(--fg2); }
+.delta-up::before { content: "\25B2"; font-size: 0.8em; }
+.delta-down::before { content: "\25BC"; font-size: 0.8em; }
+.delta-none::before { content: "\2013"; }
+.delta-base { color: var(--fg2); font-weight: 400; }
+
+/* ------------------------------------------------------------ disclosure -- */
+/* "Show details" — the depth is kept and moved, never cut. */
+.disclosure > summary {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  list-style: none; font-size: 13px; color: var(--fg2);
+  padding: 8px 0; min-height: 34px;
+}
+.disclosure > summary::-webkit-details-marker,
+.disclosure > summary::details-marker { display: none; }
+.disclosure > summary::after {
   content: ""; width: 5px; height: 5px; flex: none;
   border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
   transform: translateY(-2px) rotate(45deg);
 }
-.l3[open] > summary::after { transform: translateY(1px) rotate(-135deg); }
-.l3 > summary:hover { color: var(--fg1); }
-.l3 > summary:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
-.l3-body {
-  border-left: 1px solid var(--rule); padding: 2px 0 2px var(--space-sm);
-  margin: 4px 0 var(--space-sm);
-  font-size: 13px; line-height: 1.5; color: var(--fg2); max-width: 62ch;
+.disclosure[open] > summary::after { transform: translateY(1px) rotate(-135deg); }
+.disclosure > summary:hover { color: var(--fg1); }
+.disclosure > summary:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+.disclosure-body {
+  font-size: 13px; line-height: 1.55; color: var(--fg2);
+  max-width: 66ch; padding-bottom: var(--space-sm);
 }
-.l3-body > :first-child { margin-top: 0; }
-.l3-body > :last-child { margin-bottom: 0; }
-.l3-body strong { color: var(--fg1); }
+.disclosure-body > :first-child { margin-top: 0; }
+.disclosure-body strong { color: var(--fg1); }
 
-.answer { margin: var(--space-md) 0 var(--space-sm); max-width: 68ch; }
-.answer .l1 strong { font-weight: 500; }
-
-/* ============================================= define ================= */
-/*
-   A term the reader may not know, explained where it is used and nowhere else.
-   Uses the native `popover` attribute with `popovertarget` — a real dismissible
-   popover with light-dismiss and Esc, no JavaScript, no library. This is what
-   replaces glossary pages and parenthetical asides: the definition is available
-   at the word, on demand, instead of pre-emptively in a paragraph nobody asked
-   for.
-*/
-.define {
-  font: inherit; color: inherit; background: none; padding: 0; cursor: help;
-  border: 0; border-bottom: 1px dotted var(--fg2); text-underline-offset: 2px;
+/* ----------------------------------------------------------- empty state -- */
+.empty-state {
+  padding: var(--space-md) 0; display: flex; flex-direction: column;
+  align-items: flex-start; gap: 10px;
 }
-.define:hover { border-bottom-color: var(--fg1); }
-.define:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
-.define-pop {
-  max-width: 34ch; padding: var(--space-sm); border: var(--border-hairline) solid var(--fg1);
-  border-radius: var(--radius-sm); background: var(--bg); color: var(--fg1);
-  font-size: 13px; line-height: 1.5; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.10);
-}
-.define-pop::backdrop { background: transparent; }
-.define-pop p { margin: 0; }
-.define-pop p + p { margin-top: 8px; color: var(--fg2); }
+.empty-state p { margin: 0; color: var(--fg2); max-width: 56ch; }
 
-/* ============================================= encodings ============== */
-/*
-   "Excel in HTML" was the complaint. These make quantity visible instead of
-   leaving it to be computed from digits. All inline SVG or CSS, server-rendered,
-   greyscale-safe: colour is never the only channel, and every graphic carries
-   its number as text so a screen reader never depends on the shape.
-*/
-
-/* Source count. Ordinal, tiny, printable — and the number is the label, so no
-   invented word like "corroborated" has to be learned. */
+/* ------------------------------------------------------------- encodings -- */
+/* Quantity seen, not computed from digits. Inline SVG/CSS, greyscale-safe,
+   every graphic also carrying its number as text. */
 .pips { display: inline-flex; gap: 3px; vertical-align: middle; }
 .pip { width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--fg1); }
 .pip-on { background: var(--fg1); }
 .pips-label { font-size: 12px; color: var(--fg2); margin-left: 6px; font-variant-numeric: tabular-nums; }
 
-/* Bullet bar: level and change in one row. The tick is where it stood last
-   sweep, so the comparison needs no second chart and no sentence. */
 .bullet { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
 .bullet-track { position: relative; height: 16px; background: var(--bg-subtle); }
 .bullet-fill { position: absolute; inset: 0 auto 0 0; background: var(--fg1); }
 .bullet-tick { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--fg2); }
 .bullet-value { font-variant-numeric: tabular-nums; font-size: 13px; white-space: nowrap; }
 
-.delta-mark { font-variant-numeric: tabular-nums; white-space: nowrap; }
-.delta-mark::before { font-size: 0.85em; margin-right: 3px; }
-.delta-up::before { content: "\25B2"; }
-.delta-down::before { content: "\25BC"; }
-.delta-flat::before { content: "\2013"; }
+@media (max-width: 699px) {
+  .scorecard { grid-template-columns: repeat(2, 1fr); }
+  .page-title { font-size: 22px; }
+}
 
 /* ============================================= dashboard ============== */
 /*

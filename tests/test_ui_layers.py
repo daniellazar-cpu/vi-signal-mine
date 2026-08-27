@@ -1,14 +1,16 @@
-"""Layering, not cutting.
+"""Hierarchy and progressive disclosure, using the category's own components.
 
-The owner's correction, verbatim: *"There are so many UI components you can use
-to handle that — expanding windows, sidebars, tooltips, read-mores... no need to
-cut where it's meaty, but don't puke on me the whole bible at once in the same
-colour, font and size and hope I'll be able to curate something."*
+Two corrections from the owner are encoded here. First: *"no need to cut where
+it's meaty, but don't puke on me the whole bible at once in the same colour,
+font and size"* — so depth must be **present but behind a control**, and levels
+must be **visually distinguished**. Second: *"it's not such a niche, you should
+re-invent the wheel — think about other products and common rules and align"* —
+so the components are the ones every analytics product already uses
+(scorecard, card, the (i) tooltip, a delta against a named baseline), not a
+bespoke scheme invented here.
 
-So the tests below check two things a word count cannot: that depth material is
-**present but behind a control**, and that layers are **visually distinguished**
-rather than set identically. A screen where a finding and a footnote look the
-same has failed however few words it has.
+The original of this file asserted a home-grown `l1`/`l2`/`l3` system. The
+properties it was checking were right; the vocabulary was not.
 """
 
 from __future__ import annotations
@@ -63,13 +65,21 @@ def test_the_depth_material_is_behind_a_control(insight):
         )
 
 
-def test_the_answer_precedes_the_evidence(insight):
-    """Layer 1 first. The old page opened with a plot and left the reader to
-    derive the finding from it."""
+def test_the_finding_precedes_the_evidence(insight):
+    """Statement first, then the chart. The old page opened with a plot and
+    left the reader to derive the finding from it — the "insight statement"
+    pattern every analytics product leads a card with."""
     _, body = insight
-    answer = body.index('class="answer"')
+    lead = body.index('class="card-lead"')
     plot = body.index("forest-plot-wrap")
-    assert answer < plot, "the plot comes before the sentence that reads it"
+    assert lead < plot, "the plot comes before the sentence that reads it"
+
+
+def test_the_headline_numbers_come_before_the_chart_too(insight):
+    """Scorecard, then chart, then table — GA4's anatomy, and the order a
+    reader scans in."""
+    _, body = insight
+    assert body.index('class="scorecard"') < body.index("forest-plot-wrap")
 
 
 # -------------------------------------------------- terms explain themselves --
@@ -84,10 +94,11 @@ def test_internal_tokens_do_not_reach_the_page(insight):
 
 
 def test_a_term_carries_its_definition_on_demand(insight):
-    """Native popover: the definition costs nothing until asked for. The old
-    interface paid for every definition on every page."""
+    """The (i) beside a label, which is the affordance this category already
+    uses. The definition costs nothing until asked for; the old interface paid
+    for every definition on every page."""
     _, body = insight
-    assert 'class="define"' in body, "no on-demand definitions on the page"
+    assert 'class="info"' in body, "no (i) affordances on the page"
     m = re.search(r'popovertarget="([^"]+)"', body)
     assert m, "the trigger is not wired to a popover"
     assert f'popover id="{m.group(1)}"' in body, "the popover target does not exist"
@@ -107,7 +118,7 @@ def test_the_definition_works_without_javascript_support(insight):
     """`popover` needs no script, but an older engine ignores it entirely — so
     the text must also be reachable as a title, and present in the DOM."""
     _, body = insight
-    trigger = re.search(r'<button type="button" class="define"[^>]*>', body).group(0)
+    trigger = re.search(r'<button type="button" class="info"[^>]*>', body).group(0)
     assert 'title="' in trigger, "no fallback for an engine without popover"
     assert 'aria-label=' in trigger
 
@@ -115,11 +126,11 @@ def test_the_definition_works_without_javascript_support(insight):
 # --------------------------------------------------- layers are separated --
 
 @pytest.mark.parametrize("selector,axes", [
-    (".l1", ("font-size", "color")),
-    (".l2", ("font-size", "color")),
-    (".l3-body", ("font-size", "color")),
+    (".metric-value", ("font-size", "color")),
+    (".metric-label", ("font-size", "color")),
+    (".disclosure-body", ("font-size", "color")),
 ])
-def test_each_layer_declares_its_own_size_and_colour(selector, axes):
+def test_each_level_declares_its_own_size_and_colour(selector, axes):
     css = _CSS.read_text()
     m = re.search(re.escape(selector) + r"\s*\{([^}]*)\}", css)
     assert m, f"{selector} is not defined"
@@ -127,8 +138,8 @@ def test_each_layer_declares_its_own_size_and_colour(selector, axes):
         assert axis in m.group(1), f"{selector} does not set {axis}"
 
 
-def test_the_layers_are_actually_different_sizes():
-    """Three layers set at one size is the defect being fixed."""
+def test_the_levels_are_actually_different_sizes():
+    """Three levels set at one size is the defect being fixed."""
     css = _CSS.read_text()
 
     def size(sel):
@@ -137,13 +148,36 @@ def test_the_layers_are_actually_different_sizes():
         assert m, f"{sel} has no resolvable px size"
         return int(m.group(1))
 
-    assert size(".l1-figure") > size(".l1") > size(".l2"), "layers share a size"
-    assert size(".l3-body") <= size(".l2")
+    assert size(".metric-value") > size(".card-lead") > size(".metric-label"), (
+        "the levels share a size"
+    )
+    assert size(".disclosure-body") >= size(".metric-label")
 
 
-def test_layer_three_is_enclosed_not_merely_smaller():
-    """Size alone is a weak signal. A layer-3 block is also set apart by a rule,
-    which is what says "available, not addressed to you"."""
+def test_a_card_is_enclosed_not_merely_spaced():
+    """Enclosure is the third axis. A card is bounded by a rule, which is what
+    separates one section's content from the next without a heading having to
+    do all the work."""
     css = _CSS.read_text()
-    body = re.search(r"\.l3-body\s*\{([^}]*)\}", css).group(1)
-    assert "border-left" in body or "background" in body
+    card = re.search(r"\.card\s*\{([^}]*)\}", css).group(1)
+    assert "border" in card
+
+
+def test_a_delta_always_names_its_baseline():
+    """A change with no "vs what" is the commonest lie in this category, so the
+    macro takes the baseline as a required argument."""
+    macros = (Path(__file__).resolve().parents[1] / "vsm" / "ui" / "templates"
+              / "_macros.html").read_text()
+    assert "{% macro delta(pct, baseline_label) %}" in macros
+    assert "delta-base" in macros
+
+
+def test_the_components_are_the_conventional_ones():
+    """The point of the second correction: someone opening this file should
+    recognise the vocabulary from any other analytics product."""
+    css = _CSS.read_text()
+    for name in (".page-header", ".scorecard", ".metric", ".card", ".card-header",
+                 ".info", ".tooltip", ".delta", ".disclosure", ".empty-state"):
+        assert re.search(re.escape(name) + r"\s*[,{ ]", css), f"{name} is missing"
+    for invented in (".l1 ", ".l2 ", ".l3 ", ".answer ", ".define "):
+        assert invented not in css, f"the bespoke {invented.strip()} survived"

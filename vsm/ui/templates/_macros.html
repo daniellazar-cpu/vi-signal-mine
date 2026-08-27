@@ -148,27 +148,51 @@
 </li>
 {% endmacro %}
 
-{% macro define(term, label="") %}
+{% macro info(term) %}
 {#
-  A term explained at the point of use, on demand.
+  The (i) beside a metric label, opening a tooltip.
 
-  Native `popover` + `popovertarget`: a real dismissible popover with
-  light-dismiss and Esc, no JavaScript and no library. The definition costs a
-  reader nothing until they ask for it, which is the whole point — the old
-  interface paid for every definition on every page whether or not anyone
-  needed it, and that is most of what "the whole bible at once" was.
+  This is the category's own affordance — GA4, Amplitude, Stripe and Mixpanel
+  all use it, so a reader knows what it does without being taught. The previous
+  pass invented a dotted underline on the word itself, which nobody recognises
+  and which cannot sit beside a label that is already a link.
 
-  Falls back honestly: with popover unsupported the button still carries the
-  text in `title`, and the definition is still in the DOM for a screen reader.
+  Native `popover` + `popovertarget`: dismissible with Esc and click-away, no
+  JavaScript. Degrades to `title` where `popover` is unsupported, and the text
+  stays in the DOM for a screen reader either way.
 #}
 {%- set d = definitions[term] -%}
-{%- set pid = "def-" ~ term|replace(" ", "-")|replace("+", "plus") -%}
-<button type="button" class="define" popovertarget="{{ pid }}"
-        aria-label="What {{ term }} means" title="{{ d[0] }}">{{ label or term }}</button>
-<div popover id="{{ pid }}" class="define-pop" role="tooltip">
-  <p><strong>{{ term }}</strong> — {{ d[0] }}</p>
+{%- set pid = "tip-" ~ term|replace(" ", "-")|replace("+", "plus") -%}
+<button type="button" class="info" popovertarget="{{ pid }}"
+        aria-label="What {{ term }} means" title="{{ d[0] }}">i</button>
+<div popover id="{{ pid }}" class="tooltip" role="tooltip">
+  <p><span class="tooltip-term">{{ term }}</span> — {{ d[0] }}</p>
   {% if d[1] %}<p>{{ d[1] }}</p>{% endif %}
 </div>
+{% endmacro %}
+
+{% macro delta(pct, baseline_label) %}
+{#
+  A change chip against a *named* baseline. A delta with no "vs what" is the
+  commonest lie in this category, so the baseline is a required argument.
+#}
+{%- if pct is none -%}
+<span class="delta delta-none">no baseline<span class="delta-base"> · first sweep</span></span>
+{%- else -%}
+<span class="delta {{ 'delta-up' if pct > 0 else ('delta-down' if pct < 0 else 'delta-none') }}">
+  {{ pct|pct }}<span class="delta-base"> vs {{ baseline_label }}</span>
+</span>
+{%- endif -%}
+{% endmacro %}
+
+{% macro sources(n) %}
+{#
+  Source count as pips plus the number. The count *is* the label — no invented
+  category word to learn, which is what "wtf is Corroborated" was about.
+#}
+<span class="pips" role="img" aria-label="{{ n }} independent source{{ '' if n == 1 else 's' }}">
+  {%- for i in range(3) %}<span class="pip {{ 'pip-on' if i < (n if n < 3 else 3) }}"></span>{% endfor -%}
+</span><span class="pips-label">{{ n }}</span>
 {% endmacro %}
 
 {% macro deliverable_promise(tiers, heading_level=2) %}
