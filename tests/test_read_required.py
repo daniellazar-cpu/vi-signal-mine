@@ -173,3 +173,23 @@ def test_the_invalidation_is_optional():
     s = _NoMemo()
     assert read_required(s, "r", "n.json", base_delay=0.001) == "ok"
     assert s.attempts == 3
+
+
+def test_the_default_budget_leaves_room_for_a_whole_report():
+    """`run_report` reads eight artifacts it cannot proceed without, so the
+    per-read waits compound. At six attempts (7.75s each) a genuinely absent
+    artifact pushed the operation past the 60s serverless ceiling — a timeout
+    instead of a clean 400, which is worse than the error being absorbed.
+    """
+    import inspect
+
+    sig = inspect.signature(read_required)
+    attempts = sig.parameters["attempts"].default
+    base = sig.parameters["base_delay"].default
+    per_read = sum(base * (2 ** i) for i in range(attempts - 1))
+    assert per_read * 8 < 30, (
+        f"{attempts} attempts x {base}s = {per_read:.2f}s per read; "
+        f"{per_read * 8:.1f}s for a report's eight reads is too close to the "
+        f"60s function ceiling"
+    )
+    assert attempts >= 3, "too few attempts to absorb any real lag"

@@ -16,6 +16,7 @@ defaults.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from html import escape as _esc
 from pathlib import Path
@@ -28,6 +29,8 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 from starlette.responses import PlainTextResponse, Response
 from starlette.templating import Jinja2Templates
 from starlette.types import ASGIApp, Receive, Scope, Send
+
+logger = logging.getLogger(__name__)
 
 from vsm.config import get_settings
 from vsm.errors import GuardViolation, NoSuchRun, NoSuchTopic, VsmError
@@ -1146,20 +1149,22 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
                 request, 422, "A guard blocked the report",
                 f"{exc} — nothing was written; a blocked report leaves no partial artifacts.",
             )
-        except FileNotFoundError:
-            # The insight run's own artifacts exist (this route only reached
-            # `run_report` because `run_id` resolved), but `run_report` also
-            # re-reads the *snapshot's* `signals.json` (vsm/modes/report.py)
-            # to rebuild the citation ledger — and on ephemeral storage
-            # (vsm/storage.py) that file can simply be gone by the time this
-            # POST arrives. Caught here, the same way `insight_create` above
-            # already catches the identical failure one step earlier in the
-            # chain, rather than surfacing as an unhandled 500.
+        except FileNotFoundError as exc:
+            # `run_report` reads eight artifacts it cannot proceed without: the
+            # snapshot's `signals.json`, to rebuild the citation ledger, and
+            # seven of the insight run's own. Any of them can be the one that
+            # is missing, so **say which**. This message used to assert
+            # `signals.json` unconditionally, which sent a reader looking at
+            # the wrong run — and cost real time diagnosing a live failure that
+            # was not about that file at all. The backends all raise
+            # `FileNotFoundError("no artifact named X on run Y")`, so the
+            # detail is already in hand.
+            logger.warning("report %s could not read a required artifact: %s", run_id, exc)
             return error_page(
-                request, 400, "No snapshot to report on",
-                f"The snapshot run_report {run_id!r} was going to report on has "
-                "lost its signals.json on disk — the report cannot be rebuilt "
-                "from it. Mine a fresh snapshot and generate insight again.",
+                request, 400, "A required artifact is missing",
+                f"The report could not be built: {exc}. If this is a run that "
+                "just completed, retry — otherwise mine a fresh snapshot and "
+                "generate insight again.",
             )
         return RedirectResponse(url=f"/runs/{rep.run_id}/report", status_code=303)
 

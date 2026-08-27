@@ -156,7 +156,7 @@ def open_stores(
 
 
 def read_required(store: Any, run_id: str, name: str,
-                  *, attempts: int = 6, base_delay: float = 0.25) -> Any:
+                  *, attempts: int = 4, base_delay: float = 0.25) -> Any:
     """An artifact the caller **knows** must exist, read through a transient
     absence.
 
@@ -183,11 +183,16 @@ def read_required(store: Any, run_id: str, name: str,
     key-value *table* on the same Postgres database, so both read their own
     writes and take the single-attempt path.
 
-    Bounded on purpose. Six attempts with full exponential backoff is about 7.75
-    seconds in the worst case, comfortably inside a serverless function's
-    ceiling, and a genuine absence still surfaces as ``FileNotFoundError`` — it
-    is just slower to conclude, which is the right trade when the alternative is
-    telling someone their data is lost while it is sitting in the store.
+    Bounded tightly, and the budget is per read for a reason worth stating.
+    ``run_report`` needs **eight** artifacts, so the waits compound: at six
+    attempts (7.75s each) a genuinely absent artifact took the whole operation
+    past a serverless function's 60-second ceiling, turning a clean 400 into a
+    timeout — strictly worse than the error it replaced. Four attempts is 1.75s
+    per read, so the same worst case lands around 14 seconds.
+
+    A genuine absence still surfaces as ``FileNotFoundError``; it is only slower
+    to conclude, which is the right trade when the alternative is telling
+    someone their data is lost while it sits in the store.
     """
     # A backend that reads its own writes has nothing to wait for: there, a
     # failed read means the artifact is genuinely absent, and retrying only
