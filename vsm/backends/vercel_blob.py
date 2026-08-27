@@ -96,6 +96,11 @@ from vsm.topics.model import BANDS, Topic
 __all__ = ["BlobTopicStore", "BlobRunStore"]
 
 _API_BASE = "https://blob.vercel-storage.com"
+#: Distinguishes "read it, and it was a 404" from "not read yet" in the
+#: request-scoped map, so a genuine absence is memoised too rather than being
+#: re-fetched on every one of hundreds of duplicate lookups.
+_MISSING = object()
+
 _API_VERSION = "7"
 
 #: How many times the sequence allocator retries a lost compare-and-swap race
@@ -155,6 +160,10 @@ class _BlobHTTP:
     def __init__(self, token: str, timeout: float = 20.0) -> None:
         self._timeout = timeout
         self._auth = {"authorization": f"Bearer {token}", "x-api-version": _API_VERSION}
+        #: Request-scoped identity map, url -> (content, etag) or `_MISSING`.
+        #: Cleared by `begin_request`; see `get_content` for why it exists and
+        #: why it must not outlive one request.
+        self._seen: dict[str, Any] = {}
 
     def _send(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         """One request, retried up to ``_TRANSIENT_MAX_ATTEMPTS`` times on a
@@ -204,6 +213,10 @@ class _BlobHTTP:
         if if_match is not None:
             headers["x-if-match"] = if_match
         resp = self._send("PUT", f"{_API_BASE}/{pathname}", content=content, headers=headers)
+        # Whatever this pathname's content URL was, the map's copy is now wrong.
+        # Keyed by url, not pathname, so drop every entry whose url ends in it.
+        for url in [u for u in self._seen if u.endswith("/" + pathname)]:
+            del self._seen[url]
         if resp.status_code == 412:
             return None
         if resp.status_code == 400 and if_match is not None:
@@ -262,16 +275,51 @@ class _BlobHTTP:
     #: this is a correctness fix for every read, not only for the counter.
     _NO_CACHE = {"cache-control": "no-cache, no-store, max-age=0", "pragma": "no-cache"}
 
+    def begin_request(self) -> None:
+        """Drop the identity map. Called once per HTTP request.
+
+        The map below is **not** a TTL cache and must never become one: it is
+        correct only for the span of one request, and a container reused for a
+        later request would otherwise serve that request a value it did not
+        read. Clearing is therefore the caller's responsibility, wired in
+        `vsm/ui/app.py`'s middleware rather than left to a timer.
+        """
+        self._seen.clear()
+
     def get_content(self, url: str) -> tuple[bytes, str | None] | None:
         """``(content, etag)`` for an already-known full blob URL, or
         ``None`` on 404. No auth header needed — the store's default access
         is public-read, confirmed live (an unauthenticated GET on the
-        content host succeeded)."""
+        content host succeeded).
+
+        **Memoised for the current request.** Not a performance nicety: the
+        topics index renders one row per topic, and each row asked the store
+        for that topic's runs — which, on a store with no secondary index,
+        means listing every run blob and reading each one's content to find out
+        which topic it belongs to. Twice per row, because `snapshots()` is
+        itself a filter over `for_topic()`. So the cost was O(topics x runs x 2)
+        *round trips*, and the same handful of blobs were fetched hundreds of
+        times within a single page render. Measured on production: **13,144**
+        content GETs, and the home page hit the 60-second function ceiling and
+        returned 504.
+
+        Within one request the store is not being written by this process
+        between those duplicate reads, so returning the same bytes is not
+        merely faster, it is the same answer. A write still invalidates its own
+        pathname (see `put`) so a read-after-write inside one request cannot go
+        stale.
+        """
+        hit = self._seen.get(url)
+        if hit is not None:
+            return None if hit is _MISSING else hit
         resp = self._send("GET", url, headers=self._NO_CACHE)
         if resp.status_code == 404:
+            self._seen[url] = _MISSING
             return None
         resp.raise_for_status()
-        return resp.content, resp.headers.get("etag")
+        got = (resp.content, resp.headers.get("etag"))
+        self._seen[url] = got
+        return got
 
     def delete(self, urls: list[str]) -> None:
         if not urls:
@@ -493,6 +541,13 @@ class BlobTopicStore:
     tests derive one per ``tmp_path``.
     """
 
+    def begin_request(self) -> None:
+        """Forwarded to the HTTP layer's request-scoped identity map. Called by
+        `vsm/ui/app.py`'s middleware once per request; see
+        `_BlobHTTP.get_content` for what the map is for and
+        `_BlobHTTP.begin_request` for why it must not outlive a request."""
+        self._ns._http.begin_request()
+
     def __init__(self, token: str, root: str = "vsm") -> None:
         self._ns = _BlobNamespace(token, root)
 
@@ -581,6 +636,13 @@ class BlobRunStore:
     conditionally for exactly this reason — see that function's own
     docstring.
     """
+
+    def begin_request(self) -> None:
+        """Forwarded to the HTTP layer's request-scoped identity map. Called by
+        `vsm/ui/app.py`'s middleware once per request; see
+        `_BlobHTTP.get_content` for what the map is for and
+        `_BlobHTTP.begin_request` for why it must not outlive a request."""
+        self._ns._http.begin_request()
 
     def __init__(self, token: str, root: str = "vsm") -> None:
         self._ns = _BlobNamespace(token, root)

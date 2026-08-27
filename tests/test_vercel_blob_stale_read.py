@@ -284,3 +284,94 @@ def test_an_unrecognised_token_still_resolves_via_the_list_api():
         {"pathname": "vsm-cold/x.json", "url": "https://host.example/vsm-cold/x.json"}
     ]
     assert store._ns._resolve("vsm-cold/x.json") == "https://host.example/vsm-cold/x.json"
+
+
+# ------------------------------------------------- request-scoped identity map --
+
+
+def _http():
+    from vsm.backends.vercel_blob import _BlobHTTP
+    return _BlobHTTP("vercel_blob_rw_tLMD7oDfiL8G8UPE_secret")
+
+
+def _wire(http, monkeypatch, bodies: dict):
+    """Count real sends, serving from `bodies` by url."""
+    sent: list[str] = []
+
+    class _Resp:
+        def __init__(self, url):
+            self._url = url
+            self.status_code = 200 if url in bodies else 404
+            self.content = bodies.get(url, b"")
+            self.headers = {"etag": '"e"'}
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"url": self._url}
+
+    def fake_send(method, url, **kwargs):
+        sent.append(url)
+        return _Resp(url)
+
+    monkeypatch.setattr(http, "_send", fake_send)
+    return sent
+
+
+def test_the_same_blob_is_fetched_once_per_request(monkeypatch):
+    """The 504. One page render fetched the same handful of blobs hundreds of
+    times — 13,144 GETs, past the 60s function ceiling."""
+    http = _http()
+    url = "https://h/vsm/runs/min-abc.json"
+    sent = _wire(http, monkeypatch, {url: b'{"a":1}'})
+
+    for _ in range(200):
+        assert http.get_content(url) == (b'{"a":1}', '"e"')
+    assert len(sent) == 1, f"{len(sent)} round trips for one blob in one request"
+
+
+def test_a_404_is_remembered_too(monkeypatch):
+    """A missing blob is looked up just as repeatedly as a present one — the
+    fan-out does not know in advance which runs belong to which topic."""
+    http = _http()
+    sent = _wire(http, monkeypatch, {})
+    for _ in range(50):
+        assert http.get_content("https://h/vsm/runs/nope.json") is None
+    assert len(sent) == 1, f"{len(sent)} round trips for one absent blob"
+
+
+def test_begin_request_drops_the_map(monkeypatch):
+    """The map is correct only within one request. A serverless container is
+    reused, so without this a later request is served bytes it never read."""
+    http = _http()
+    url = "https://h/vsm/runs/min-abc.json"
+    sent = _wire(http, monkeypatch, {url: b'{"a":1}'})
+
+    http.get_content(url)
+    http.begin_request()
+    http.get_content(url)
+    assert len(sent) == 2, "begin_request did not clear the map"
+
+
+def test_a_write_invalidates_what_it_wrote(monkeypatch):
+    """Read-after-write inside one request must not be served the pre-write
+    bytes."""
+    http = _http()
+    url = "https://h/vsm/runs/min-abc.json"
+    store = {url: b'{"v":1}'}
+    sent = _wire(http, monkeypatch, store)
+
+    assert http.get_content(url)[0] == b'{"v":1}'
+    store[url] = b'{"v":2}'
+    http.put("vsm/runs/min-abc.json", b'{"v":2}', "application/json")
+    assert http.get_content(url)[0] == b'{"v":2}', "served a stale read after its own write"
+
+
+def test_both_stores_expose_begin_request():
+    """The middleware calls this on the store, not the HTTP layer."""
+    from vsm.backends.vercel_blob import BlobRunStore, BlobTopicStore
+
+    for cls in (BlobRunStore, BlobTopicStore):
+        s = cls("vercel_blob_rw_tLMD7oDfiL8G8UPE_secret", root="r")
+        s.begin_request()

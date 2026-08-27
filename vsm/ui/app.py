@@ -602,8 +602,14 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
     # --------------------------------------------------------------- topics --
 
     def _topic_row(topic: Any) -> dict[str, Any]:
-        snapshots = run_store.snapshots(topic.topic_id)
+        # One pass, not two. `snapshots()` is a filter over `for_topic()`, so
+        # calling both asked a store with no secondary index to list and read
+        # every run blob twice per row — and this runs once per topic on the
+        # index. Deriving the snapshots here keeps the filter identical (the
+        # backend's own `snapshots()` is `mode == "mine" and status ==
+        # "complete"`, in `for_topic` order) while halving the traffic.
         all_runs = run_store.for_topic(topic.topic_id)
+        snapshots = [r for r in all_runs if r.mode == "mine" and r.status == "complete"]
         spend = round(sum(r.cost_usd for r in all_runs), 4)
         volumes: list[int] = []
         for run in snapshots:
@@ -621,6 +627,23 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             "latest_volume": volumes[-1] if volumes else None,
             "sparkline": sparkline_svg(volumes) if len(volumes) >= 2 else "",
         }
+
+    @app.middleware("http")
+    async def _fresh_reads_each_request(request: Request, call_next):
+        """Drop each store's request-scoped identity map before handling.
+
+        That map makes the fan-out reads on a page render affordable (see
+        `vsm/backends/vercel_blob.py`'s `get_content`), and it is correct only
+        within one request. A serverless container is reused, so without this a
+        later request could be served bytes it never read. `getattr` because
+        only the blob-backed stores have one — the filesystem and Postgres
+        backends do not fan out this way and need no map.
+        """
+        for store in (topic_store, run_store):
+            begin = getattr(store, "begin_request", None)
+            if begin is not None:
+                begin()
+        return await call_next(request)
 
     @app.get("/", response_class=HTMLResponse)
     def topics_index(request: Request) -> HTMLResponse:
