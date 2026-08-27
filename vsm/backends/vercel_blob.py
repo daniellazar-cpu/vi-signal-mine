@@ -244,12 +244,36 @@ class _BlobHTTP:
                 return blobs
             cursor = page.get("cursor")
 
+    #: Sent on **every** content read. A store is mutable; a cached read of it
+    #: is a wrong answer, not a fast one.
+    #:
+    #: This is not belt-and-braces. Measured live against this store, on a blob
+    #: whose own response says ``cache-control: public, max-age=0, s-maxage=0``:
+    #:
+    #:   plain GET                  -> {"seq": 5}   x-vercel-cache: HIT
+    #:   GET with a fresh ?query    -> {"seq": 5}   x-vercel-cache: HIT
+    #:   GET with these headers     -> {"seq": 6}   <- the actual stored value
+    #:
+    #: So the edge serves a stale body **and a stale ETag**, `s-maxage=0` is not
+    #: honoured, and a cache-busting query string does not defeat it. Only an
+    #: explicit request-side no-cache does.
+    #:
+    #: That stale ETag is what broke `_next_seq`: it read a superseded value,
+    #: PUT with a precondition that could no longer hold, got a genuine 412,
+    #: re-read the *same cached copy*, and burned all forty retries — then
+    #: reported "too much concurrent contention" with exactly one caller. On
+    #: production this made every run creation a coin flip, which is precisely
+    #: the "sometimes it does work" this app was reported with. The same
+    #: staleness also let a run record read back with an out-of-date status, so
+    #: this is a correctness fix for every read, not only for the counter.
+    _NO_CACHE = {"cache-control": "no-cache, no-store, max-age=0", "pragma": "no-cache"}
+
     def get_content(self, url: str) -> tuple[bytes, str | None] | None:
         """``(content, etag)`` for an already-known full blob URL, or
         ``None`` on 404. No auth header needed — the store's default access
         is public-read, confirmed live (an unauthenticated GET on the
         content host succeeded)."""
-        resp = self._send("GET", url)
+        resp = self._send("GET", url, headers=self._NO_CACHE)
         if resp.status_code == 404:
             return None
         resp.raise_for_status()
