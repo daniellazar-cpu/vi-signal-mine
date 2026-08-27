@@ -1150,9 +1150,9 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
                 f"{exc} — nothing was written; a blocked report leaves no partial artifacts.",
             )
         except FileNotFoundError as exc:
-            # `run_report` reads eight artifacts it cannot proceed without: the
-            # snapshot's `signals.json`, to rebuild the citation ledger, and
-            # seven of the insight run's own. Any of them can be the one that
+            # `run_report` reads seven artifacts it cannot proceed without:
+            # the snapshot's `signals.json`, to rebuild the citation ledger, and
+            # six of the insight run's own. Any of them can be the one that
             # is missing, so **say which**. This message used to assert
             # `signals.json` unconditionally, which sent a reader looking at
             # the wrong run — and cost real time diagnosing a live failure that

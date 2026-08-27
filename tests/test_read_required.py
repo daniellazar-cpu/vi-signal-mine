@@ -175,21 +175,81 @@ def test_the_invalidation_is_optional():
     assert s.attempts == 3
 
 
-def test_the_default_budget_leaves_room_for_a_whole_report():
-    """`run_report` reads eight artifacts it cannot proceed without, so the
-    per-read waits compound. At six attempts (7.75s each) a genuinely absent
-    artifact pushed the operation past the 60s serverless ceiling — a timeout
-    instead of a clean 400, which is worse than the error being absorbed.
+def test_one_operation_s_waiting_is_bounded_by_its_deadline_not_by_its_read_count():
+    """The bug this class exists for.
+
+    `run_report` needs seven artifacts. With a per-read budget, a genuinely
+    absent artifact multiplied the wait by seven and pushed the operation past
+    the 60-second function ceiling — a timeout instead of a clean 400, worse
+    than the error being absorbed. Shrinking the per-read budget instead traded
+    that for the opposite failure: too little patience to absorb the lag it
+    exists for.
     """
+    from vsm.storage import ReadDeadline
+
+    class _AlwaysMissing:
+        reads_may_lag = True
+
+        def __init__(self):
+            self.attempts = 0
+
+        def read_artifact(self, run_id, name):
+            self.attempts += 1
+            raise FileNotFoundError(name)
+
+    budget = 0.05
+    deadline = ReadDeadline(budget)
+    s = _AlwaysMissing()
+    import time as _t
+
+    started = _t.perf_counter()
+    for name in ("signals.json", "findings.json", "themes.json", "momentum.json",
+                 "anomaly.json", "duallens.json", "stance.json"):
+        with pytest.raises(FileNotFoundError):
+            read_required(s, "min-abc", name, deadline=deadline, base_delay=0.01)
+    elapsed = _t.perf_counter() - started
+
+    assert deadline.remaining == 0, "the budget was not fully consumed"
+    assert elapsed < budget * 3, (
+        f"seven failing reads waited {elapsed:.3f}s against a {budget}s "
+        f"operation budget — the deadline is not shared"
+    )
+
+
+def test_the_first_read_may_spend_the_whole_budget():
+    """The realistic case: once one artifact from a run is visible the rest
+    are, so the first read should be allowed to wait properly rather than
+    getting a seventh of the patience."""
+    from vsm.storage import ReadDeadline
+
+    deadline = ReadDeadline(10.0)
+    s = _Store(fail_times=3)
+    assert read_required(s, "r", "n.json", deadline=deadline, base_delay=0.001) == "the artifact"
+    assert s.attempts == 4
+    assert deadline.remaining < 10.0, "nothing was drawn from the shared budget"
+
+
+def test_a_spent_deadline_stops_retrying_immediately():
+    from vsm.storage import ReadDeadline
+
+    deadline = ReadDeadline(0.0)
+    s = _Store(fail_times=99)
+    with pytest.raises(FileNotFoundError):
+        read_required(s, "r", "n.json", deadline=deadline, base_delay=999)
+    assert s.attempts == 1, f"kept retrying with no budget left ({s.attempts})"
+
+
+def test_the_report_shares_one_deadline_across_every_required_read():
+    """Structural, because the cost of getting this wrong is a timeout in
+    production rather than a test failure."""
     import inspect
 
-    sig = inspect.signature(read_required)
-    attempts = sig.parameters["attempts"].default
-    base = sig.parameters["base_delay"].default
-    per_read = sum(base * (2 ** i) for i in range(attempts - 1))
-    assert per_read * 8 < 30, (
-        f"{attempts} attempts x {base}s = {per_read:.2f}s per read; "
-        f"{per_read * 8:.1f}s for a report's eight reads is too close to the "
-        f"60s function ceiling"
+    from vsm.modes import report
+
+    src = inspect.getsource(report.run_report)
+    n_reads = src.count("read_required(")
+    assert n_reads >= 7, f"only {n_reads} required reads found — did they move?"
+    assert src.count("deadline=deadline") == n_reads, (
+        "some required read does not draw on the shared budget"
     )
-    assert attempts >= 3, "too few attempts to absorb any real lag"
+    assert src.count("ReadDeadline(") == 1, "more than one budget per operation"

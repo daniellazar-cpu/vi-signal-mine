@@ -155,8 +155,43 @@ def open_stores(
     )
 
 
-def read_required(store: Any, run_id: str, name: str,
-                  *, attempts: int = 4, base_delay: float = 0.25) -> Any:
+class ReadDeadline:
+    """A waiting budget shared across the reads of one operation.
+
+    Exists because the two obvious budgets are both wrong. Per-read attempts
+    compound: ``run_report`` needs seven artifacts, so a generous per-read
+    budget (six attempts, ~7.75s) put a genuinely absent artifact past the
+    60-second function ceiling — a timeout instead of a clean 400, worse than
+    the error it was absorbing. Shrinking the per-read budget instead trades
+    that for the opposite failure: too little patience to absorb the lag it
+    exists for, and the intermittent report failure comes back.
+
+    So the budget belongs to the *operation*. The first read may spend the whole
+    thing waiting for a write to become visible — which is the realistic case,
+    because once one artifact from a run is visible the rest are — and every
+    later read draws on what is left. A genuine absence therefore costs the
+    budget once, not once per artifact.
+    """
+
+    __slots__ = ("remaining",)
+
+    def __init__(self, seconds: float = 20.0) -> None:
+        self.remaining = seconds
+
+    def spend(self, seconds: float) -> float:
+        """Sleep up to ``seconds``, limited by what is left. Returns what was
+        actually spent; ``0.0`` means the budget is gone and the caller should
+        stop retrying."""
+        take = min(seconds, self.remaining)
+        if take <= 0:
+            return 0.0
+        self.remaining -= take
+        time.sleep(take)
+        return take
+
+
+def read_required(store: Any, run_id: str, name: str, *, deadline: "ReadDeadline | None" = None,
+                  attempts: int = 6, base_delay: float = 0.25) -> Any:
     """An artifact the caller **knows** must exist, read through a transient
     absence.
 
@@ -183,12 +218,10 @@ def read_required(store: Any, run_id: str, name: str,
     key-value *table* on the same Postgres database, so both read their own
     writes and take the single-attempt path.
 
-    Bounded tightly, and the budget is per read for a reason worth stating.
-    ``run_report`` needs **eight** artifacts, so the waits compound: at six
-    attempts (7.75s each) a genuinely absent artifact took the whole operation
-    past a serverless function's 60-second ceiling, turning a clean 400 into a
-    timeout — strictly worse than the error it replaced. Four attempts is 1.75s
-    per read, so the same worst case lands around 14 seconds.
+    Pass a shared :class:`ReadDeadline` when one operation needs several
+    artifacts — see its docstring for why a per-read budget is wrong in both
+    directions. Without one, each call gets its own ~7.75s, which is fine for a
+    lone read and dangerous for seven.
 
     A genuine absence still surfaces as ``FileNotFoundError``; it is only slower
     to conclude, which is the right trade when the alternative is telling
@@ -209,7 +242,12 @@ def read_required(store: Any, run_id: str, name: str,
         except FileNotFoundError as exc:
             last = exc
             if attempt < attempts - 1:
-                time.sleep(base_delay * (2 ** attempt))
+                wait = base_delay * (2 ** attempt)
+                if deadline is not None:
+                    if deadline.spend(wait) == 0.0:
+                        break          # the operation's budget is gone
+                else:
+                    time.sleep(wait)
                 # Drop the request-scoped identity map before trying again.
                 # It memoises a 404 as deliberately as a hit — the fan-out
                 # looks up absent artifacts just as repeatedly as present ones
