@@ -414,7 +414,23 @@ legend {
 
 /* ------------------------------------------------------------- tables -- */
 
-.table-scroll { overflow-x: auto; margin-top: 8px; }
+/* A scrollable table must say so. Every wide table here correctly scrolls
+   inside its own box rather than pushing the page sideways, but the cut edge
+   was silent: on a 375px phone a client can swipe past Divergence and
+   Confidence without knowing they exist. The two `local` gradients are
+   background-coloured covers that travel with the content; the two `scroll`
+   shadows sit still beneath them. At the left edge the cover hides the left
+   shadow, at the right edge the right one — so the hint appears only in the
+   direction there is actually more to read, with no script. */
+.table-scroll {
+  overflow-x: auto; margin-top: 8px;
+  background:
+    linear-gradient(to right, var(--bg) 30%, transparent) left center / 32px 100% no-repeat,
+    linear-gradient(to left, var(--bg) 30%, transparent) right center / 32px 100% no-repeat,
+    radial-gradient(farthest-side at 0 50%, rgba(0, 0, 0, 0.13), transparent) left center / 12px 100% no-repeat,
+    radial-gradient(farthest-side at 100% 50%, rgba(0, 0, 0, 0.13), transparent) right center / 12px 100% no-repeat;
+  background-attachment: local, local, scroll, scroll;
+}
 .table-scroll:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; }
 
 .data-table { width: 100%; border-collapse: collapse; min-width: 560px; }
@@ -568,14 +584,19 @@ legend {
 
 .forest-plot-wrap { border: var(--border-hairline) solid var(--rule); padding: var(--space-sm) var(--space-sm) 0; }
 .forest-plot-wrap svg { display: block; width: 100%; height: auto; }
+/* The plot's small text is --fg2, not --vi-gray-500: at 10-12px/400-500,
+   #797F88 measures 4.03:1 on white, under AA's 4.5:1. This SVG is reused
+   verbatim as Figure 1 of the client report, so the shortfall shipped in
+   the deliverable. #5F6570 measures 5.86:1. Guarded in
+   tests/test_ui_a11y_contrast.py. */
 .plot-legend-text, .plot-axis-end, .plot-theme-sub, .plot-num, .plot-tier { font-family: var(--vi-font-family); }
-.plot-legend-text { fill: var(--vi-gray-500); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 500; }
-.plot-axis-end { fill: var(--vi-gray-500); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 500; }
+.plot-legend-text { fill: var(--fg2); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 500; }
+.plot-axis-end { fill: var(--fg2); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 500; }
 .plot-theme-name { fill: var(--vi-black); font-size: 14px; font-weight: 500; }
-.plot-theme-sub { fill: var(--vi-gray-500); font-size: 12px; }
+.plot-theme-sub { fill: var(--fg2); font-size: 12px; }
 .plot-num { fill: var(--vi-black); font-size: 13px; font-variant-numeric: tabular-nums; }
 .plot-tier { fill: var(--vi-black); font-size: 12px; font-weight: 500; }
-.plot-tier-single_source { fill: var(--vi-gray-500); }
+.plot-tier-single_source { fill: var(--fg2); }
 .plot-ne-label { fill: var(--vi-ink); font-size: 10px; font-weight: 700; letter-spacing: 0.06em; }
 
 .forest-plot-baseline-action {
@@ -946,7 +967,12 @@ a.tier-badge-corroborated:hover { background: var(--vi-violet-hover); border-col
 .deliv-tier-secondary { padding-top: var(--space-lg); border-top: var(--border-hairline) solid var(--rule); }
 
 /* ---- the primary tier: presence, and a rendered excerpt ---- */
-.deliv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--space-md); }
+/* Exactly two columns, not auto-fill. The primary tier is always four
+   cards, and this same macro renders on both the narrow report column and
+   the wide /deliverables page — auto-fill gave the wide one three columns
+   and stranded the fourth card alone beside two card-widths of dead
+   space, so the two renderings of one component disagreed. */
+.deliv-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-md); }
 .deliv-card {
   /* A grid item's automatic minimum size is its min-content width, and a
      card carrying a sample table or an unbreakable filename has a
@@ -1102,7 +1128,7 @@ a.tier-badge-corroborated:hover { background: var(--vi-violet-hover); border-col
   .doc-figure-plot { border: 0.5pt solid #999; }
   .finding-claim { font-size: 13pt; line-height: 1.35; }
 
-  .table-scroll { overflow: visible !important; }
+  .table-scroll { overflow: visible !important; background: none !important; }
   .doc-table { min-width: 0 !important; }
   .doc-table thead th { position: static !important; }
   .data-table thead th { position: static !important; background: none !important; }
@@ -1117,8 +1143,14 @@ a.tier-badge-corroborated:hover { background: var(--vi-violet-hover); border-col
   /* Every insight tab prints, with its label as a heading — four of five are
      hidden on screen and would silently vanish from a printed page. */
   .tab-panel { display: block !important; padding-top: 0 !important; }
+  /* The wrapper alone was not enough: the browser's own
+     `details:not([open]) > :not(summary) { display: none }` still applies,
+     so any <details> left closed on screen printed as an empty gap — the
+     exact loss this block exists to prevent, solved only for the CSS-only
+     .tab-panels above, which hide by a different mechanism. */
   details { display: block; }
   details > summary { display: none; }
+  details:not([open]) > :not(summary) { display: block !important; }
 }
 
 /* ==================================================== forced colors ===== */
@@ -1131,6 +1163,10 @@ a.tier-badge-corroborated:hover { background: var(--vi-violet-hover); border-col
   .flow-step.flow-step-current::after { forced-color-adjust: none; }
   .tier-badge { border: 1px solid currentColor; }
   input:focus-visible, textarea:focus-visible, select:focus-visible,
+  /* The scroll-hint gradients are decorative and forced-colors mode
+     discards background images anyway — drop them explicitly so no
+     system colour is spent painting a shadow. */
+  .table-scroll { background: none !important; }
   .table-scroll:focus-visible { outline: 2px solid Highlight; }
 }
 

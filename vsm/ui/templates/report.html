@@ -156,8 +156,11 @@
       <tr>
         <th scope="row">{{ r.name }}</th>
         <td class="num">{{ r.volume }}</td>
-        <td class="num">{{ r.hcp_net|net }}</td>
-        <td class="num">{{ r.patient_net|net }}</td>
+        {# Each net cell states its own reason when absent, matching the wording
+           the client artifact uses in the same cell. A bare dash here made the
+           page less honest than the document it previews. #}
+        <td class="{{ 'num' if r.hcp_net is not none else 'doc-reason' }}">{{ r.hcp_net|net('hcp') }}</td>
+        <td class="{{ 'num' if r.patient_net is not none else 'doc-reason' }}">{{ r.patient_net|net('patient') }}</td>
         {# The one non-negotiable rule of this codebase, in the one column
            most likely to break it: a divergence of `None` prints the stated
            reason, never 0 and never an empty cell. #}

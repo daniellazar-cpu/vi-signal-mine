@@ -88,9 +88,29 @@ def pct(value: float | None) -> str:
     return f"{sign}{value:g}%"
 
 
-def net_stance_text(value: float | None) -> str:
+#: Why a net stance is absent, per lens. Mirrors `_NET_CELL_REASON` in
+#: `vsm/modes/report.py` so the page and the artifact say the same thing in the
+#: same cell — they diverged once, and the page was the one that lost the reason.
+_NET_ABSENT_REASON = {
+    "hcp": "not read — no clinician-class signal in this theme",
+    "patient": "not read — no patient-class signal in this theme",
+}
+
+
+def net_stance_text(value: float | None, which: str | None = None) -> str:
+    """A net stance, or **why there isn't one**.
+
+    An em dash alone was the defect here. The client artifact prints "not read
+    — no patient-class signal in this theme" in this very cell, so the page was
+    strictly less honest than the file it previews, and a reader comparing the
+    two would find the page silent where the document explained itself.
+
+    `which` is optional so the filter stays usable where the lens is not known;
+    without it the reason degrades to a bare dash, which is the old behaviour
+    and should be treated as a caller that has not been updated yet.
+    """
     if value is None:
-        return "—"
+        return _NET_ABSENT_REASON.get(which or "", "—")
     sign = "+" if value >= 0 else ""
     return f"{sign}{value:.2f}"
 

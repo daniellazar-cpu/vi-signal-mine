@@ -7,7 +7,10 @@
 {% if topic is not none and snapshot_rail %}
 <div class="dated-strip" role="navigation" aria-label="topic snapshots">
   {% for frame in snapshot_rail %}
+  {# aria-current, as the nav and flow-step indicators both do — this was the
+     one "current" marker carried by border-colour and weight alone. #}
   <a class="dated-frame {% if frame.is_current %}dated-frame-current{% endif %}"
+     {% if frame.is_current %}aria-current="page"{% endif %}
      href="/runs/{{ frame.run_id }}/snapshot">{{ frame.started_at|dt }}</a>
   {% endfor %}
 </div>

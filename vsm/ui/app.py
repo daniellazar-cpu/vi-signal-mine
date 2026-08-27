@@ -15,16 +15,17 @@ defaults.
 
 from __future__ import annotations
 
+import json
 import re
 from html import escape as _esc
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
-from starlette.responses import PlainTextResponse
+from starlette.responses import PlainTextResponse, Response
 from starlette.templating import Jinja2Templates
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -304,11 +305,10 @@ def _deliverable_cards(
             if content is not None:
                 available = True
                 href = f"/runs/{run.run_id}/artifact/{d['file']}"
-                path = run_store.artifacts_dir(run.run_id) / d["file"]
-                try:
-                    size = path.stat().st_size
-                except OSError:
-                    size = None
+                # Derived from `content`, never from a filesystem path — see
+                # `_artifact_bytes`. A path here is a key on two of the three
+                # backends, and `.stat()` on it is an `AttributeError`.
+                size = len(_artifact_bytes(content, d["file"]))
                 if d["file"].endswith(".md") and isinstance(content, str):
                     real = markdown_excerpt_html(content)
                     if real:
@@ -464,6 +464,33 @@ def _mine_run_is_synthetic(run_store: Any, mine_run_id: str | None) -> bool:
     except FileNotFoundError:
         return False
     return any_synthetic(rows)
+
+
+def _artifact_bytes(content: Any, name: str) -> bytes:
+    """The exact bytes a backend holds for this artifact, from content already
+    read — no second fetch, and **no filesystem**.
+
+    This exists because the deliverable cards and the download route used to
+    reach for ``artifacts_dir(run_id) / name`` and treat it as a real
+    ``pathlib.Path``. On the local backend it is one. On Vercel Blob it is a
+    ``PurePosixPath`` subclass standing in for a key, with no ``.stat()`` and
+    no file behind it — so ``.stat().st_size`` raised ``AttributeError`` (not
+    the ``OSError`` that was being caught) and took down every route that
+    renders a deliverable card, while ``FileResponse`` broke every download.
+    Production served reads of pre-seeded data fine and 500ed the moment a run
+    was created through it, which is exactly the "it doesn't work" this app was
+    reported with.
+
+    Reconstruction is byte-exact rather than approximate: every backend writes
+    a mapping as ``json.dumps(payload, indent=2, sort_keys=True)`` encoded
+    UTF-8, and a string verbatim. If that ever stops being true, the size on a
+    card drifts and a download stops matching the stored blob — so the writers
+    and this reader are pinned together by
+    ``tests/test_ui_artifact_bytes.py``.
+    """
+    if isinstance(content, str):
+        return content.encode("utf-8")
+    return json.dumps(content, indent=2, sort_keys=True).encode("utf-8")
 
 
 def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> FastAPI:
@@ -1383,18 +1410,32 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             run = run_store.get(run_id)
         except NoSuchRun:
             return error_page(request, 404, "Run not found", f"No run with id {run_id!r}.")
-        base = run_store.artifacts_dir(run.run_id).resolve()
-        candidate = (base / name).resolve()
-        if base != candidate.parent or not candidate.is_file():
+        # Read through the store, not the filesystem. `FileResponse` needs a
+        # real local file, which only one of the three backends has; on Vercel
+        # Blob every download 500ed. Each backend applies its own traversal
+        # guard inside `read_artifact` (`RunStore._artifact_path` and
+        # `vercel_blob._validated_key` both raise `ValueError`), so a name that
+        # escapes the run is refused at the layer that knows what "escapes"
+        # means for its own storage, rather than by path arithmetic here that
+        # is only meaningful for one of them.
+        try:
+            content = run_store.read_artifact(run.run_id, name)
+        except (FileNotFoundError, ValueError):
             return error_page(
                 request, 404, "Artifact not found",
                 f"No artifact named {name!r} on run {run_id!r}.",
             )
+        suffix = Path(name).suffix
         media = (
-            "application/json" if candidate.suffix == ".json"
-            else "text/markdown; charset=utf-8" if candidate.suffix == ".md"
+            "application/json" if suffix == ".json"
+            else "text/markdown; charset=utf-8" if suffix == ".md"
             else "text/plain; charset=utf-8"
         )
-        return FileResponse(candidate, media_type=media, filename=candidate.name)
+        filename = Path(name).name
+        return Response(
+            _artifact_bytes(content, name),
+            media_type=media,
+            headers={"content-disposition": f'attachment; filename="{filename}"'},
+        )
 
     return app

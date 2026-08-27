@@ -564,3 +564,36 @@ def test_the_document_has_one_h1_and_skips_no_heading_level(seeded):
         assert levels.count(1) == 1, f"{path}: {levels.count(1)} h1 elements"
         for previous, current in zip(levels, levels[1:]):
             assert current <= previous + 1, f"{path}: h{previous} -> h{current}"
+
+
+def test_each_absent_net_cell_states_its_own_reason(seeded):
+    """The page must not be less honest than the document it previews.
+
+    The sibling test above asserts only that an em dash appears, which passes
+    whether or not the cell explains itself — it locked the defect in rather
+    than catching it. `pulse_report.md` prints "not read — no patient-class
+    signal in this theme" in this very cell, so the page printing a bare dash
+    meant a reader comparing the two found the page silent where the document
+    explained itself. Fourteenth instance in this build of a test asserting a
+    property it never exercised.
+    """
+    body = seeded["client"].get(seeded["report_path"]).text
+    # At least one lens has no signal in the seeded demo, so at least one of
+    # these reasons must be on the page. If the demo ever changes so that both
+    # lenses are always populated, this test should be given a fixture that
+    # forces the absent case rather than being deleted.
+    assert (
+        "no clinician-class signal in this theme" in body
+        or "no patient-class signal in this theme" in body
+    ), "an absent net stance rendered without saying why"
+
+
+def test_the_net_filter_degrades_rather_than_lying():
+    """Called without a lens the filter falls back to a dash — the old
+    behaviour. Pinned so a caller that forgets the argument is visibly
+    unhelpful rather than silently wrong about which lens is missing."""
+    from vsm.ui.render import net_stance_text
+
+    assert net_stance_text(None) == "—"
+    assert net_stance_text(None, "patient").startswith("not read")
+    assert net_stance_text(0.0, "patient") == "+0.00"

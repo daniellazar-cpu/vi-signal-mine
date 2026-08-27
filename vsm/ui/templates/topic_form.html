@@ -18,9 +18,14 @@
       <label for="f-name">{{ field_guide.name.label }}</label>
       <span class="field-required-tag">Required</span>
     </div>
-    <input id="f-name" type="text" name="name" value="{{ values.name }}" placeholder="{{ field_guide.name.placeholder }}" required autofocus>
-    <p class="field-note">{{ field_guide.name.help }}</p>
-    {% if errors.name is defined %}<p class="field-error">{{ errors.name }}</p>{% endif %}
+    {# The error is tied to the input by id, not just placed near it. Sighted
+       users get proximity; a screen-reader user tabbing in got only the label
+       and help text and never heard the error at all. #}
+    <input id="f-name" type="text" name="name" value="{{ values.name }}" placeholder="{{ field_guide.name.placeholder }}" required autofocus
+           aria-describedby="f-name-note{% if errors.name is defined %} f-name-error{% endif %}"
+           {% if errors.name is defined %}aria-invalid="true"{% endif %}>
+    <p class="field-note" id="f-name-note">{{ field_guide.name.help }}</p>
+    {% if errors.name is defined %}<p class="field-error" id="f-name-error">{{ errors.name }}</p>{% endif %}
   </div>
 
   <div class="field-row">
@@ -78,9 +83,10 @@
     <p class="field-note">A report may never contain these terms — checked on every generated string. If left blank: nothing is blocked.</p>
   </div>
 
-  <fieldset class="band-fieldset">
+  <fieldset class="band-fieldset"
+            {% if errors.spend_band is defined %}aria-describedby="spend-band-error" aria-invalid="true"{% endif %}>
     <legend>Spend band</legend>
-    {% if errors.spend_band is defined %}<p class="field-error">{{ errors.spend_band }}</p>{% endif %}
+    {% if errors.spend_band is defined %}<p class="field-error" id="spend-band-error">{{ errors.spend_band }}</p>{% endif %}
     <div class="band-cards">
       {% for card in band_cards %}
       <label class="band-card">
