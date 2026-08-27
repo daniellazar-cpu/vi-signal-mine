@@ -69,6 +69,10 @@
         {% endfor %}
       </tbody>
     </table>
+    {% elif moved_comparable %}
+    {# Comparable themes exist; none crossed the threshold. Saying "sweep it
+       twice" here was wrong on a store that had already been swept twice. #}
+    <p class="panel-empty">{{ moved_comparable }} theme{{ '' if moved_comparable == 1 else 's' }} compared against a prior snapshot — none moved more than {{ moved_threshold|round|int }}%.</p>
     {% else %}
     <p class="panel-empty">Needs a topic swept twice — one snapshot has nothing to move against.</p>
     {% endif %}

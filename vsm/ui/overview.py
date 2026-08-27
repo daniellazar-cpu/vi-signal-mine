@@ -79,13 +79,21 @@ def _moved(
     topics_by_id: Mapping[str, Any],
     insights: Mapping[str, Any],
     read: ArtifactReader,
-) -> list[dict[str, Any]]:
-    """Themes whose volume changed against the prior snapshot, biggest first.
+) -> tuple[list[dict[str, Any]], int]:
+    """Themes whose volume changed against the prior snapshot, biggest first,
+    and how many were comparable at all.
 
     Rows with no prior snapshot are skipped rather than shown as 0%: a theme
     being measured for the first time has not "not moved", and rendering it at
     zero is the exact confusion this codebase has fought everywhere else.
+
+    The comparable count is returned because without it an empty panel cannot
+    say why it is empty, and it guessed wrong on the deployment: it read "needs
+    a topic swept twice" on a store that had two snapshots and simply nothing
+    moving more than the threshold. Those are different facts and only one of
+    them is an instruction.
     """
+    comparable = 0
     out: list[dict[str, Any]] = []
     for topic_id, run in insights.items():
         for row in _rows(read, run.run_id, "momentum.json"):
@@ -93,6 +101,7 @@ def _moved(
             pct = row.get("delta_pct")
             if prior is None or pct is None:
                 continue
+            comparable += 1
             if abs(pct) < MOVED_MIN_PCT:
                 continue
             out.append({
@@ -106,7 +115,7 @@ def _moved(
                 "synthetic": bool(row.get("synthetic")),
             })
     out.sort(key=lambda r: (-abs(r["delta_pct"]), r["theme"]))
-    return out
+    return out, comparable
 
 
 def _divergence(
@@ -244,7 +253,7 @@ def build_overview(
     topics_by_id = {t.topic_id: t for t in topics}
     insights = latest_insight_per_topic(runs_by_topic)
 
-    moved = _moved(topics_by_id, insights, read)
+    moved, moved_comparable = _moved(topics_by_id, insights, read)
     divergence, not_comparable = _divergence(topics_by_id, insights, read)
     sayable, emerging = _sayable(topics_by_id, insights, read)
     attention = _attention(topics, runs_by_topic)
@@ -273,6 +282,9 @@ def build_overview(
         ],
         "moved": moved[:panel_rows],
         "moved_total": len(moved),
+        # Lets the empty state say which of two different things is true.
+        "moved_comparable": moved_comparable,
+        "moved_threshold": MOVED_MIN_PCT,
         "divergence": divergence[:panel_rows],
         "divergence_total": len(divergence),
         "not_comparable": not_comparable,
