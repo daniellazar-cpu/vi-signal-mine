@@ -112,3 +112,64 @@ def test_the_expected_absence_paths_do_not_use_it():
     loop = inspect.getsource(insight)
     i = loop.index("earlier = series[:position]")
     assert "read_required" not in loop[i:i + 400], "the momentum loop must not retry"
+
+
+def test_a_retry_is_not_served_the_memoised_miss():
+    """The interaction that made the first version of this a no-op.
+
+    The blob backend memoises a 404 for the life of a request as deliberately
+    as it memoises a hit — the fan-out probes absent artifacts just as
+    repeatedly as present ones. So a retry inside the same request was served
+    the first attempt's miss out of memory and never reached the network.
+    Production stayed at 2/10 successful report runs with the retry in place,
+    because it was retrying against a cache.
+    """
+
+    class _Memoising:
+        """A store whose reads are cached until `begin_request` clears it."""
+
+        reads_may_lag = True
+
+        def __init__(self):
+            self.network_calls = 0
+            self.visible = False
+            self._memo = {}
+
+        def begin_request(self):
+            self._memo.clear()
+
+        def read_artifact(self, run_id, name):
+            if name in self._memo:
+                raise FileNotFoundError(name)      # the memoised miss
+            self.network_calls += 1
+            if not self.visible:
+                self.visible = True                # visible from the 2nd call on
+                self._memo[name] = True
+                raise FileNotFoundError(name)
+            return "the artifact"
+
+    s = _Memoising()
+    assert read_required(s, "min-abc", "signals.json", base_delay=0.001) == "the artifact"
+    assert s.network_calls == 2, (
+        f"{s.network_calls} network call(s) — the retry was served from the memo"
+    )
+
+
+def test_the_invalidation_is_optional():
+    """A store without `begin_request` must still retry, not crash."""
+
+    class _NoMemo:
+        reads_may_lag = True
+
+        def __init__(self):
+            self.attempts = 0
+
+        def read_artifact(self, run_id, name):
+            self.attempts += 1
+            if self.attempts < 3:
+                raise FileNotFoundError(name)
+            return "ok"
+
+    s = _NoMemo()
+    assert read_required(s, "r", "n.json", base_delay=0.001) == "ok"
+    assert s.attempts == 3

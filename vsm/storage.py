@@ -205,5 +205,16 @@ def read_required(store: Any, run_id: str, name: str,
             last = exc
             if attempt < attempts - 1:
                 time.sleep(base_delay * (2 ** attempt))
+                # Drop the request-scoped identity map before trying again.
+                # It memoises a 404 as deliberately as a hit — the fan-out
+                # looks up absent artifacts just as repeatedly as present ones
+                # — so without this every retry is served the *first*
+                # attempt's miss from memory and never reaches the network.
+                # That made this whole function a no-op on its first outing:
+                # production stayed at 2/10 successful report runs with the
+                # retry in place, because it was retrying against a cache.
+                forget = getattr(store, "begin_request", None)
+                if forget is not None:
+                    forget()
     assert last is not None  # the loop cannot exit without raising or returning
     raise last
