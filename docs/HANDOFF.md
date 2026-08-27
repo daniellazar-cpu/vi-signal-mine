@@ -31,8 +31,8 @@ any page.
 
 There is a dedicated Vercel Blob store (`vsm-store`) connected to the project on
 the **`vi-labs-projects`** team. Topics, runs and artifacts survive across
-invocations. Creating a topic, mining, and generating insight all work on the
-deployment.
+invocations. The full chain — topic, mine, insight, report — ran **8/8 green** on the
+deployment after the last of these fixes, having been 2/10 before them.
 
 ### Use Postgres instead. This is the main recommendation of the day.
 
@@ -57,7 +57,7 @@ five separate defects fixed today were all consequences of that one choice:
 | Records read back stale | The content host serves a stale body *and* ETag, ignores its own `s-maxage=0`, and a cache-busting query string does not defeat it |
 | A cold container reported existing blobs as missing | No secondary index, so discovery went through the list API, which is eventually consistent |
 | The home page 504ed | No secondary index, so "this topic's runs" means reading *every* run blob's content. 13,144 GETs for one render |
-| The report step failed intermittently | A blob is not readable from every edge the instant its write returns |
+| The report step failed intermittently | A blob is not readable from every edge the instant its write returns. Caught in the act: on a failing run, every artifact the function could not read returned 200 to an external check moments later — from a different region |
 
 Each has a fix and a test that fails without it. But they are five workarounds
 for a substrate mismatch, and a relational database with a primary key, an
@@ -78,9 +78,17 @@ anyone.**
   (`vercel_blob_rw_<storeId>_<secret>` -> `<storeid>.public.blob.…`) so no read
   path consults the list API.
 - `vsm/storage.py:read_required` retries a read the caller knows must succeed,
-  opt-in per backend via `reads_may_lag`. It must clear the identity map between
-  attempts — without that it retries against the memoised miss and does nothing,
-  which is exactly how its first version shipped.
+  opt-in per backend via `reads_may_lag`. Two traps, both hit:
+  it must **clear the identity map between attempts**, or it retries against the
+  memoised miss and does nothing (that is how its first version shipped, and
+  production stayed at 2/10); and the waiting budget must belong to the
+  *operation*, not the read — `run_report` needs seven artifacts, so a per-read
+  budget multiplied the wait by seven and pushed a genuine absence past the
+  60-second ceiling, while shrinking the per-read budget simply brought the
+  original failure back. `ReadDeadline` is shared across all seven.
+- Reads whose absence is a legitimate answer must stay plain: `_existing_artifact`
+  (resume), the momentum loop, and the deliverable cards' ten-name probe. A test
+  asserts the first two do not retry.
 
 ### The bug that made it look broken, and it was not the UI
 
