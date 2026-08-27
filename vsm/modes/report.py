@@ -43,6 +43,7 @@ from __future__ import annotations
 from typing import Any, Mapping, Sequence
 
 from vsm.analysis.corroborate import CORROBORATED_AT, Finding
+from vsm.modes.vocabulary import SWEEP_SIZE
 from vsm.storage import ReadDeadline, read_required
 from vsm.analysis.momentum import NO_BASELINE
 from vsm.guards.advisory import assert_advisory
@@ -429,7 +430,10 @@ def run_report(
         )
     considering_lines.extend(model_considerations)
     generic_suggestion = guard_only(
-        "Raising the spend band on the next sweep is worth considering if "
+        # "band" is banned from anything a reader sees, and these strings go to
+        # a client inside the methodology and worth-considering documents — the
+        # same vocabulary problem one layer deeper than the interface.
+        "Running a wider sweep next time is worth considering if "
         "broader venue coverage is wanted.",
         where="worth_considering.md",
     )
@@ -473,7 +477,8 @@ def run_report(
         f"Topic: {topic.name} ({topic.therapeutic_area}). "
         f"Brand: {topic.brand or '(none)'}. Molecule (INN): {topic.molecule or '(none)'}. "
         f"Competitors tracked: {', '.join(topic.competitors) or '(none)'}. "
-        f"Spend band: {band.name} ({band.queries_per_cluster} queries, "
+        f"Sweep size: {SWEEP_SIZE.get(band.name, band.name)} "
+        f"({band.queries_per_cluster} queries, "
         f"{band.page_fetches_per_cluster} page fetches per cluster).",
         "",
         "## Where",

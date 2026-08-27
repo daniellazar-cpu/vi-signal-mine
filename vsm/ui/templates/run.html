@@ -1,6 +1,6 @@
 {% extends "_base.html" %}
-{% from "_macros.html" import title_block, flow_rail, deliverable_downloads %}
-{% block title %}{{ run.mode|capitalize }} run — Vi Signal Mine{% endblock %}
+{% from "_macros.html" import page_header, flow_rail, deliverable_downloads %}
+{% block title %}{{ MODE_LABELS.get(run.mode, run.mode|capitalize) }} — Vi Signal Mine{% endblock %}
 
 {% block top_rail %}
 {{ flow_rail(topic, flow, current_step) }}
@@ -8,20 +8,15 @@
 
 {% block content %}
 <div class="page">
-<section class="page-head">
-  <h1>{{ run.mode|capitalize }} run</h1>
+{{ page_header(MODE_LABELS.get(run.mode, run.mode|capitalize),
+     [run.started_at|dt,
+      (topic.spend_band|sweep_size ~ " sweep") if topic is not none else "—",
+      run.cost_usd|usd(4),
+      run.run_id]) }}
+<p class="page-meta">
   <span class="status-badge status-{{ run.status }}">{{ run.status|replace("_", " ") }}</span>
-</section>
-<p class="page-caption">{{ explainer('run') }}</p>
-
-{{ title_block([
-  ("Topic", topic.name if topic is not none else "—"),
-  ("Date", run.started_at|dt),
-  ("Run id", run.run_id),
-  ("Spend band", topic.spend_band if topic is not none else "—"),
-  ("Cost", run.cost_usd|usd(4)),
-  ("Finished", run.finished_at|dt if run.finished_at else "not yet"),
-]) }}
+  <span>{{ ("finished " ~ run.finished_at|dt) if run.finished_at else "not finished" }}</span>
+</p>
 
 {% if run.note %}
 <p class="body-text field-note">{{ run.note }}</p>

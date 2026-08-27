@@ -181,3 +181,92 @@ def test_the_components_are_the_conventional_ones():
         assert re.search(re.escape(name) + r"\s*[,{ ]", css), f"{name} is missing"
     for invented in (".l1 ", ".l2 ", ".l3 ", ".answer ", ".define "):
         assert invented not in css, f"the bespoke {invented.strip()} survived"
+
+
+# ------------------------------------------------------------ page header --
+
+@pytest.fixture
+def screens(tmp_path, monkeypatch):
+    monkeypatch.delenv("BLOB_READ_WRITE_TOKEN", raising=False)
+    monkeypatch.delenv("VSM_ACCESS_KEY", raising=False)
+    ts = TopicStore(tmp_path / "db")
+    rs = RunStore(tmp_path / "db", tmp_path / "var")
+    seed_demo_topic(ts, rs, env={})
+    topic = ts.list()[0]
+    by = {m: [r for r in rs.for_topic(topic.topic_id, m)] for m in ("mine", "insight", "report")}
+    c = TestClient(create_app(topic_store=ts, run_store=rs))
+    return c, {
+        "topic": f"/topics/{topic.topic_id}",
+        "snapshot": f"/runs/{by['mine'][-1].run_id}/snapshot",
+        "insight": f"/runs/{by['insight'][-1].run_id}/insight",
+        "run": f"/runs/{by['mine'][-1].run_id}",
+    }
+
+
+@pytest.mark.parametrize("screen", ["topic", "snapshot", "insight", "run"])
+def test_every_working_screen_uses_the_conventional_header(screens, screen):
+    c, paths = screens
+    body = c.get(paths[screen]).text
+    assert 'class="page-header"' in body, f"{screen} still has a bespoke head"
+    assert 'class="page-title"' in body
+
+
+@pytest.mark.parametrize("screen", ["topic", "snapshot", "insight", "run"])
+def test_the_five_field_definition_grid_is_gone(screens, screen):
+    """It opened every screen with the same facts at the same weight as the
+    content. One meta line replaces it."""
+    c, paths = screens
+    body = c.get(paths[screen]).text
+    assert 'class="title-block"' not in body, f"{screen} still renders the grid"
+    assert body.count('class="page-meta"') >= 1
+
+
+def test_the_title_does_not_repeat_the_breadcrumb(screens):
+    """The breadcrumb above already names the topic. The h1 used to repeat it,
+    which is what made the title wrap to two lines on every run screen."""
+    c, paths = screens
+    body = c.get(paths["insight"]).text
+    title = re.search(r'<h1 class="page-title">(.*?)</h1>', body, re.S).group(1)
+    assert "Tirzepatide" not in title, f"title repeats the topic: {title!r}"
+    assert "Insight" in title
+
+
+@pytest.mark.parametrize("screen", ["topic", "snapshot", "insight", "run"])
+def test_the_word_band_never_reaches_the_reader(screens, screen):
+    """`band` means two unrelated things — how wide a sweep is, and what kind of
+    venue a site is. Two meanings on one word is how a vocabulary rots, so the
+    word is banned outright and the plain label used instead."""
+    c, paths = screens
+    text = re.sub(r"<[^>]*>", " ", c.get(paths[screen]).text)
+    assert "probe band" not in text and " band" not in text, f"{screen} still says band"
+    assert "sweep" in text
+
+
+def test_internal_mode_words_are_replaced_with_what_the_step_does(screens):
+    c, paths = screens
+    text = re.sub(r"<[^>]*>", " ", c.get(paths["run"]).text)
+    assert "Mine run" not in text
+    assert "Collection" in text
+
+
+def test_the_ui_and_the_artifacts_share_one_vocabulary():
+    """A term translated on the screen and not in the file a client receives is
+    worse than translating neither: the deliverable then disagrees with the
+    screen about what the same figure is called."""
+    import vsm.modes.vocabulary as vocab
+    from vsm.ui.content import MODE_LABELS
+    from vsm.ui.render import _SWEEP_SIZE
+
+    assert _SWEEP_SIZE is vocab.SWEEP_SIZE
+    assert MODE_LABELS is vocab.MODE_LABEL
+
+
+def test_band_does_not_survive_into_a_generated_document():
+    """The client-facing methodology and worth-considering documents used the
+    word too. Same problem, one layer deeper."""
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1] / "vsm" / "modes" / "report.py").read_text()
+    # Only prose strings matter; the code may still name the field.
+    for phrase in ("Spend band:", "the spend band on"):
+        assert phrase not in src, f"{phrase!r} still reaches a client document"

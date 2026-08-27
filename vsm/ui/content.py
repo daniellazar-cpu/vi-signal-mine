@@ -584,3 +584,8 @@ DEFINITIONS: dict[str, tuple[str, str]] = {
         "to a site nobody asked, and only one of those is a finding.",
     ),
 }
+
+
+#: Run modes as verbs. `mine` is an internal word for what the step does, and
+#: "Mine run" told a reader nothing they could act on.
+from vsm.modes.vocabulary import MODE_LABEL as MODE_LABELS

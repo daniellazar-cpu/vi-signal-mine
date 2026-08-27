@@ -131,6 +131,20 @@ def net_stance_short(value: float | None, which: str | None = None) -> str:
     return f"{sign}{value:.2f}"
 
 
+#: Sweep size in plain words. "probe / standard / deep" are internal names for
+#: how wide and how expensive a collection run is; "band" is banned from the
+#: interface because it also means something unrelated (venue band 1/2/3).
+from vsm.modes.vocabulary import SWEEP_SIZE as _SWEEP_SIZE
+
+
+def sweep_size(value: str | None) -> str:
+    """The band's plain-language name, or the raw value if it is unrecognised —
+    showing an unknown band verbatim is better than hiding it behind a guess."""
+    if not value:
+        return "—"
+    return _SWEEP_SIZE.get(value, value)
+
+
 def fmt_dt(value: str | None) -> str:
     """A dated frame's label. Never guesses a format that doesn't parse."""
     if not value:

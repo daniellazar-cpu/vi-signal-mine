@@ -48,6 +48,7 @@ from vsm.topics.model import BANDS
 from vsm.ui.overview import artifacts_to_warm, build_overview
 from vsm.ui.content import (
     DEFINITIONS,
+    MODE_LABELS,
     DELETE_WARNING,
     DELIVERABLE_GROUPS,
     DELIVERABLE_TIERS,
@@ -69,6 +70,7 @@ from vsm.ui.content import (
     explainer,
 )
 from vsm.ui.render import (
+    sweep_size,
     fmt_date_long,
     fmt_dt,
     forest_plot_svg,
@@ -534,6 +536,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
     )
     env.filters["usd"] = usd
     env.filters["pct"] = pct
+    env.filters["sweep_size"] = sweep_size
     env.filters["net"] = net_stance_text
     # The compact variant, for cells too narrow for the full reason. Still
     # says "not read" rather than showing a dash — see net_stance_short.
@@ -553,6 +556,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
     # Available to every template so `define()` can be used anywhere a term
     # first appears, without each route remembering to pass it.
     env.globals["definitions"] = DEFINITIONS
+    env.globals["MODE_LABELS"] = MODE_LABELS
     env.globals["tagline"] = TAGLINE
     env.globals["ephemeral_storage_notice"] = EPHEMERAL_STORAGE_NOTICE
     env.globals["read_only_control_note"] = READ_ONLY_CONTROL_NOTE

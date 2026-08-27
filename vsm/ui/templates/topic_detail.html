@@ -1,24 +1,24 @@
 {% extends "_base.html" %}
-{% from "_macros.html" import deliverable_tiers %}
+{% from "_macros.html" import deliverable_tiers, page_header, info %}
 {% block title %}{{ topic.name }} — Vi Signal Mine{% endblock %}
 {% block content %}
 <div class="page page-wide">
-<p class="eyebrow">Topic</p>
-<section class="page-head">
-  <h1>{{ topic.name }}</h1>
-  <a class="btn btn-primary" href="/topics/{{ topic.topic_id }}/confirm">{% if has_run %}Run new snapshot{% else %}Run snapshot{% endif %}</a>
-</section>
-<p class="page-caption">
-  {% if topic.therapeutic_area %}{{ topic.therapeutic_area }} — {% endif %}{{ topic.spend_band }} band
-  {% if storage_is_durable() %}· <a class="link-back" href="/topics/{{ topic.topic_id }}/edit">Edit topic</a>{% endif %}
-</p>
+{% call page_header(topic.name,
+     [topic.therapeutic_area if topic.therapeutic_area else "no area set",
+      topic.spend_band|sweep_size ~ " sweep",
+      (history|length ~ " run" ~ ("" if history|length == 1 else "s")) if history else "never run"]) %}
+  {% if storage_is_durable() %}
+  <a class="link-back" href="/topics/{{ topic.topic_id }}/edit">Edit</a>
+  {% endif %}
+  <a class="btn btn-primary" href="/topics/{{ topic.topic_id }}/confirm">{% if has_run %}New sweep{% else %}Run first sweep{% endif %}</a>
+{% endcall %}
 
 <h2>Runs</h2>
 {% if history %}
 <ul class="run-history">
   {% for run in history %}
   <li>
-    <span class="run-mode">{{ run.mode }}</span>
+    <span class="run-mode">{{ MODE_LABELS.get(run.mode, run.mode) }}</span>
     <span class="status-badge status-{{ run.status }}">{{ run.status|replace("_", " ") }}</span>
     <span class="run-date">{{ run.started_at|dt }}</span>
     <span class="cell-sub">{{ run.cost_usd|usd(4) }}</span>
@@ -36,10 +36,8 @@
 {% endif %}
 
 <h2>What you get</h2>
-{% if has_run %}
-<p class="body-text field-note">Real where the latest complete run reached that stage, pending where it has not yet.</p>
-{% else %}
-<p class="body-text field-note">This topic has never been run, so nothing below is real yet — this is exactly what lands, in this shape, once a snapshot, insight and report complete. See it before you spend anything.</p>
+{% if not has_run %}
+<p class="page-meta"><span>Nothing here is real yet — this is the shape that fills in once a sweep completes.</span></p>
 {% endif %}
 {{ deliverable_tiers(tiers) }}
 </div>

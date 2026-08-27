@@ -1,5 +1,5 @@
 {% extends "_base.html" %}
-{% from "_macros.html" import title_block, flow_rail, deliverable_downloads, tier_badge, info %}
+{% from "_macros.html" import page_header, flow_rail, deliverable_downloads, tier_badge, info %}
 {% block title %}Insight — Vi Signal Mine{% endblock %}
 
 {% block top_rail %}
@@ -19,34 +19,31 @@
 
 {% block content %}
 <div class="page page-wide">
-<section class="page-head">
-  <h1>{% if topic is not none %}{{ topic.name }} — {% endif %}Insight</h1>
-</section>
-<p class="page-caption">{{ explainer('insight') }}</p>
-
-{{ title_block([
-  ("Topic", topic.name if topic is not none else "—"),
-  ("Date", run.started_at|dt),
-  ("Run id", run.run_id),
-  ("Spend band", topic.spend_band if topic is not none else "—"),
-  ("Cost", run.cost_usd|usd(4)),
-]) }}
+{# The breadcrumb above already names the topic, so the title is the screen.
+   The five-field grid becomes one line, and the caption's content moves behind
+   the (i) rather than being deleted. #}
+{% call page_header("Insight",
+     [run.started_at|dt,
+      (topic.spend_band|sweep_size ~ " sweep") if topic is not none else "—",
+      run.cost_usd|usd(4),
+      run.run_id]
+     + ([('<a href="/runs/' ~ mine_run_id ~ '/snapshot">from the ' ~ run.started_at|dt ~ ' sweep</a>')|safe] if mine_run_id else [])) %}
+  {% if run.status == "complete" and storage_is_durable() %}
+  <form method="post" action="/runs/{{ run.run_id }}/report">
+    <button class="btn btn-primary" type="submit">Generate report</button>
+  </form>
+  {% endif %}
+{% endcall %}
 {% if mine_run_id %}
-<p class="cell-sub"><a href="/runs/{{ mine_run_id }}/snapshot">based on the snapshot captured {{ run.started_at|dt }}</a></p>
+
 {% endif %}
 
 <div class="page-head page-head-section">
   {# "Dual-lens" was internal vocabulary. The heading now names the question the
      section answers; the terms inside it explain themselves on demand. #}
   <h2 id="dual-lens">Clinicians vs patients</h2>
-  {% if run.status == "complete" %}
-    {% if storage_is_durable() %}
-    <form method="post" action="/runs/{{ run.run_id }}/report">
-      <button class="btn btn-primary" type="submit">Generate report</button>
-    </form>
-    {% else %}
-    <p class="storage-notice">{{ read_only_control_note }}</p>
-    {% endif %}
+  {% if run.status == "complete" and not storage_is_durable() %}
+  <p class="storage-notice">{{ read_only_control_note }}</p>
   {% endif %}
 </div>
 {# Layer 1: the answer. Previously the reader had to derive it from the plot.

@@ -1,5 +1,5 @@
 {% extends "_base.html" %}
-{% from "_macros.html" import title_block, flow_rail, deliverable_downloads %}
+{% from "_macros.html" import page_header, flow_rail, deliverable_downloads %}
 {% block title %}Snapshot — Vi Signal Mine{% endblock %}
 
 {% block top_rail %}
@@ -8,20 +8,12 @@
 
 {% block content %}
 <div class="page page-wide">
-<section class="page-head">
-  <h1>Snapshot</h1>
-  <span class="status-badge status-{{ run.status }}">{{ run.status|replace("_", " ") }}</span>
-</section>
-<p class="page-caption">{{ explainer('snapshot') }}</p>
-
-{{ title_block([
-  ("Topic", topic.name if topic is not none else "—"),
-  ("Date", run.started_at|dt),
-  ("Run id", run.run_id),
-  ("Spend band", topic.spend_band if topic is not none else "—"),
-  ("Cost", run.cost_usd|usd(4)),
-]) }}
-<p class="cell-sub"><a href="/runs/{{ run.run_id }}">view run</a>{% if topic is not none %} — <a href="/topics/{{ topic.topic_id }}">view topic</a>{% endif %}</p>
+{{ page_header("Snapshot",
+     [run.started_at|dt,
+      (topic.spend_band|sweep_size ~ " sweep") if topic is not none else "—",
+      run.cost_usd|usd(4),
+      run.run_id]) }}
+<p class="page-meta"><span class="status-badge status-{{ run.status }}">{{ run.status|replace("_", " ") }}</span></p>
 
 {% if coverage is not none %}
 <h2>Coverage</h2>

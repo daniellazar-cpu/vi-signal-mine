@@ -3,6 +3,39 @@
    no way to know which value belongs to which label, and the sibling
    `.meta-grid` pattern in this same codebase already does it correctly.
    Values are plain text; Jinja's autoescape covers them. #}
+{% macro page_header(title, meta=[], tip="") %}
+{#
+  The conventional page header: title, one metadata line, actions on the right.
+
+  Replaces a stack of six blocks that opened every screen — an h1 repeating the
+  topic the breadcrumb already showed, a prose caption, and a five-field
+  definition grid, all at similar weight. The title is now just the screen name
+  because the breadcrumb above carries the topic, which is how every product in
+  this category does it.
+
+  `meta` is a list of already-rendered strings joined by middots. `tip` is a
+  DEFINITIONS key: what the caption used to say moves behind the (i) rather than
+  being deleted — depth kept, not addressed to the reader on arrival.
+
+  `caller()` supplies the actions, so the primary button sits in the header
+  where it belongs instead of halfway down the page.
+#}
+<header class="page-header">
+  <div class="page-header-main">
+    <h1 class="page-title">{{ title }}{% if tip %} {{ info(tip) }}{% endif %}</h1>
+    {% if meta %}
+    <p class="page-meta">
+      {%- for item in meta %}<span>{{ item }}</span>{% endfor -%}
+    </p>
+    {% endif %}
+  </div>
+  {% if caller is defined %}<div class="page-actions">{{ caller() }}</div>{% endif %}
+</header>
+{% endmacro %}
+
+{# Superseded by `page_header`. Kept only where a genuine definition grid is
+   still the right thing — see `confirm.html`, where the four facts being
+   committed to deserve individual weight. #}
 {% macro title_block(items) %}
 <dl class="title-block">
   {% for label, value in items %}
@@ -21,7 +54,7 @@
 <div class="table-scroll" tabindex="0" role="region" aria-label="{{ label }}">
 {% endmacro %}
 
-{# The in-flow rail: Topics / topic name / band, then the three stages —
+{# The in-flow rail: Topics / topic name / sweep size, then the three stages —
    Snapshot, Insight, Report — each a link when that stage exists for this
    topic's current run chain, plain text when it does not yet. `flow` is
    the dict app.py's `_flow_chain` returns; `current` is one of
@@ -45,7 +78,9 @@
     <span class="flow-rail-sep" aria-hidden="true">/</span>
     {% if topic is not none %}
     <a href="/topics/{{ topic.topic_id }}" class="flow-rail-topic">{{ topic.name }}</a>
-    <span class="flow-rail-band">{{ topic.spend_band }} band</span>
+    {# "band" is banned from the interface: it also means venue band 1/2/3,
+       and two meanings on one word is how a vocabulary rots. #}
+    <span class="flow-rail-band">{{ topic.spend_band|sweep_size }} sweep</span>
     {% else %}
     <span class="flow-rail-topic">topic no longer exists</span>
     {% endif %}
