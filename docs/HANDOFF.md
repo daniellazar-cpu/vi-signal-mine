@@ -9,8 +9,8 @@ what a person (or an agent) needs to pick it up cold.
 |---|---|
 | Repo | `daniellazar-cpu/vi-signal-mine`, private. Branches `build/vi-signal-mine-v1` (work) and `deploy` |
 | Live | https://vi-signal-mine-pink.vercel.app — production, serving, **read-write** |
-| Tests | **591 passed, 1 skipped.** The skip is the Blob storage-contract suite, which needs a live Blob token |
-| Working tree | clean at `e00a913` |
+| Tests | **600 passed, 2 skipped** hermetically; **38 passed** of the storage contract suite against the live Neon. The skip is the Blob storage-contract suite, which needs a live Blob token |
+| Working tree | clean at `5324341` |
 
 ## What works right now
 
