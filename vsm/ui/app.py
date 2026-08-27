@@ -47,6 +47,7 @@ from vsm.platform import assert_serveable, storage_is_durable
 from vsm.topics.model import BANDS
 from vsm.ui.overview import artifacts_to_warm, build_overview
 from vsm.ui.content import (
+    DEFINITIONS,
     DELETE_WARNING,
     DELIVERABLE_GROUPS,
     DELIVERABLE_TIERS,
@@ -549,6 +550,9 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
     # The product in one line, for the document head on every page — and the
     # link-preview card, which is part of the deliverable when a report gets
     # pasted into chat.
+    # Available to every template so `define()` can be used anywhere a term
+    # first appears, without each route remembering to pass it.
+    env.globals["definitions"] = DEFINITIONS
     env.globals["tagline"] = TAGLINE
     env.globals["ephemeral_storage_notice"] = EPHEMERAL_STORAGE_NOTICE
     env.globals["read_only_control_note"] = READ_ONLY_CONTROL_NOTE

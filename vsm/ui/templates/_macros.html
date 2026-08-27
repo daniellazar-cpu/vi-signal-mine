@@ -148,6 +148,29 @@
 </li>
 {% endmacro %}
 
+{% macro define(term, label="") %}
+{#
+  A term explained at the point of use, on demand.
+
+  Native `popover` + `popovertarget`: a real dismissible popover with
+  light-dismiss and Esc, no JavaScript and no library. The definition costs a
+  reader nothing until they ask for it, which is the whole point — the old
+  interface paid for every definition on every page whether or not anyone
+  needed it, and that is most of what "the whole bible at once" was.
+
+  Falls back honestly: with popover unsupported the button still carries the
+  text in `title`, and the definition is still in the DOM for a screen reader.
+#}
+{%- set d = definitions[term] -%}
+{%- set pid = "def-" ~ term|replace(" ", "-")|replace("+", "plus") -%}
+<button type="button" class="define" popovertarget="{{ pid }}"
+        aria-label="What {{ term }} means" title="{{ d[0] }}">{{ label or term }}</button>
+<div popover id="{{ pid }}" class="define-pop" role="tooltip">
+  <p><strong>{{ term }}</strong> — {{ d[0] }}</p>
+  {% if d[1] %}<p>{{ d[1] }}</p>{% endif %}
+</div>
+{% endmacro %}
+
 {% macro deliverable_promise(tiers, heading_level=2) %}
 {#
   What you will get, as names — not a catalogue.

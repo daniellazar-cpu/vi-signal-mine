@@ -522,3 +522,65 @@ DELETE_WARNING = (
     "else breaks — but the collected signal rows are gone, and re-mining "
     "collects today's web, not the web as it was on the snapshot's date."
 )
+
+
+#: Terms explained **at the word, on demand** — never pre-emptively in a
+#: paragraph. Each is rendered as a native popover (see the `define` macro), so
+#: the definition costs nothing until someone asks for it.
+#:
+#: This is what replaces the glossary page and the parenthetical asides. The
+#: owner's reaction to the old vocabulary was "wtf is Corroborated" — a word
+#: invented in this codebase, surfaced raw, with its meaning nowhere near it.
+#: Every entry below is a term a reader could reasonably not know; the second
+#: string, where present, is the consequence rather than the restatement.
+DEFINITIONS: dict[str, tuple[str, str]] = {
+    "sources": (
+        "How many independent sources say this.",
+        "One forum post counts as one source. One publisher counts as one "
+        "source however many pages it runs — so five outlets carrying the same "
+        "press release count once, not five times.",
+    ),
+    "3+ sources": (
+        "Three or more independent sources. Safe to state as-is.",
+        "Two sources: attribute it. One: quote it, don't generalise from it.",
+    ),
+    "gap": (
+        "How differently clinicians and patients read the same theme.",
+        "Each side's tone runs from −1 to +1. The gap is the distance between "
+        "them, so a large gap means the two audiences disagree about it.",
+    ),
+    "no comparison": (
+        "Only one audience discussed this theme, so there is no gap to measure.",
+        "This is not agreement. It means one side did not raise it at all.",
+    ),
+    "sweep": (
+        "One dated collection run against the live web.",
+        "Comparisons are always between two sweeps, so a theme's change is "
+        "measured against a specific earlier date rather than a rolling window.",
+    ),
+    "tone": (
+        "The balance of positive and negative mentions, from −1 to +1.",
+        "Mentions we could not read either way are excluded from the balance "
+        "and counted separately, so they never look like neutral opinions.",
+    ),
+    "mention": (
+        "One collected post, comment or page.",
+        "Every figure in this tool is an aggregate of these, and each one keeps "
+        "its URL and the date it was captured.",
+    ),
+    "access basis": (
+        "How this site may lawfully be collected from.",
+        "A site's own API and public pages may be fetched. Others are used only "
+        "as search results and are never page-fetched.",
+    ),
+    "sweep size": (
+        "How wide and how expensive the collection run is.",
+        "It sets the number of queries and page fetches. Page fetches cost "
+        "about twenty times a search call, so they set the bill.",
+    ),
+    "returned nothing": (
+        "The site was queried and gave back no rows.",
+        "Named rather than hidden: a site that returned nothing looks identical "
+        "to a site nobody asked, and only one of those is a finding.",
+    ),
+}

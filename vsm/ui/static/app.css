@@ -1109,6 +1109,121 @@ a.tier-badge-corroborated:hover { background: var(--vi-violet-hover); border-col
 .promise-foot { margin: 12px 0 0; font-size: 13px; }
 @media (max-width: 699px) { .promise-list { grid-template-columns: 1fr; } }
 
+/* ============================================= layers ================= */
+/*
+   The three-layer system. The owner's diagnosis of the old interface was that
+   everything arrived "in the same colour, font and size" and left them to
+   curate it. The fix is not fewer words — cutting destroys the *why* behind a
+   number, which is usually the most valuable thing on the page. The fix is
+   rank.
+
+     Layer 1  the answer          largest, full-strength ink, generous leading
+     Layer 2  the support         meta size, secondary ink, tight
+     Layer 3  the depth           behind a control, enclosed, tighter still
+
+   Every screen must separate its layers on at least three axes at once — size,
+   weight, colour, position, enclosure, density. A screen where a finding and a
+   footnote are set identically has failed however few words it has.
+*/
+
+.l1 {
+  font-size: var(--t-h2-size, 24px); line-height: 1.25; letter-spacing: -0.015em;
+  color: var(--fg1); font-weight: 500; margin: 0;
+}
+.l1-figure {
+  font-size: 44px; line-height: 1; letter-spacing: -0.025em;
+  color: var(--fg1); font-variant-numeric: tabular-nums; display: block;
+}
+.l2 {
+  font-size: 13px; line-height: 1.45; color: var(--fg2); margin: 6px 0 0;
+  font-variant-numeric: tabular-nums;
+}
+.l2 strong { color: var(--fg1); font-weight: 500; }
+
+/* Layer 3 is enclosed as well as smaller: the hairline and the ground tint are
+   what say "this is available, not addressed to you right now". */
+.l3 { margin-top: var(--space-sm); }
+.l3 > summary {
+  display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
+  list-style: none; font-size: 12px; letter-spacing: 0.06em;
+  text-transform: uppercase; font-weight: 500; color: var(--fg2);
+  padding: 7px 0; min-height: 34px;
+}
+.l3 > summary::-webkit-details-marker,
+.l3 > summary::details-marker { display: none; }
+.l3 > summary::after {
+  content: ""; width: 5px; height: 5px; flex: none;
+  border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+  transform: translateY(-2px) rotate(45deg);
+}
+.l3[open] > summary::after { transform: translateY(1px) rotate(-135deg); }
+.l3 > summary:hover { color: var(--fg1); }
+.l3 > summary:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+.l3-body {
+  border-left: 1px solid var(--rule); padding: 2px 0 2px var(--space-sm);
+  margin: 4px 0 var(--space-sm);
+  font-size: 13px; line-height: 1.5; color: var(--fg2); max-width: 62ch;
+}
+.l3-body > :first-child { margin-top: 0; }
+.l3-body > :last-child { margin-bottom: 0; }
+.l3-body strong { color: var(--fg1); }
+
+.answer { margin: var(--space-md) 0 var(--space-sm); max-width: 68ch; }
+.answer .l1 strong { font-weight: 500; }
+
+/* ============================================= define ================= */
+/*
+   A term the reader may not know, explained where it is used and nowhere else.
+   Uses the native `popover` attribute with `popovertarget` — a real dismissible
+   popover with light-dismiss and Esc, no JavaScript, no library. This is what
+   replaces glossary pages and parenthetical asides: the definition is available
+   at the word, on demand, instead of pre-emptively in a paragraph nobody asked
+   for.
+*/
+.define {
+  font: inherit; color: inherit; background: none; padding: 0; cursor: help;
+  border: 0; border-bottom: 1px dotted var(--fg2); text-underline-offset: 2px;
+}
+.define:hover { border-bottom-color: var(--fg1); }
+.define:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+.define-pop {
+  max-width: 34ch; padding: var(--space-sm); border: var(--border-hairline) solid var(--fg1);
+  border-radius: var(--radius-sm); background: var(--bg); color: var(--fg1);
+  font-size: 13px; line-height: 1.5; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.10);
+}
+.define-pop::backdrop { background: transparent; }
+.define-pop p { margin: 0; }
+.define-pop p + p { margin-top: 8px; color: var(--fg2); }
+
+/* ============================================= encodings ============== */
+/*
+   "Excel in HTML" was the complaint. These make quantity visible instead of
+   leaving it to be computed from digits. All inline SVG or CSS, server-rendered,
+   greyscale-safe: colour is never the only channel, and every graphic carries
+   its number as text so a screen reader never depends on the shape.
+*/
+
+/* Source count. Ordinal, tiny, printable — and the number is the label, so no
+   invented word like "corroborated" has to be learned. */
+.pips { display: inline-flex; gap: 3px; vertical-align: middle; }
+.pip { width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--fg1); }
+.pip-on { background: var(--fg1); }
+.pips-label { font-size: 12px; color: var(--fg2); margin-left: 6px; font-variant-numeric: tabular-nums; }
+
+/* Bullet bar: level and change in one row. The tick is where it stood last
+   sweep, so the comparison needs no second chart and no sentence. */
+.bullet { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
+.bullet-track { position: relative; height: 16px; background: var(--bg-subtle); }
+.bullet-fill { position: absolute; inset: 0 auto 0 0; background: var(--fg1); }
+.bullet-tick { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--fg2); }
+.bullet-value { font-variant-numeric: tabular-nums; font-size: 13px; white-space: nowrap; }
+
+.delta-mark { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.delta-mark::before { font-size: 0.85em; margin-right: 3px; }
+.delta-up::before { content: "\25B2"; }
+.delta-down::before { content: "\25BC"; }
+.delta-flat::before { content: "\2013"; }
+
 /* ============================================= dashboard ============== */
 /*
    The overview. Density is the design here: four counters and four ranked

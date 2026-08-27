@@ -71,14 +71,21 @@ def test_a_finished_run_renders_without_scripting(env):
 
 
 def test_the_plot_legend_appears_beside_the_forest_plot(env):
-    """PLOT_GUIDE belongs beside the forest plot, not on the help page —
-    lede above it, marks as a compact legend, why_ne inside <details>."""
+    """PLOT_GUIDE belongs beside the plot, not on a help page — and behind a
+    disclosure rather than in front of the reader.
+
+    The summary no longer says "Why some rows say NE": `NE` was an internal
+    token surfaced raw, and naming the fact ("can't be compared") is the point
+    of the vocabulary pass. The structural requirement this test was written for
+    is unchanged — the guide is on this page, and it is inside a `<details>`.
+    """
     c, ts, rs, topic = env
     snap = _snapshot(rs, topic, _rows(2, 2))
     ins = run_insight(topic, snap.run_id, rs)
     body = c.get(f"/runs/{ins.run_id}/insight").text
-    assert "Box size" in body  # a PLOT_GUIDE mark label
-    assert "Why some rows say NE" in body  # the <details> summary
+    assert "Box size" in body                      # a PLOT_GUIDE mark label
+    assert "<details" in body and "How to read this" in body
+    assert "say NE" not in body, "the raw token is back"
 
 
 def test_a_tier_key_is_present_where_tiers_are_shown(env):

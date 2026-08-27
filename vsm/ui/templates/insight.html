@@ -1,5 +1,5 @@
 {% extends "_base.html" %}
-{% from "_macros.html" import title_block, flow_rail, deliverable_downloads, tier_badge %}
+{% from "_macros.html" import title_block, flow_rail, deliverable_downloads, tier_badge, define %}
 {% block title %}Insight — Vi Signal Mine{% endblock %}
 
 {% block top_rail %}
@@ -36,7 +36,9 @@
 {% endif %}
 
 <div class="page-head page-head-section">
-  <h2 id="dual-lens">Dual-lens gap — where clinicians and patients diverge</h2>
+  {# "Dual-lens" was internal vocabulary. The heading now names the question the
+     section answers; the terms inside it explain themselves on demand. #}
+  <h2 id="dual-lens">Clinicians vs patients</h2>
   {% if run.status == "complete" %}
     {% if storage_is_durable() %}
     <form method="post" action="/runs/{{ run.run_id }}/report">
@@ -47,21 +49,53 @@
     {% endif %}
   {% endif %}
 </div>
+{# Layer 1: the answer. Previously the reader had to derive it from the plot.
+   Layer 2: what it rests on. Layer 3: how to read the plot, and why some rows
+   cannot be compared — available, not addressed to you on arrival. #}
+{% set widest = forest_rows | selectattr("divergence", "ne", None) | sort(attribute="divergence") | list %}
+{% set ne_rows = forest_rows | selectattr("divergence", "equalto", None) | list %}
+<div class="answer">
+  {% if widest %}
+  {% set top = (widest | last) if (widest | last).divergence | abs >= (widest | first).divergence | abs else (widest | first) %}
+  <p class="l1">Clinicians and patients read <strong>{{ top.name }}</strong> most differently.</p>
+  <p class="l2">
+    {{ define('gap') }} of <strong>{{ top.divergence|net }}</strong> ·
+    clinician {{ top.hcp_net|net_short('hcp') }} · patient {{ top.patient_net|net_short('patient') }} ·
+    {{ widest|length }} theme{{ '' if widest|length == 1 else 's' }} comparable
+    {%- if ne_rows %}, {{ ne_rows|length }} with {{ define('no comparison') }}{% endif %}
+  </p>
+  {% else %}
+  <p class="l1">No theme can be compared across the two audiences yet.</p>
+  <p class="l2">Every theme in this sweep was raised by one side only — that is not agreement, it means the other side did not raise it.</p>
+  {% endif %}
+</div>
+
 <div class="forest-plot-wrap">
   {{ forest_svg|safe }}
 </div>
-<div class="plot-guide">
-  <p class="plot-guide-lede">{{ plot_guide.lede }}</p>
-  <dl class="plot-legend-key">
-    {% for mark, desc in plot_guide.marks %}
-    <div><dt>{{ mark }}</dt><dd>{{ desc }}</dd></div>
-    {% endfor %}
-  </dl>
-  <details class="plot-why-ne">
-    <summary>Why some rows say NE</summary>
+
+<details class="l3">
+  <summary>How to read this</summary>
+  <div class="l3-body">
+    <p>{{ plot_guide.lede }}</p>
+    <dl class="plot-legend-key">
+      {% for mark, desc in plot_guide.marks %}
+      <div><dt>{{ mark }}</dt><dd>{{ desc }}</dd></div>
+      {% endfor %}
+    </dl>
+  </div>
+</details>
+{% if ne_rows %}
+<details class="l3">
+  <summary>Why {{ ne_rows|length }} theme{{ '' if ne_rows|length == 1 else 's' }} can't be compared</summary>
+  <div class="l3-body">
     <p>{{ plot_guide.why_ne }}</p>
-  </details>
-</div>
+    <ul>
+      {% for r in ne_rows %}<li><strong>{{ r.name }}</strong> — {{ r.reason }}</li>{% endfor %}
+    </ul>
+  </div>
+</details>
+{% endif %}
 
 <div class="tabs">
   <input class="tab-input" type="radio" name="insight-view" id="tab-momentum" checked>
