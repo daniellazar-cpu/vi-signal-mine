@@ -9,8 +9,8 @@ what a person (or an agent) needs to pick it up cold.
 |---|---|
 | Repo | `daniellazar-cpu/vi-signal-mine`, private. Branches `build/vi-signal-mine-v1` (work) and `deploy` |
 | Live | https://vi-signal-mine-pink.vercel.app — production, serving, **read-write** |
-| Tests | **527 passed, 1 skipped.** The skip is the Blob storage-contract suite, which needs a live Blob token |
-| Working tree | clean at `cabc24c` |
+| Tests | **554 passed, 1 skipped.** The skip is the Blob storage-contract suite, which needs a live Blob token |
+| Working tree | clean at `7b586f6` |
 
 ## What works right now
 
@@ -27,43 +27,70 @@ links across 36–38 pages**.
 Verified at the moment of stopping: every route 200, and no raw markdown reaches
 any page.
 
-## Storage: solved
+## Storage — and the honest recommendation
 
 There is a dedicated Vercel Blob store (`vsm-store`) connected to the project on
-the `vi-labs-projects` team. The deployment is **read-write**: topics, runs and
-artifacts survive across invocations, verified by creating a topic and reading it
-back on three later requests, then running a full mine → insight → report chain
-through the real forms.
+the **`vi-labs-projects`** team. Topics, runs and artifacts survive across
+invocations. Creating a topic, mining, and generating insight all work on the
+deployment.
 
-`open_stores` prefers Postgres, then Blob, then SQLite, and logs its choice at
-INFO. The team's existing Neon Postgres is deliberately untouched — it belongs to
-a different project.
+### Use Postgres instead. This is the main recommendation of the day.
+
+`open_stores` already prefers Postgres over Blob, and the Postgres backend is
+built and tested. Switching is one environment variable and a redeploy:
+
+```bash
+vercel env add POSTGRES_URL_NON_POOLING production --scope vi-labs-projects
+```
+
+Use the **non-pooling** URL: the pooled one is PgBouncer in transaction mode and
+breaks prepared statements. Any Postgres works — Neon, Supabase. The team has a
+Neon on a *different* project; the backend takes a `schema=`, so it can be
+shared without collision.
+
+**Why it matters.** Vercel Blob is an object store being used as a database, and
+five separate defects fixed today were all consequences of that one choice:
+
+| What broke | Because |
+|---|---|
+| Run creation was a coin flip | A compare-and-swap counter cannot be atomic on a store with no atomic primitive. Every `GET` returned 200, the following conditional `PUT` returned 412, forty times |
+| Records read back stale | The content host serves a stale body *and* ETag, ignores its own `s-maxage=0`, and a cache-busting query string does not defeat it |
+| A cold container reported existing blobs as missing | No secondary index, so discovery went through the list API, which is eventually consistent |
+| The home page 504ed | No secondary index, so "this topic's runs" means reading *every* run blob's content. 13,144 GETs for one render |
+| The report step failed intermittently | A blob is not readable from every edge the instant its write returns |
+
+Each has a fix and a test that fails without it. But they are five workarounds
+for a substrate mismatch, and a relational database with a primary key, an
+index, a real sequence and read-your-writes deletes all five problems rather
+than mitigating them. **Recommend doing this before the tool goes in front of
+anyone.**
+
+### What the Blob path cost, recorded so it is not re-learned
+
+- `seq` is a nanosecond hybrid clock with an in-process monotonic clamp, not a
+  counter. Safe only because `seq` is a pure sort key — both blob stores
+  `data.pop("seq")` before building the model. See `_next_ordinal`.
+- Content reads send request-side `no-cache`, and there is a **request-scoped**
+  identity map in front of them. It is not a TTL cache and must not become one:
+  it is correct only within one request, and serverless containers are reused.
+  Cleared by middleware in `vsm/ui/app.py`.
+- The content host is derived from the token
+  (`vercel_blob_rw_<storeId>_<secret>` -> `<storeid>.public.blob.…`) so no read
+  path consults the list API.
+- `vsm/storage.py:read_required` retries a read the caller knows must succeed,
+  opt-in per backend via `reads_may_lag`. It must clear the identity map between
+  attempts — without that it retries against the memoised miss and does nothing,
+  which is exactly how its first version shipped.
 
 ### The bug that made it look broken, and it was not the UI
 
-Two defects, both found by adversarial verification rather than by use, and both
-now fixed with tests that fail without the fix:
-
-1. **Every write-path route 500ed.** `BlobRunStore.artifacts_dir` returns a
-   `PurePosixPath` subclass standing in for a blob key. The UI treated it as a
-   real path — `.stat().st_size` inside an `except OSError` raised
-   `AttributeError` instead, killing every route that renders a deliverable card
-   (run, snapshot, insight, report, topic detail), and `FileResponse` broke all
-   ten downloads. Reads of pre-seeded data worked, so it surfaced only once a run
-   was created on the deployment. The whole suite was green because every UI test
-   used the one backend with real paths; `tests/test_ui_keyed_backend.py` now runs
-   the UI against the keyed contract.
-
-2. **Run creation was a coin flip.** `_next_seq` failed with "too much concurrent
-   contention after 40 attempts" with one caller. The blob content host serves a
-   stale body *and a stale ETag* — it ignores its own `s-maxage=0` and a
-   cache-busting query string does not defeat it, only a request-side no-cache
-   does. A compare-and-swap loop cannot survive a stale ETag: it PUT against a
-   precondition that could no longer hold, took a real 412, re-read the same
-   cached copy, and burned the retry budget. `get_content` now reads uncached,
-   which is a correctness fix for run records too, not just the counter.
-
-This pair is the "sometimes it does work" the tool was reported with.
+`BlobRunStore.artifacts_dir` returns a `PurePosixPath` standing in for a key.
+The UI treated it as a real path — `.stat().st_size` inside an `except OSError`
+raised `AttributeError` instead, killing every route that renders a deliverable
+card, and `FileResponse` broke all ten downloads. Reads of pre-seeded data
+worked, so it surfaced only once a run was created on the deployment. The whole
+suite was green because every UI test used the one backend with real paths;
+`tests/test_ui_keyed_backend.py` now runs the UI against the keyed contract.
 
 ## Also outstanding, and genuinely yours
 
@@ -91,6 +118,24 @@ stand; setting them is what arms live collection.
 Until `VSM_OFFLINE=0`, the deployment is hermetic: every screen works, no
 outbound call is possible, nothing can be spent. That is a safe resting state,
 not a broken one.
+
+**Two other things I could not do for you.**
+
+*Delete my test data.* Verifying the write path on production meant creating
+topics, and there are roughly thirty of mine on the deployment now — named
+`Verify …`, `Hunt …`, `Probe …`, `E2E chain …`, `Fresh chain …`, `Host chain …`,
+`Ordinal chain …`, `deploy-probe-…`, `Post-fix …`, `QA durability check`, and one
+`top-4e87096e38` a verification agent left deliberately for repro. I did not
+remove them: the app has **no delete route and no store-level delete**, so the
+only way would be hand-crafted blob API calls with the store token — permanent
+deletion of data using a secret I should not handle. Worth noting the gap on its
+own merits: a self-service tool with no way to delete a topic is a hole, and it
+is not in the current scope.
+
+*Mark the blob token sensitive.* `BLOB_READ_WRITE_TOKEN` sits in the project as
+**Non-sensitive** (Vercel's default for an integration-injected variable), so
+its value is partly readable in `vercel env ls`. Not exposed publicly, but it is
+a write credential and would be better re-added as sensitive.
 
 **Set `VSM_ACCESS_KEY` before adding live keys.** With keys present and no gate,
 the production guard refuses to serve — deliberately. On this plan Vercel gates
