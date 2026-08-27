@@ -9,8 +9,8 @@ what a person (or an agent) needs to pick it up cold.
 |---|---|
 | Repo | `daniellazar-cpu/vi-signal-mine`, private. Branches `build/vi-signal-mine-v1` (work) and `deploy` |
 | Live | https://vi-signal-mine-pink.vercel.app — production, serving, **read-write** |
-| Tests | **554 passed, 1 skipped.** The skip is the Blob storage-contract suite, which needs a live Blob token |
-| Working tree | clean at `7b586f6` |
+| Tests | **591 passed, 1 skipped.** The skip is the Blob storage-contract suite, which needs a live Blob token |
+| Working tree | clean at `e00a913` |
 
 ## What works right now
 
@@ -127,23 +127,10 @@ Until `VSM_OFFLINE=0`, the deployment is hermetic: every screen works, no
 outbound call is possible, nothing can be spent. That is a safe resting state,
 not a broken one.
 
-**Two other things I could not do for you.**
-
-*Delete my test data.* Verifying the write path on production meant creating
-topics, and there are roughly thirty of mine on the deployment now — named
-`Verify …`, `Hunt …`, `Probe …`, `E2E chain …`, `Fresh chain …`, `Host chain …`,
-`Ordinal chain …`, `deploy-probe-…`, `Post-fix …`, `QA durability check`, and one
-`top-4e87096e38` a verification agent left deliberately for repro. I did not
-remove them: the app has **no delete route and no store-level delete**, so the
-only way would be hand-crafted blob API calls with the store token — permanent
-deletion of data using a secret I should not handle. Worth noting the gap on its
-own merits: a self-service tool with no way to delete a topic is a hole, and it
-is not in the current scope.
-
-*Mark the blob token sensitive.* `BLOB_READ_WRITE_TOKEN` sits in the project as
-**Non-sensitive** (Vercel's default for an integration-injected variable), so
-its value is partly readable in `vercel env ls`. Not exposed publicly, but it is
-a write credential and would be better re-added as sensitive.
+**One other thing that still needs you.** `BLOB_READ_WRITE_TOKEN` sits in the
+project as **Non-sensitive** (Vercel's default for an integration-injected
+variable), so its value is partly readable in `vercel env ls`. Not exposed
+publicly, but it is a write credential and would be better re-added as sensitive.
 
 **Set `VSM_ACCESS_KEY` before adding live keys.** With keys present and no gate,
 the production guard refuses to serve — deliberately. On this plan Vercel gates
@@ -160,6 +147,65 @@ clinician–patient gap reads `NE` on most themes because no stance classifier
 runs without an Anthropic key; and every seeded row is flagged `synthetic` with a
 fabrication notice carried into the artifacts, so a downloaded report cannot be
 mistaken for real collection.
+
+## Speed
+
+Every page was slow, and none of it was compute.
+
+| Page | Before | After |
+|---|---|---|
+| Topics index | 11.6s | 0.72s |
+| `/deliverables` | 10.3s | 0.69s |
+| A topic page | 4.7s | 0.79s |
+| Report | — | 0.81s |
+
+Two separate contributions, worth keeping apart because only one of them
+survives the store growing again:
+
+**The fixes, ~4x at any size** (measured at 61 topics: index 11.6s → 3.0s). A
+flat key-value store with no secondary index answers "which runs belong to this
+topic?" by reading every run record. That much is inherent. Doing it one request
+at a time, and re-doing it per topic, was not:
+
+- prefix listings memoised per request — the index called `for_topic` once per
+  topic and every call listed the *same* prefix, 61 identical round trips
+- `get_many`, a small thread pool for content reads, which are independent GETs
+  against a CDN with nothing to serialise them for
+- `prefetch_artifacts`, so the index's per-snapshot `signals.json` reads and a
+  run page's ten card probes each go out in one batch
+- `/deliverables` stops at the first topic with a report; it used to scan every
+  topic and keep the last, on a page that shows no run data at all
+- search is applied *before* any run lookup, so a narrow query turns the most
+  expensive page into one of the cheapest
+
+**The rest is a smaller store.** 61 verification topics of mine are deleted, and
+that alone took the index from 3.0s to 0.58s. If the store grows to hundreds of
+topics the index will get slow again — the reads scale with the number of runs
+and only the constant factor was fixed. **That is the strongest practical
+argument for the Postgres switch above**, where "this topic's runs" is an index
+lookup rather than a scan.
+
+## Managing the list
+
+The list had grown to sixty topics with no way to tell the real ones apart.
+
+- Search across name, brand, molecule, therapeutic area and competitors. All
+  words must match — an any-word search over sixty rows is no narrower than no
+  search.
+- Six sorts, four filters. `Has a trend (2+)` is the analytically meaningful one:
+  momentum and anomaly mean nothing on a single snapshot.
+- All server-side and in the URL, so a view is shareable, bookmarkable and
+  printable, and works with scripting off.
+- **Delete**, new on the protocol and all four backends, removing the runs and
+  their artifacts — the artifacts are the bulk of what a topic occupies.
+  Confirm page rather than a dialog, tally first, POST-only for the destructive
+  step, runs deleted before the topic so a half-failure stays retryable.
+
+One worked example is left on the deployment — "Tirzepatide for obesity", two
+snapshots so momentum and anomaly have a real baseline, with an insight and a
+report. Delete it in one click if you would rather start empty; the demo seeder
+will not recreate it, because it is a no-op whenever durable storage is
+configured.
 
 ## Where the redesign got to
 
