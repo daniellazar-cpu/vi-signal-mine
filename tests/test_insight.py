@@ -1,3 +1,4 @@
+from vsm.analysis.momentum import NO_BASELINE
 import pytest
 
 from vsm.modes.insight import run_insight
@@ -54,7 +55,7 @@ def test_first_snapshot_momentum_says_no_baseline(env):
     snap = _snapshot(rs, topic, _rows(2, 1))
     run = run_insight(topic, snap.run_id, rs)
     momentum = rs.read_artifact(run.run_id, "momentum.json")
-    assert momentum and all(m["reason"] == "no prior snapshot" for m in momentum)
+    assert momentum and all(m["reason"] == NO_BASELINE for m in momentum)
     assert rs.read_artifact(run.run_id, "anomaly.json") == []
 
 
@@ -76,7 +77,7 @@ def test_a_prior_snapshot_after_this_one_is_not_used_as_a_baseline(env):
     _snapshot(rs, topic, _rows(50, 0))
     run = run_insight(topic, first.run_id, rs)
     momentum = rs.read_artifact(run.run_id, "momentum.json")
-    assert all(m["reason"] == "no prior snapshot" for m in momentum)
+    assert all(m["reason"] == NO_BASELINE for m in momentum)
 
 
 def test_stance_artifact_records_its_basis(env):

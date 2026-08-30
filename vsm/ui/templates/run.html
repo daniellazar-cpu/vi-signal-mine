@@ -51,11 +51,11 @@
 
 <div class="form-actions">
   {% if run.mode == "mine" %}
-  <a class="btn btn-ghost" href="/runs/{{ run.run_id }}/snapshot">View snapshot</a>
+  <a class="btn btn-ghost" href="/runs/{{ run.run_id }}/snapshot">View the sweep</a>
   {% if run.status in ("complete", "stopped_on_budget") %}
     {% if storage_is_durable() %}
     <form method="post" action="/runs/{{ run.run_id }}/insight">
-      <button class="btn btn-primary" type="submit">Run insight on this snapshot</button>
+      <button class="btn btn-primary" type="submit">Run analysis on this sweep</button>
     </form>
     {% else %}
     <p class="storage-notice">{{ read_only_control_note }}</p>

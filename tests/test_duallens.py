@@ -48,15 +48,18 @@ def test_a_one_sided_theme_has_no_divergence_and_says_why():
     stances = [ThemeStance("t1", {"hcp": {"positive": 3}}, "venue")]
     gap = dual_lens([theme("t1", "clinical only")], stances)[0]
     assert gap.divergence is None
-    assert "patient" in gap.reason.lower()
+    # Names the side that spoke, in plain words — "hcp"/"signal" are banned from
+    # anything a reader (or the client report) sees. Clinicians spoke here.
+    assert "only clinicians" in gap.reason.lower()
+    assert "silence is not agreement" in gap.reason.lower()
 
 
-def test_a_patient_only_theme_has_no_divergence_and_names_hcp_as_missing():
-    """The mirror image of the clinical-only case: hcp is the silent side."""
+def test_a_patient_only_theme_has_no_divergence_and_names_the_silent_side():
+    """The mirror image of the clinical-only case: clinicians are silent."""
     stances = [ThemeStance("t1", {"patient": {"negative": 3}}, "venue")]
     gap = dual_lens([theme("t1", "patient only")], stances)[0]
     assert gap.divergence is None
-    assert "hcp" in gap.reason.lower()
+    assert "only patients" in gap.reason.lower()
 
 
 def test_a_theme_with_neither_class_present_does_not_blame_one_side():
@@ -70,8 +73,8 @@ def test_a_theme_with_neither_class_present_does_not_blame_one_side():
     assert gap.hcp_net is None
     assert gap.patient_net is None
     assert gap.divergence is None
-    assert "hcp" in gap.reason.lower()
-    assert "patient" in gap.reason.lower()
+    # Neither side spoke — the reason must not blame one, and must name both.
+    assert "neither clinicians nor patients" in gap.reason.lower()
 
 
 def test_unmeasurable_themes_sort_last():

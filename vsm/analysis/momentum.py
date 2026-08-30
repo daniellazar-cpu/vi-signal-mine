@@ -20,7 +20,7 @@ from typing import Any, Sequence
 
 __all__ = ["ThemeMomentum", "momentum", "NO_BASELINE"]
 
-NO_BASELINE = "no prior snapshot"
+NO_BASELINE = "no prior sweep"
 
 
 @dataclass(frozen=True)
@@ -68,7 +68,7 @@ def momentum(
             results.append(
                 ThemeMomentum(
                     name, volume_now, 0, delta, None,
-                    "not present in the prior snapshot, so growth has no base",
+                    "not present in the prior sweep, so growth has no base",
                 )
             )
             continue

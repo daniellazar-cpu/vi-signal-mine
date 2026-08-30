@@ -55,16 +55,17 @@ def test_report_writes_its_four_artifacts(env):
 
 
 def test_the_methodology_states_the_author_basis(env):
-    """A bare 'venue' substring is too weak to pin this: the 'Where' section
-    also says 'venue registry' for an unrelated reason, so that check would
-    still pass even if the author-class basis statement were deleted
-    outright. Assert the actual claim instead."""
+    """A bare 'site' substring is too weak to pin this: the 'Where' section
+    also mentions the site registry for an unrelated reason, so that check would
+    still pass even if the basis statement were deleted outright. Assert the
+    actual claim instead — in the plain wording that reaches the client, since
+    "author class" and "venue" are banned from anything a reader sees."""
     ts, rs, topic = env
     insight = _pipeline(rs, topic, _rows(4))
     run = run_report(topic, insight.run_id, rs)
     text = rs.read_artifact(run.run_id, "methodology.md").lower()
-    assert "author class" in text
-    assert "derived from the venue" in text
+    assert "who is speaking was derived from" in text
+    assert "the site a mention came from" in text
 
 
 def test_the_methodology_states_the_ae_scope_limit_exactly_once(env):

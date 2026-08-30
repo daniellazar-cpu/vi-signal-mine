@@ -45,7 +45,7 @@ TAGLINE = "What people are saying about a brand or product online — and what c
 #:
 #: This is not merely a caveat any more. ``storage_is_durable() is False``
 #: means every mutating route actually refuses (409) — creating or editing a
-#: topic, running a snapshot, insight or report all fail outright — so the
+#: topic, running a sweep, insight or report all fail outright — so the
 #: words say that plainly rather than soften it into "might not survive".
 EPHEMERAL_STORAGE_NOTICE = (
     "This instance is a read-only demonstration: no database is connected, "
@@ -71,7 +71,7 @@ TOPIC_NAME_REQUIRED = (
 )
 
 WHAT_IT_IS = (
-    "Vi Signal Mine watches a topic over time. It collects what is being said "
+    "Vi Mention Mine watches a topic over time. It collects what is being said "
     "in medical forums, patient communities, journals and guideline bodies, "
     "then works out which findings hold up, who is saying them, and what moved "
     "since last time. Every number on every screen traces back to a dated row "
@@ -83,14 +83,14 @@ MODES = (
     {
         "key": "mine",
         "name": "Mine",
-        "one_liner": "Go and collect. Produces one dated snapshot of the topic.",
+        "one_liner": "Go and collect. Produces one dated sweep of the topic.",
         "detail": (
             "Searches a hand-checked list of medical venues first — journals, "
             "guideline bodies, clinician forums, patient communities — before "
             "spending anything on the open web. Every result is recorded with "
             "where it came from, when it was captured, and what it cost."
         ),
-        "produces": "Signals, provenance, coverage, cost",
+        "produces": "Mentions, provenance, coverage, cost",
         # Say the number the form shows, not a flattering slice of it. A probe
         # estimates near 6 cents: about a penny of search and 5 cents of model
         # time. "About 3 cents" was the search half quoted as the whole, which
@@ -104,14 +104,14 @@ MODES = (
     {
         "key": "insight",
         "name": "Insight",
-        "one_liner": "Work out what it means. Seven passes over one snapshot.",
+        "one_liner": "Work out what it means. Seven passes over one sweep.",
         "detail": (
-            "Groups signals into themes, counts how many independent sources "
+            "Groups mentions into themes, counts how many independent sources "
             "back each one, reads stance separately for clinicians and for "
-            "patients, and compares everything against earlier snapshots of the "
+            "patients, and compares everything against earlier sweeps of the "
             "same topic to find what moved and what is new."
         ),
-        "produces": "Themes, findings, stance, the clinician–patient gap, momentum, anomalies",
+        "produces": "Themes, findings, stance, the clinician–patient gap, trend, anomalies",
         "cost": "Model time only — typically under a dollar.",
     },
     {
@@ -136,7 +136,7 @@ PLOT_GUIDE = {
         "The whisker shows how differently clinicians and patients feel about it."
     ),
     "marks": (
-        ("Box size", "How many signals mention this theme."),
+        ("Box size", "How many mentions mention this theme."),
         ("Whisker", "The distance between clinician stance and patient stance."),
         ("Centre line", "No gap — both sides feel the same way."),
         ("Left", "Patients are more negative than clinicians."),
@@ -165,9 +165,9 @@ GLOSSARY = (
         "therapeutic area. Topics persist so you can run them again.",
     ),
     (
-        "Snapshot",
+        "Sweep",
         "One dated collection run against a topic. Run a topic twice and the "
-        "second snapshot can be compared to the first.",
+        "second sweep can be compared to the first.",
     ),
     (
         "Sweep size",
@@ -192,8 +192,8 @@ GLOSSARY = (
         "blended into one number.",
     ),
     (
-        "Momentum",
-        "How a theme's volume changed against the previous snapshot. Measured, "
+        "Trend",
+        "How a theme's volume changed against the previous sweep. Measured, "
         "not predicted — this tool does not forecast.",
     ),
     (
@@ -214,7 +214,7 @@ FIRST_RUN_STEPS = (
     ("Run a sweep", "Pick a sweep size. You see the estimate before anything is spent."),
     (
         "Run it again next week",
-        "Momentum and anomalies need something to compare against. One snapshot "
+        "Trend and anomalies need something to compare against. One sweep "
         "tells you what is being said; two tell you what is changing.",
     ),
 )
@@ -271,8 +271,8 @@ FIELD_GUIDE = {
 #: Short inline notes, keyed by screen. One sentence each.
 _EXPLAINERS = {
     "topics": (
-        "Each topic is watched over time. The sparkline is its signal volume "
-        "across snapshots."
+        "Each topic is watched over time. The sparkline is its mention volume "
+        "across sweeps."
     ),
     "topic_form": (
         "Only the topic is required. Everything else narrows or widens the "
@@ -283,12 +283,12 @@ _EXPLAINERS = {
         "not a guess — a run stops cleanly rather than exceeding it."
     ),
     "run": "Each stage writes its output as it finishes, so nothing is lost if a run stops early.",
-    "snapshot": (
+    "sweep": (
         "Everything collected, with where it came from and when. Filter here and "
         "the plot above re-weights."
     ),
     "insight": (
-        "Seven passes over one snapshot. The clinician–patient gap leads because "
+        "Seven passes over one sweep. The clinician–patient gap leads because "
         "it is the finding nobody thinks to ask for."
     ),
     "report": (
@@ -343,7 +343,7 @@ DELIVERABLES = (
         "for_whom": "The client, as-is.",
         "sample": (
             "**Cost of access** — 12 independent sources, "
-            "(14 signals). Volume is up 40% versus the prior snapshot "
+            "(14 mentions). Volume is up 40% versus the prior sweep "
             "(10 to 14)."
         ),
     },
@@ -354,7 +354,7 @@ DELIVERABLES = (
         "group": "report",
         "headline": "Every claim, traced to the rows behind it.",
         "body": (
-            "One row per cited signal: id, venue, what kind of venue, when it "
+            "One row per cited mention: id, venue, what kind of venue, when it "
             "was captured, how, and the URL. This is what lets someone check "
             "the report instead of believing it."
         ),
@@ -396,7 +396,7 @@ DELIVERABLES = (
     {
         "key": "signals",
         "file": "signals.json",
-        "name": "Signal ledger",
+        "name": "Mention ledger",
         "group": "data",
         "headline": "Everything collected, row by row.",
         "body": "Each result with its venue, capture time, collection method, tier and URL.",
@@ -434,11 +434,11 @@ DELIVERABLES = (
         "sample": "",
     },
     {
-        "key": "momentum",
-        "file": "momentum.json",
-        "name": "Momentum",
+        "key": "trend",
+        "file": "trend.json",
+        "name": "Trend",
         "group": "analysis",
-        "headline": "What moved since the last snapshot.",
+        "headline": "What moved since the last sweep.",
         "body": "Volume change per theme. Measured, never forecast.",
         "for_whom": "The half a client cannot get by reading forums themselves.",
         "sample": "",
@@ -497,7 +497,7 @@ SORTS: tuple[tuple[str, str], ...] = (
     ("recent", "Newest first"),
     ("oldest", "Oldest first"),
     ("name", "Name A–Z"),
-    ("activity", "Most snapshots"),
+    ("activity", "Most sweeps"),
     ("spend", "Highest spend"),
     ("volume", "Largest volume"),
 )
@@ -507,7 +507,7 @@ SORTS: tuple[tuple[str, str], ...] = (
 #: create once and never run?
 FILTERS: tuple[tuple[str, str], ...] = (
     ("all", "All topics"),
-    ("watched", "Has snapshots"),
+    ("watched", "Has sweeps"),
     ("trend", "Has a trend (2+)"),
     ("empty", "Never run"),
 )
@@ -515,7 +515,7 @@ FILTERS: tuple[tuple[str, str], ...] = (
 FILTER_HELP = {
     "all": "Everything in the store.",
     "watched": "Mined at least once, so there is something to read.",
-    "trend": "Mined twice or more — the only topics where momentum and anomaly mean anything.",
+    "trend": "Mined twice or more — the only topics where trend and anomaly mean anything.",
     "empty": "Created but never mined. Usually a false start, or a test.",
 }
 
@@ -527,11 +527,11 @@ FILTER_LEDE = (
 )
 
 DELETE_WARNING = (
-    "Deleting a topic removes every snapshot, insight and report under it, and "
+    "Deleting a topic removes every sweep, insight and report under it, and "
     "every artifact those runs wrote. Downloads you have already taken are "
     "yours and are unaffected. Nothing else references this topic, so nothing "
-    "else breaks — but the collected signal rows are gone, and re-mining "
-    "collects today's web, not the web as it was on the snapshot's date."
+    "else breaks — but the collected mention rows are gone, and re-mining "
+    "collects today's web, not the web as it was on the sweep's date."
 )
 
 

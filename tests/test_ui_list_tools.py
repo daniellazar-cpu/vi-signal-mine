@@ -187,7 +187,8 @@ def test_the_confirm_page_counts_what_will_go(app):
     topic = next(t for t in ts.list() if t.name == "One sweep only")
     body = c.get(f"/topics/{topic.topic_id}/delete").text
     assert "One sweep only" in body
-    assert "Snapshots" in body and ">1<" in body
+    # The label reads "Sweeps" now — "snapshot" is banned from the reader.
+    assert "Sweeps" in body and ">1<" in body
 
     
 def test_the_confirm_page_changes_nothing(app):

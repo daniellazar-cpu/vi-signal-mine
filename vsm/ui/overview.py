@@ -213,12 +213,12 @@ def _attention(
                         "action": "See why", "href": f"/runs/{failed[-1].run_id}"})
         elif len(snapshots) == 1 and not insights:
             out.append({"topic": topic, "rank": 2, "why": "collected, not analysed",
-                        "detail": "One snapshot with no insight pass over it.",
+                        "detail": "One sweep with no analysis pass over it.",
                         "action": "Analyse",
                         "href": f"/runs/{snapshots[-1].run_id}/snapshot"})
         elif len(snapshots) == 1:
             out.append({"topic": topic, "rank": 3, "why": "no trend yet",
-                        "detail": "One snapshot. Momentum and anomalies need a "
+                        "detail": "One sweep. Trend and anomalies need a "
                                   "second to compare against.",
                         "action": "Sweep again",
                         "href": f"/topics/{topic.topic_id}/confirm"})

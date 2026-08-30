@@ -85,14 +85,14 @@
 
   <fieldset class="band-fieldset"
             {% if errors.spend_band is defined %}aria-describedby="spend-band-error" aria-invalid="true"{% endif %}>
-    <legend>Spend band</legend>
+    <legend>Sweep size</legend>
     {% if errors.spend_band is defined %}<p class="field-error" id="spend-band-error">{{ errors.spend_band }}</p>{% endif %}
     <div class="band-cards">
       {% for card in band_cards %}
       <label class="band-card">
         <input type="radio" name="spend_band" value="{{ card.band.name }}"
                {% if values.spend_band == card.band.name %}checked{% endif %}>
-        <span class="band-card-name">{{ card.band.name }}</span>
+        <span class="band-card-name">{{ card.band.name|sweep_size }}</span>
         <span class="band-card-estimate">{{ card.estimate.total_usd|usd(2) }} estimated</span>
         <span class="band-card-detail">
           {{ card.band.queries_per_cluster }} queries,

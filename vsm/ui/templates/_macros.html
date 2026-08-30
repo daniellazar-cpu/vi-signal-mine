@@ -55,7 +55,7 @@
 {% endmacro %}
 
 {# The in-flow rail: Topics / topic name / sweep size, then the three stages —
-   Snapshot, Insight, Report — each a link when that stage exists for this
+   Sweep, Insight, Report — each a link when that stage exists for this
    topic's current run chain, plain text when it does not yet. `flow` is
    the dict app.py's `_flow_chain` returns; `current` is one of
    "snapshot" | "insight" | "report".
@@ -86,7 +86,7 @@
     {% endif %}
   </div>
   <div class="flow-steps">
-    {{ flow_step("01", "Snapshot", "/runs/" ~ flow.mine_run_id ~ "/snapshot" if flow.mine_run_id else none, current == "snapshot") }}
+    {{ flow_step("01", "Sweep", "/runs/" ~ flow.mine_run_id ~ "/snapshot" if flow.mine_run_id else none, current == "snapshot") }}
     <span class="flow-sep" aria-hidden="true">—</span>
     {{ flow_step("02", "Insight", "/runs/" ~ flow.insight_run_id ~ "/insight" if flow.insight_run_id else none, current == "insight") }}
     <span class="flow-sep" aria-hidden="true">—</span>

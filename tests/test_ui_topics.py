@@ -70,7 +70,7 @@ def test_how_page_renders_a_glossary_term_and_a_mode_name(client):
     render them, not just have a route that returns something."""
     c, _, _ = client
     body = c.get("/how").text
-    assert "Momentum" in body  # a GLOSSARY term
+    assert "Trend" in body  # a GLOSSARY term — "momentum" reworded to "trend"
     assert "Insight" in body  # a MODES name
     assert "3+ sources" in body  # a TIERS key, now stated as the count
 

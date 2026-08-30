@@ -56,15 +56,20 @@ def dual_lens(
         hcp_net, patient_net = net_stance(hcp), net_stance(patient)
 
         if hcp_net is None or patient_net is None:
+            # Name the audience that *did* speak, in plain words. The old string
+            # said "no hcp-class signal ... the two lenses cannot be compared" —
+            # three banned words (hcp, signal, and the internal "lenses" framing)
+            # in a sentence that reaches the client report. What matters to a
+            # reader is which side was silent, and that silence is not agreement.
             if hcp_net is None and patient_net is None:
-                missing = "hcp-class or patient-class"
+                present = "Neither clinicians nor patients"
             elif patient_net is None:
-                missing = "patient-class"
+                present = "Only clinicians"
             else:
-                missing = "hcp-class"
+                present = "Only patients"
             divergence, reason = None, (
-                f"no {missing} signal for this theme, so the two lenses "
-                "cannot be compared; silence is not agreement"
+                f"{present} discussed this theme, so there is no gap to measure. "
+                "Silence is not agreement."
             )
         else:
             divergence, reason = round(abs(hcp_net - patient_net), 4), ""

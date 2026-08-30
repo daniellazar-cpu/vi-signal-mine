@@ -1,7 +1,7 @@
 """REPORT — the client deliverable, and the guards that make it safe to hand over.
 
 INSIGHT already did the arithmetic: themes, their volume and mix, per-theme
-corroboration tier, momentum against the prior snapshot, and detected
+corroboration tier, trend against the prior snapshot, and detected
 anomalies. REPORT's job is narrower than it looks — turn those artifacts into
 four files a Vi analyst can hand to a client, without ever letting a model
 author a number, a citation, a directive, or a forecast.
@@ -72,7 +72,7 @@ _AE_SCOPE_SENTENCE = (
 #: appears — the pulse report banner, the methodology scope section and the
 #: worth-considering note all cite this exact string, never a paraphrase.
 _SYNTHETIC_NOTICE = (
-    "Every signal behind this document was fabricated by the offline "
+    "Every mention behind this document was fabricated by the offline "
     "demonstration miner, not collected from the web. Do not treat any "
     "figure, excerpt or citation here as real, and do not share this as a "
     "client deliverable."
@@ -93,8 +93,8 @@ _INDEPENDENT_SOURCE_DEFINITION = (
 #: this table used to do — puts leaked internals in the one artifact a client
 #: reads, and printing ``0`` would assert neutrality nobody expressed.
 _NET_CELL_REASON = {
-    "hcp": "not read — no clinician-class signal in this theme",
-    "patient": "not read — no patient-class signal in this theme",
+    "hcp": "not read — no clinician-class mention in this theme",
+    "patient": "not read — no patient-class mention in this theme",
 }
 
 
@@ -144,11 +144,11 @@ def _finding_from_dict(d: Mapping[str, Any]) -> Finding:
 
 def _momentum_phrase(m: Mapping[str, Any] | None) -> str:
     """One arithmetic sentence fragment. Never a forecast — always a delta
-    between two dated snapshots that already happened."""
+    between two dated sweeps that already happened."""
     if not m:
         return ""
     if m.get("reason") == NO_BASELINE:
-        return " No prior snapshot exists to compare this against."
+        return " No prior sweep exists to compare this against."
     if m.get("delta_pct") is None:
         return (
             f" Volume moved from {m.get('volume_prior')} to {m.get('volume_now')} "
@@ -157,7 +157,7 @@ def _momentum_phrase(m: Mapping[str, Any] | None) -> str:
     direction = "up" if (m.get("delta") or 0) >= 0 else "down"
     return (
         f" Volume is {direction} {abs(m['delta_pct'])}% versus the prior "
-        f"snapshot ({m.get('volume_prior')} to {m.get('volume_now')})."
+        f"sweep ({m.get('volume_prior')} to {m.get('volume_now')})."
     )
 
 
@@ -185,7 +185,7 @@ def run_report(
     mine_run_id = insight_run.parent_run_id
     if not mine_run_id:
         raise RuntimeError(
-            f"insight run {insight_run_id!r} has no parent snapshot to report on"
+            f"insight run {insight_run_id!r} has no parent sweep to report on"
         )
 
     # One waiting budget for all seven required reads, not one each — see
@@ -258,7 +258,7 @@ def run_report(
         "|---|---|---|---|---|",
     ]
     if not paired:
-        theme_lines.append("| _(no themes in this snapshot)_ | | | | |")
+        theme_lines.append("| _(no themes in this sweep)_ | | | | |")
     for theme, finding in paired:
         venues = ", ".join(
             f"{v} ({n})" for v, n in sorted(theme.get("venue_mix", {}).items())
@@ -297,7 +297,7 @@ def run_report(
         guard_only("\n\n".join(corroborated_lines), where="pulse_report.md")
         if corroborated_lines
         else guard_only(
-            "No theme in this snapshot has reached three independent sources yet.",
+            "No theme in this sweep has reached three independent sources yet.",
             where="pulse_report.md",
         )
     )
@@ -317,7 +317,7 @@ def run_report(
     emerging_block = (
         guard_only("\n\n".join(emerging_lines), where="pulse_report.md")
         if emerging_lines
-        else guard_only("No emerging (two-source) findings this snapshot.", where="pulse_report.md")
+        else guard_only("No two-source findings this sweep.", where="pulse_report.md")
     )
 
     # ----------------------------------------------------------- anomalies --
@@ -362,7 +362,7 @@ def run_report(
         corroborated_block,
         "## Backed by 2 sources",
         emerging_block,
-        "## What changed since the prior snapshot",
+        "## What changed since the prior sweep",
         anomaly_block,
     ]
     if lens_block:
@@ -430,7 +430,7 @@ def run_report(
         if current_theme is None:
             continue
         sentence = (
-            f"Worth looking into why **{a['theme_name']}** moved this snapshot "
+            f"Worth looking into why **{a['theme_name']}** moved this sweep "
             f"({a['detail']})."
         )
         considering_lines.append(
@@ -453,7 +453,7 @@ def run_report(
     venues_seen = sorted({str(s.get("venue") or "") for s in signals if s.get("venue")})
     captured_ats = sorted(str(s.get("captured_at") or "") for s in signals if s.get("captured_at"))
     if not captured_ats:
-        when_line = "capture timestamps were not recorded on these signals"
+        when_line = "capture timestamps were not recorded on these mentions"
     elif captured_ats[0][:10] == captured_ats[-1][:10]:
         # One day is one date, not a range. "between X and X" is a
         # zero-width window presented as a window — the sort of detail that
@@ -465,18 +465,17 @@ def run_report(
             f"{_long_date(captured_ats[-1])}"
         )
     # Written so the claim is assertable, not just gesturable: the exact
-    # phrases "author class" and "derived from the venue" / "derived from
-    # resolved author identity" state the basis in words a test — or a
-    # reader — can pin, rather than relying on the word "venue" appearing
-    # somewhere in the document for an unrelated reason (it does, in the
-    # "Where" section above, which is why a bare substring check on "venue"
-    # is not a real assertion about this claim).
+    # phrases "who is speaking was derived from" and "the site a mention came
+    # from" / "resolved author identity" state the basis in words a test — or a
+    # reader — can pin, rather than relying on "site" appearing somewhere in the
+    # document for an unrelated reason (it does, in the "Where" section above,
+    # which is why a bare substring check on "site" is not a real assertion).
     basis_line = (
-        "author class was derived from the venue a signal came from — the "
-        "registry's classification of the venue, not any resolved author identity"
+        "who is speaking was derived from the site a mention came from — the "
+        "registry's classification of that site, not any resolved author identity"
         if basis == "venue"
-        else "author class was derived from resolved author identity, not merely "
-        "from the venue a signal came from"
+        else "who is speaking was derived from resolved author identity, not merely "
+        "from the site a mention came from"
     )
     methodology_lines = [
         "# Methodology",
@@ -491,11 +490,11 @@ def run_report(
         "",
         "## Where",
         "Search was scoped to a hand-verified gold-list venue registry, routed by "
-        f"therapeutic area, before any open web search. This snapshot's signals came "
-        f"from {len(venues_seen)} distinct venue(s).",
+        f"therapeutic area, before any open web search. This sweep's mentions came "
+        f"from {len(venues_seen)} distinct site(s).",
         "",
         "## When",
-        f"This snapshot's signals were {when_line}.",
+        f"This sweep's mentions were {when_line}.",
         "",
         "## What was excluded, and why",
         "A Tier-C venue (a verified-membership network such as a gated physician "
@@ -528,7 +527,7 @@ def run_report(
     appendix_lines = [
         "# Provenance appendix",
         "",
-        "One row per cited signal.",
+        "One row per cited mention.",
     ]
     if synthetic:
         appendix_lines.append(f"**{_SYNTHETIC_NOTICE}**")
@@ -565,7 +564,7 @@ def _report_user_prompt(topic: Topic, paired: Sequence[tuple[Mapping[str, Any], 
     lines = [
         f"Topic: {topic.name} ({topic.therapeutic_area}).",
         f"Brand: {topic.brand or '(none)'}. Molecule: {topic.molecule or '(none)'}.",
-        "Themes this snapshot, with how many independent sources support each "
+        "Themes this sweep, with how many independent sources support each "
         "(you must not change or restate a tier as your own finding):",
     ]
     for theme, finding in paired:

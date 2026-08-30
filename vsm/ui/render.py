@@ -104,8 +104,8 @@ def pct(value: float | None) -> str:
 #: `vsm/modes/report.py` so the page and the artifact say the same thing in the
 #: same cell — they diverged once, and the page was the one that lost the reason.
 _NET_ABSENT_REASON = {
-    "hcp": "not read — no clinician-class signal in this theme",
-    "patient": "not read — no patient-class signal in this theme",
+    "hcp": "not read — no clinician-class mention in this theme",
+    "patient": "not read — no patient-class mention in this theme",
 }
 
 
@@ -113,7 +113,7 @@ def net_stance_text(value: float | None, which: str | None = None) -> str:
     """A net stance, or **why there isn't one**.
 
     An em dash alone was the defect here. The client artifact prints "not read
-    — no patient-class signal in this theme" in this very cell, so the page was
+    — no patient-class mention in this theme" in this very cell, so the page was
     strictly less honest than the file it previews, and a reader comparing the
     two would find the page silent where the document explained itself.
 

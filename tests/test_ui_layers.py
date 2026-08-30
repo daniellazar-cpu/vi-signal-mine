@@ -373,12 +373,19 @@ def test_no_screen_leaks_an_internal_word(tmp_path, monkeypatch):
         "insight": f"/runs/{by['insight'][-1].run_id}/insight",
         "report": f"/runs/{by['report'][-1].run_id}/report",
     }
+    # Extended after the skill-driven rebuild cleaned three more words the
+    # UX-plan vocabulary bans but the earlier test did not enforce: "signal"
+    # (say mention), "snapshot" (say sweep) and "momentum" (say trend/change).
+    # "Vi Signal Mine" (product name) and "signals.json" (a real filename in the
+    # download lists) are stripped before the check, since neither is jargon.
     banned = ["corroborated", "Corroborated", "Emerging", "single_source",
               "dual-lens", "Dual-lens", "spend band", "probe band", " band",
-              "say NE", "Mine run"]
+              "say NE", "Mine run", "momentum", "Momentum", "snapshot",
+              "Snapshot", "signal ", "Signal "]
     leaks = {}
     for name, path in paths.items():
         text = re.sub(r"\s+", " ", re.sub(r"<[^>]*>", " ", c.get(path).text))
+        text = text.replace("Vi Signal Mine", "").replace("signals.json", "")
         hit = [w for w in banned if w in text]
         if hit:
             leaks[name] = hit

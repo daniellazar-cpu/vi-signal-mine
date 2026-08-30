@@ -13,7 +13,7 @@
    someone stop, and a wall of prose above it gets skimmed past. #}
 <div class="delete-tally">
   <dl>
-    <div><dt>Snapshots</dt><dd>{{ counts.snapshots }}</dd></div>
+    <div><dt>Sweeps</dt><dd>{{ counts.snapshots }}</dd></div>
     <div><dt>Insights</dt><dd>{{ counts.insights }}</dd></div>
     <div><dt>Reports</dt><dd>{{ counts.reports }}</dd></div>
     <div><dt>Runs in total</dt><dd>{{ counts.runs }}</dd></div>
@@ -25,8 +25,8 @@
 
 {% if counts.snapshots >= 2 %}
 <p class="delete-note">
-  This topic has {{ counts.snapshots }} snapshots, so it is one of the few where
-  momentum and anomaly mean anything. That history cannot be rebuilt — a fresh
+  This topic has {{ counts.snapshots }} sweeps, so it is one of the few where
+  trend and anomaly mean anything. That history cannot be rebuilt — a fresh
   sweep collects today’s web, not the web as it was on those dates.
 </p>
 {% endif %}

@@ -613,8 +613,8 @@ def test_each_absent_net_cell_states_its_own_reason(seeded):
     # lenses are always populated, this test should be given a fixture that
     # forces the absent case rather than being deleted.
     assert (
-        "no clinician-class signal in this theme" in body
-        or "no patient-class signal in this theme" in body
+        "no clinician-class mention in this theme" in body
+        or "no patient-class mention in this theme" in body
     ), "an absent net stance rendered without saying why"
 
 

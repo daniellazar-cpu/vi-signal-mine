@@ -245,7 +245,7 @@
 
       The two substitutions are the same defect as the counter labels above:
       `_attention` in `vsm/ui/overview.py` predates the vocabulary and still
-      writes "snapshot" and "Momentum", both banned from anything a reader
+      writes "snapshot" and "Trend", both banned from anything a reader
       sees. Patched at the point of display rather than left to ship, and a
       no-op on every string that does not contain them.
     #}
@@ -253,7 +253,7 @@
       {% for r in attention %}
       <li>
         <span class="attention-topic"><a href="/topics/{{ r.topic.topic_id }}">{{ r.topic.name }}</a></span>
-        <span class="attention-why">{{ r.why }} — {{ r.detail|replace("snapshot", "sweep")|replace("Momentum", "Trend") }}</span>
+        <span class="attention-why">{{ r.why }} — {{ r.detail }}</span>
         {% if storage_is_durable() %}
         <a class="btn btn-ghost btn-sm attention-action" href="{{ r.href }}">{{ r.action }}</a>
         {% endif %}
