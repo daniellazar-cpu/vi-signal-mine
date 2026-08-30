@@ -1,170 +1,277 @@
 {% extends "_base.html" %}
+{% from "_macros.html" import page_header, card, bullet, delta, dumbbell, sources,
+                              empty, read_more, figure_caption %}
 {% block title %}Overview — Vi Signal Mine{% endblock %}
 {% block content %}
 {#
-  The landing screen. Deliberately almost wordless: four panel headings, four
-  counter labels, and a one-line empty state per panel. Every other page in this
-  app spends a quarter of its words explaining itself, which is what made the
-  tool read as prose about intelligence rather than intelligence.
+  The landing screen. One question: what is happening across everything I watch?
 
-  Each panel answers one question and is ranked, capped at six, and linked to its
-  own detail. No panel explains what it is — the heading is the explanation, and
-  a reader who needs more has "How it works" in the nav.
+  Four counters and four ranked answers, and the answers are drawn rather than
+  tabulated: a bullet bar per theme that moved, a dumbbell per audience gap,
+  pips per finding. The three tables this screen used to be — Was/Now/Change,
+  Clinician/Patient/Gap, Finding/Topic/Sources — were "Excel in HTML": every
+  figure the same size, the same colour and the same distance from the reader,
+  so the triage the interface should have done was left to the reader.
+
+  Layering, per UX-PLAN §12. Layer 1 is the encoding and the counter values.
+  Layer 2 is the grey line beneath each figure — the baseline, the truncation,
+  the count that could not be compared. Layer 3 is behind a control: the (i)
+  on each card title carries the definition, and "How “moved” is decided"
+  carries the threshold. Nothing that used to be here was deleted; the two
+  facts the old panels dropped on the floor — the reason each attention row is
+  waiting, and how the movement threshold works — are back.
+
+  Near-wordless on purpose: the card title is the question and each figure's
+  own caption is the answer in words, stated once. A hand-written lede above
+  each figure would say the caption over again in larger type, which is the
+  "word laundering" this rebuild exists to remove.
 #}
 <div class="page page-wide">
 
-<section class="dash-head">
-  <h1>Overview</h1>
-  {# No synthetic notice here: `_base.html` already shows one banner for the
-     whole page, and two warnings about the same thing is how a warning stops
-     being read. #}
-</section>
+{{ page_header("Overview", tip="sweep") }}
 
+{#
+  With nothing analysed, the four cards are all empty at once and the screen
+  has exactly one thing to say and one thing to do — so it says it once, in
+  `.dash-cold` below, and each card then names only its own missing piece
+  without repeating the sentence or the button. Four cards each carrying the
+  same "Go to topics" is the stack of restatements this rebuild is removing.
+
+  Which is also why only one empty state on this screen offers a link at all:
+  sweeping again is genuinely the fix for "nothing to compare against", and
+  /topics is where that is done. It is not the fix for "no tone reading" or
+  "no findings" — those need an analysis pass over a run this screen has no
+  id for, so those two empty states name the cause and stop.
+#}
+{% set cold = analysed_topics == 0 %}
+{% set sweep_href = "" if cold else "/topics" %}
+{% set sweep_action = "" if cold else "Go to topics" %}
+
+{#
+  The counter labels are re-spelled here rather than in `vsm/ui/overview.py`,
+  which this pass does not own and which still emits "Snapshots" and "Signals"
+  — two of the words the vocabulary bans outright (say sweep, say mention).
+  The map falls back to whatever label it is handed, so it becomes a no-op the
+  moment the aggregator is corrected rather than a second spelling to maintain.
+
+  No (i) on these: `.counter` is itself the anchor, and a <button> inside an
+  <a> is invalid and unreachable. The definitions for both words are one line
+  below, on the page title and on the card headings.
+#}
+{% set COUNTER_LABEL = {"Snapshots": "Sweeps", "Signals": "Mentions"} %}
 <div class="counter-strip">
   {% for c in counters %}
   <a class="counter" href="{{ c.href }}">
-    <span class="counter-value">{% if c.money %}{{ c.value|usd(2) }}{% else %}{{ c.value }}{% endif %}</span>
-    <span class="counter-label">{{ c.label }}</span>
+    {# Thousands separated: a mention count runs to five figures on a wide
+       sweep, and "18432" is a number a reader has to parse rather than see. #}
+    <span class="counter-value">{% if c.money %}{{ c.value|usd(2) }}{% else %}{{ "{:,}".format(c.value) }}{% endif %}</span>
+    <span class="counter-label">{{ COUNTER_LABEL.get(c.label, c.label) }}</span>
     <span class="counter-note">{{ c.note }}</span>
   </a>
   {% endfor %}
 </div>
 
-{% if analysed_topics == 0 %}
+{% if cold %}
 {# Not the same as "no topics". A store can hold twenty topics and have nothing
    analysed, in which case telling someone how to create their first topic is
-   the wrong instruction. #}
+   the wrong instruction. This is the one place on the screen that earns the
+   violet: with nothing analysed there is exactly one thing to do. #}
 <div class="dash-cold">
-  <p>Nothing has been analysed yet, so there is nothing to compare or corroborate.</p>
+  <p>Nothing has been analysed yet. A sweep collects mentions; the analysis pass over a sweep is what produces themes, gaps and findings.</p>
   <a class="btn btn-primary" href="/topics">Go to topics</a>
 </div>
 {% endif %}
 
 <div class="dash-grid">
 
-  <section class="panel">
-    <div class="panel-head">
-      <h2>What moved</h2>
-      {% if moved_total > moved|length %}<span class="panel-more">{{ moved|length }} of {{ moved_total }}</span>{% endif %}
-    </div>
-    {% if moved %}
-    <table class="panel-table">
-      <caption class="visually-hidden">Themes whose signal volume changed most against the prior snapshot.</caption>
-      <thead><tr>
-        <th scope="col">Theme</th>
-        <th scope="col">Topic</th>
-        <th scope="col" class="num">Was</th>
-        <th scope="col" class="num">Now</th>
-        <th scope="col" class="num">Change</th>
-      </tr></thead>
-      <tbody>
-        {% for r in moved %}
-        <tr>
-          <th scope="row"><a href="/runs/{{ r.run_id }}/insight">{{ r.theme }}</a></th>
-          <td class="panel-topic">{{ r.topic.name }}</td>
-          <td class="num">{{ r.volume_prior }}</td>
-          <td class="num">{{ r.volume_now }}</td>
-          <td class="num delta {{ 'delta-up' if r.delta_pct > 0 else 'delta-down' }}">{{ r.delta_pct|pct }}</td>
-        </tr>
+  {# ------------------------------------------------------- what moved -- #}
+  {% call card("What moved", 2, tip="change") %}
+    {% if moved_bullets %}
+    {#
+      A bullet per theme: the solid bar is this sweep, the tick is where the
+      theme stood last time, so level and change are one row rather than a
+      Was / Now / Change triplet the reader has to subtract in their head.
+      One shared `scale` across the column — passed by the route — or each bar
+      would silently get its own and the column would stop being comparable.
+
+      Row order is the route's: largest movement first, which is the panel's
+      whole claim. It is deliberately not `moved_bars`, whose `bar_rows` call
+      re-sorts by volume and would rank "what moved" by size instead.
+    #}
+    {% set top = moved_bullets[0] %}
+    <figure class="fig">
+      <ul class="bar-list">
+        {% for m in moved_bullets %}
+        <li>
+          {{ bullet(m.name, m.now, m.prior, scale=m.scale, unit="mentions") }}
+          {# The percentage is the ranking key and appears nowhere else on the
+             row, so it is support, not repetition — and it carries its named
+             baseline, because a change with no "versus what" is the commonest
+             lie in this category. #}
+          <p class="t-meta"><a href="{{ m.href }}">{{ m.topic }}</a> · {{ delta(m.delta_pct, "the prior sweep") }}</p>
+        </li>
         {% endfor %}
-      </tbody>
-    </table>
+      </ul>
+      {{ figure_caption(
+           top.name ~ " moved furthest — " ~ top.now ~ " mention"
+           ~ ("" if top.now == 1 else "s") ~ ", " ~ (top.delta_pct|pct)
+           ~ " against the prior sweep.") }}
+    </figure>
+    {% if moved_total > moved_bullets|length %}
+    <p class="t-meta">{{ moved_bullets|length }} of {{ moved_total }} shown, largest change first.</p>
+    {% endif %}
+
     {% elif moved_comparable %}
     {# Comparable themes exist; none crossed the threshold. Saying "sweep it
-       twice" here was wrong on a store that had already been swept twice. #}
-    <p class="panel-empty">{{ moved_comparable }} theme{{ '' if moved_comparable == 1 else 's' }} compared against a prior snapshot — none moved more than {{ moved_threshold|round|int }}%.</p>
+       twice" here was wrong on a store that had already been swept twice —
+       two different facts, and only one of them is an instruction. #}
+    {{ empty(
+         moved_comparable ~ " theme" ~ ("" if moved_comparable == 1 else "s")
+         ~ " compared against a prior sweep — none moved more than "
+         ~ (moved_threshold|round|int) ~ "%.",
+         "Smaller moves are the churn of re-querying a live web, so they are not reported as change.") }}
     {% else %}
-    <p class="panel-empty">Needs a topic swept twice — one snapshot has nothing to move against.</p>
+    {{ empty(
+         "Needs a topic swept twice — a single sweep has nothing to move against.",
+         "Change is always measured between two dated sweeps.",
+         sweep_href, sweep_action) }}
     {% endif %}
-  </section>
 
-  <section class="panel">
-    <div class="panel-head">
-      <h2>Clinicians vs patients</h2>
-      {% if divergence_total > divergence|length %}<span class="panel-more">{{ divergence|length }} of {{ divergence_total }}</span>{% endif %}
-    </div>
-    {% if divergence %}
-    <table class="panel-table">
-      <caption class="visually-hidden">Themes where the two audiences read most differently, widest gap first.</caption>
-      <thead><tr>
-        <th scope="col">Theme</th>
-        <th scope="col">Topic</th>
-        <th scope="col" class="num">Clinician</th>
-        <th scope="col" class="num">Patient</th>
-        <th scope="col" class="num">Gap</th>
-      </tr></thead>
-      <tbody>
-        {% for r in divergence %}
-        <tr>
-          <th scope="row"><a href="/runs/{{ r.run_id }}/insight">{{ r.theme }}</a></th>
-          <td class="panel-topic">{{ r.topic.name }}</td>
-          <td class="num">{{ r.hcp_net|net_short('hcp') }}</td>
-          <td class="num">{{ r.patient_net|net_short('patient') }}</td>
-          <td class="num strong">{{ r.divergence|net }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    {% if moved_comparable %}
+    {# Only where something was actually compared. On a store with no second
+       sweep anywhere there is no threshold to explain, and a disclosure about
+       a rule that has never applied is chrome. #}
+    {% call read_more("How “moved” is decided") %}
+    <p>A theme is listed when its volume changed by more than {{ moved_threshold|round|int }}% against the prior sweep. Every sweep re-queries a live web, so a one-mention wobble is noise, and a panel that fills with it teaches people to ignore the panel.</p>
+    <p>{{ moved_comparable }} theme{{ '' if moved_comparable == 1 else 's' }} had an earlier sweep to be measured against. A theme measured for the first time is left out rather than shown at zero: it has not failed to move.</p>
+    {% endcall %}
     {% endif %}
-    {% if not_comparable %}
-    <p class="panel-foot">{{ not_comparable }} theme{{ '' if not_comparable == 1 else 's' }} only one side discussed — no gap, and silence is not agreement.</p>
-    {% elif not divergence %}
-    <p class="panel-empty">Needs an insight pass, which is where the two audiences get separated.</p>
-    {% endif %}
-  </section>
+  {% endcall %}
 
-  <section class="panel">
-    <div class="panel-head">
-      <h2>Safe to say</h2>
-      {% if sayable_total > sayable|length %}<span class="panel-more">{{ sayable|length }} of {{ sayable_total }}</span>{% endif %}
-    </div>
+  {# --------------------------------------------- clinicians vs patients -- #}
+  {% call card("Clinicians vs patients", 2, tip="gap") %}
+    {% if gap.total %}
+    {# The dumbbell: two dots on one shared −1…+1 axis and the connector's
+       length *is* the gap. Never a radar and never a Clinician / Patient / Gap
+       table — the gap is a distance, and a distance is the one thing a pair of
+       signed decimals in adjacent cells does not show. #}
+    {{ dumbbell(gap, 3) }}
+    {% elif not_comparable %}
+    {{ empty(
+         "No theme has a tone reading from both audiences.",
+         (not_comparable ~ " theme was" if not_comparable == 1
+          else not_comparable ~ " themes were")
+         ~ " raised by one audience only, which is not the same as the two agreeing.") }}
+    {% elif cold %}
+    {{ empty(
+         "No clinician or patient reading yet.",
+         "Tone is read separately for each audience by the analysis pass over a sweep.") }}
+    {% else %}
+    {{ empty(
+         "No theme has been read for tone yet.",
+         "The analysis passes that have run produced no per-audience tone reading.") }}
+    {% endif %}
+
+    {% if not_comparable and gap.total %}
+    {# The system's highest-risk null (UX-PLAN §7.2) and the reason this count
+       is on the face of the card rather than inside the disclosure: a theme
+       one audience never raised has no gap, and it must never be averaged
+       into — or read as — the comparison above. #}
+    <p class="t-meta">{{ not_comparable }} further theme{{ '' if not_comparable == 1 else 's' }} raised by one audience only — no gap to measure, and silence is not agreement.</p>
+    {% endif %}
+    {% if divergence_total > gap.rows|length %}
+    <p class="t-meta">{{ gap.rows|length }} of {{ divergence_total }} shown, widest gap first.</p>
+    {% endif %}
+  {% endcall %}
+
+  {# ------------------------------------------------------- safe to say -- #}
+  {% call card("Safe to say", 2, tip="3+ sources") %}
     {% if sayable %}
-    <table class="panel-table">
-      <caption class="visually-hidden">Findings on three or more independent sources, so they can be stated to a client.</caption>
-      <thead><tr>
-        <th scope="col">Finding</th>
-        <th scope="col">Topic</th>
-        <th scope="col" class="num">Sources</th>
-      </tr></thead>
-      <tbody>
+    {#
+      Pips and the literal count, never a bar. A source count runs 1 to 8, and
+      charts.csv row 1 sends anything under four points to a stat card rather
+      than to a chart — the count *is* the label, which is also why no invented
+      confidence word appears anywhere on this card.
+    #}
+    <figure class="fig">
+      <ul class="attention-list">
         {% for r in sayable %}
-        <tr>
-          <th scope="row"><a href="/runs/{{ r.run_id }}/insight">{{ r.statement }}</a></th>
-          <td class="panel-topic">{{ r.topic.name }}</td>
-          <td class="num strong">{{ r.sources }}</td>
-        </tr>
+        <li>
+          <span class="attention-topic"><a href="/runs/{{ r.run_id }}/insight">{{ r.statement }}</a></span>
+          <span class="attention-why">{{ r.topic.name }}</span>
+          {{ sources(r.sources) }}
+        </li>
         {% endfor %}
-      </tbody>
-    </table>
+      </ul>
+      {{ figure_caption(
+           sayable|length ~ " finding" ~ ("" if sayable|length == 1 else "s")
+           ~ " can be stated as-is, the strongest on "
+           ~ sayable[0].sources ~ " independent sources.") }}
+    </figure>
+    {% if sayable_total > sayable|length %}
+    <p class="t-meta">{{ sayable|length }} of {{ sayable_total }} shown, most sources first.</p>
     {% endif %}
-    {% if emerging %}
-    <p class="panel-foot">{{ emerging }} more on fewer than three independent sources — not yet stateable.</p>
-    {% elif not sayable %}
-    <p class="panel-empty">Needs an insight pass to score findings against the three-source threshold.</p>
+    {% elif emerging %}
+    {{ empty(
+         "No finding has reached three independent sources.",
+         (emerging ~ " finding rests" if emerging == 1
+          else emerging ~ " findings rest")
+         ~ " on one or two sources, which is a reason to attribute or quote rather than to state.") }}
+    {% elif cold %}
+    {{ empty(
+         "No findings yet.",
+         "Findings and the source count behind each one come from the analysis pass over a sweep.") }}
+    {% else %}
+    {{ empty(
+         "No findings have been written yet.",
+         "The analysis passes that have run produced none.") }}
     {% endif %}
-  </section>
 
-  <section class="panel">
-    <div class="panel-head">
-      <h2>Needs attention</h2>
-      {% if attention_total > attention|length %}<span class="panel-more">{{ attention|length }} of {{ attention_total }}</span>{% endif %}
-    </div>
+    {% if sayable and emerging %}
+    <p class="t-meta">{{ emerging ~ " further finding rests" if emerging == 1 else emerging ~ " further findings rest" }} on one or two sources — attribute or quote those rather than stating them.</p>
+    {% endif %}
+  {% endcall %}
+
+  {# --------------------------------------------------- needs attention -- #}
+  {% call card("Needs attention", 2) %}
     {% if attention %}
+    {#
+      Ordered by how close the topic is to being useful, so the cheapest wins
+      come first. `r.detail` is the sentence that says what the state actually
+      costs and what to do about it; the old panel computed it and then threw
+      it away, which is exactly the "cut where it's meaty" the owner objected
+      to. It rides with its own row at meta size rather than behind six
+      separate disclosures.
+
+      The two substitutions are the same defect as the counter labels above:
+      `_attention` in `vsm/ui/overview.py` predates the vocabulary and still
+      writes "snapshot" and "Momentum", both banned from anything a reader
+      sees. Patched at the point of display rather than left to ship, and a
+      no-op on every string that does not contain them.
+    #}
     <ul class="attention-list">
       {% for r in attention %}
       <li>
         <span class="attention-topic"><a href="/topics/{{ r.topic.topic_id }}">{{ r.topic.name }}</a></span>
-        <span class="attention-why">{{ r.why }}</span>
+        <span class="attention-why">{{ r.why }} — {{ r.detail|replace("snapshot", "sweep")|replace("Momentum", "Trend") }}</span>
         {% if storage_is_durable() %}
         <a class="btn btn-ghost btn-sm attention-action" href="{{ r.href }}">{{ r.action }}</a>
         {% endif %}
       </li>
       {% endfor %}
     </ul>
-    {% else %}
-    <p class="panel-empty">Nothing waiting.</p>
+    {% if attention_total > attention|length %}
+    <p class="t-meta">{{ attention|length }} of {{ attention_total }} shown, most fixable first.</p>
     {% endif %}
-  </section>
+    {% if not storage_is_durable() %}
+    {# The actions above are hidden, not merely inert, so the gap is named
+       rather than left for the reader to notice (UX-PLAN §7.7). #}
+    <p class="storage-notice">{{ read_only_control_note }}</p>
+    {% endif %}
+    {% else %}
+    {{ empty("Nothing is waiting.") }}
+    {% endif %}
+  {% endcall %}
 
 </div>
 </div>

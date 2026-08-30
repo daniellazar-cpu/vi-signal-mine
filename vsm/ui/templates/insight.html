@@ -1,274 +1,396 @@
 {% extends "_base.html" %}
-{% from "_macros.html" import page_header, flow_rail, deliverable_downloads, tier_badge, info, sources %}
+{% from "_macros.html" import page_header, flow_rail, deliverable_downloads, info,
+   sources, stat, card, read_more, empty, chip, bar_list, bullet, dumbbell,
+   sentiment_bar, pair_bars, figure_caption, stamp, table_scroll_open %}
 {% block title %}Insight — Vi Signal Mine{% endblock %}
+
+{#
+  ==========================================================================
+  INSIGHT — "what did the analysis find?"
+
+  Six answers, one per section, each one always on the page.
+
+  The five secondary passes used to be CSS radio tabs, so four fifths of the
+  analysis was invisible on arrival, unreachable by the back button, and
+  impossible to send to a colleague. They are now six anchored sections with
+  a jump strip: `/runs/<id>/insight#anomalies` is the addressable state the
+  tabs never had, and every pass prints.
+
+  Each section holds the three layers apart:
+
+    1  the answer   — a `card-lead` naming *which* theme, and the scorecard
+    2  the support  — the figure, whose caption states the key value
+    3  the depth    — the rows, the method and the caveats, in a `read_more`
+
+  Nothing was deleted to reach layer 3. Two things were deleted outright and
+  both were legends for a chart that no longer exists: the forest plot (which
+  printed `TIER`, `NE` and "6 signals" as its own axis labels, drew its boxes
+  in the reserved violet, and set unbounded theme names as unwrappable SVG
+  text) and `PLOT_GUIDE`, which described that plot's boxes and whiskers. The
+  gap is now the `dumbbell` — the same rows, every value printed as text, the
+  axis named in words at both ends, and the themes only one audience raised
+  held apart under their own heading instead of drawn as `NE`.
+  ==========================================================================
+#}
 
 {% block top_rail %}
 {{ flow_rail(topic, flow, "insight") }}
-{% if topic is not none and snapshot_rail %}
-<div class="dated-strip" role="navigation" aria-label="topic snapshots">
-  {% for frame in snapshot_rail %}
-  {# aria-current, as the nav and flow-step indicators both do — this was the
-     one "current" marker carried by border-colour and weight alone. #}
-  <a class="dated-frame {% if frame.is_current %}dated-frame-current{% endif %}"
-     {% if frame.is_current %}aria-current="page"{% endif %}
-     href="/runs/{{ frame.run_id }}/snapshot">{{ frame.started_at|dt }}</a>
+{% if sweep_rail %}
+{# The dated axis doubles as the navigation control. The short label is what a
+   reader scans; the long one is carried for a screen reader, since "19 Aug"
+   alone cannot be resolved to a year. #}
+<div class="dated-strip" role="navigation" aria-label="sweeps of this topic">
+  {% for f in sweep_rail %}
+  <a class="dated-frame {% if f.is_current %}dated-frame-current{% endif %}"
+     {% if f.is_current %}aria-current="page"{% endif %}
+     href="{{ f.href }}">{{ f.short }}<span class="visually-hidden"> — {{ f.long }}</span></a>
   {% endfor %}
 </div>
 {% endif %}
 {% endblock %}
 
 {% block content %}
+{# ---- values this page derives once, before any section --------------- #}
+
+{# The sweep immediately before this one: the baseline every change on this
+   screen is measured against, and the only honest label for a prior tick. #}
+{% set ns = namespace(prev=none, seen=false) %}
+{% for f in sweep_rail %}
+  {% if f.is_current %}{% set ns.seen = true %}
+  {% elif not ns.seen %}{% set ns.prev = f %}{% endif %}
+{% endfor %}
+{% set prior_short = ns.prev.short if ns.prev else "the earlier sweep" %}
+{% set prior_long = ns.prev.long if ns.prev else "the earlier sweep" %}
+
+{# Section headings come from the route's own `views`, so the jump strip and
+   the sections cannot drift apart. `.get` rather than indexing: a missing key
+   should cost a nicer heading, never a 500 under StrictUndefined. #}
+{% set label_of = {} %}
+{% for v in views %}{% set _ = label_of.update({v.key: v.label}) %}{% endfor %}
+{% set gap_heading = "Clinicians vs patients" %}
+
+{# The theme that moved furthest in either direction. Sorting and taking both
+   ends is the only way to compare magnitudes in Jinja without a filter for
+   absolute value. #}
+{% set moved = momentum_bullets | selectattr("delta", "ne", None)
+                                | rejectattr("delta", "equalto", 0) | sort(attribute="delta") | list %}
+{% set risen = moved | last if moved else none %}
+{% set fallen = moved | first if moved else none %}
+{% set top_mover = risen if (moved and (risen.delta >= (0 - fallen.delta))) else fallen %}
+{% set theme_total = theme_bars | sum(attribute="value") | int %}
+{% set entity_total = entity_bars | sum(attribute="value") | int %}
+
 <div class="page page-wide">
-{# The breadcrumb above already names the topic, so the title is the screen.
-   The five-field grid becomes one line, and the caption's content moves behind
-   the (i) rather than being deleted. #}
-{% call page_header("Insight",
-     [run.started_at|dt,
-      (topic.spend_band|sweep_size ~ " sweep") if topic is not none else "—",
-      run.cost_usd|usd(4)]
-     + ([('<a href="/runs/' ~ mine_run_id ~ '/snapshot">from the ' ~ run.started_at|dt ~ ' sweep</a>')|safe] if mine_run_id else [])) %}
+
+{% set meta = [stamp(run.started_at)] %}
+{% if topic is not none %}{% set _ = meta.append(topic.spend_band|sweep_size ~ " sweep") %}{% endif %}
+{% set _ = meta.append(run.cost_usd|usd(4)) %}
+{% if mine_run_id %}{% set _ = meta.append(('<a href="/runs/' ~ mine_run_id ~ '/snapshot">The mentions behind it</a>')|safe) %}{% endif %}
+{% call page_header("Insight", meta) %}
   {% if run.status == "complete" and storage_is_durable() %}
+  {# The one primary action on this screen, and the only violet on it. #}
   <form method="post" action="/runs/{{ run.run_id }}/report">
     <button class="btn btn-primary" type="submit">Generate report</button>
   </form>
   {% endif %}
 {% endcall %}
-{% if mine_run_id %}
-
+{% if run.status == "complete" and not storage_is_durable() %}
+<p class="storage-notice">{{ read_only_control_note }}</p>
 {% endif %}
 
-<div class="page-head page-head-section">
-  {# "Dual-lens" was internal vocabulary. The heading now names the question the
-     section answers; the terms inside it explain themselves on demand. #}
-  <h2 id="dual-lens">Clinicians vs patients</h2>
-  {% if run.status == "complete" and not storage_is_durable() %}
-  <p class="storage-notice">{{ read_only_control_note }}</p>
-  {% endif %}
-</div>
-{# Layer 1: the answer. Previously the reader had to derive it from the plot.
-   Layer 2: what it rests on. Layer 3: how to read the plot, and why some rows
-   cannot be compared — available, not addressed to you on arrival. #}
-{% set widest = forest_rows | selectattr("divergence", "ne", None) | sort(attribute="divergence") | list %}
-{% set ne_rows = forest_rows | selectattr("divergence", "equalto", None) | list %}
-<div class="card">
-  <div class="card-body">
-  {% if widest %}
-  {% set top = (widest | last) if (widest | last).divergence | abs >= (widest | first).divergence | abs else (widest | first) %}
-  <p class="card-lead">Clinicians and patients read <strong>{{ top.name }}</strong> most differently.</p>
+{# What is on this page, in one line. The owner's complaint was "hard to
+   navigate, hard to understand what's there" — this is the answer to it, and
+   because every target is a real anchor on a section that is always rendered,
+   a link to one of them shows a colleague the same page you are looking at. #}
+<nav class="chip-row" aria-label="Sections on this page">
+  {{ chip(gap_heading, "#dual-lens") }}
+  {% for v in views %}{{ chip(v.label, "#" ~ v.key) }}{% endfor %}
+</nav>
+
+{# ====================================================== 1. the gap ===== #}
+{# It leads because it is the finding nobody thinks to ask for. #}
+{% call card(gap_heading, 2, tip="gap", id="dual-lens") %}
+  {% if gap.widest %}
+  <p class="card-lead">Clinicians and patients read <strong>{{ gap.widest.name }}</strong> most differently.</p>
   <div class="scorecard">
-    <div class="metric">
-      <span class="metric-label">Gap {{ info('gap') }}</span>
-      <span class="metric-value">{{ top.divergence|net }}</span>
-      <span class="metric-sub">on the widest theme</span>
-    </div>
-    <div class="metric">
-      <span class="metric-label">Clinician tone {{ info('tone') }}</span>
-      <span class="metric-value metric-value-sm">{{ top.hcp_net|net_short('hcp') }}</span>
-    </div>
-    <div class="metric">
-      <span class="metric-label">Patient tone</span>
-      <span class="metric-value metric-value-sm">{{ top.patient_net|net_short('patient') }}</span>
-    </div>
-    <div class="metric">
-      <span class="metric-label">Comparable {{ info('no comparison') }}</span>
-      <span class="metric-value metric-value-sm">{{ widest|length }}<span class="metric-sub" style="display:inline"> of {{ forest_rows|length }} themes</span></span>
-      {% if ne_rows %}<span class="metric-sub">{{ ne_rows|length }} raised by one side only</span>{% endif %}
-    </div>
+    {{ stat("Gap", gap.widest.gap_label,
+            "widest of " ~ gap.count_comparable ~ (" theme" if gap.count_comparable == 1 else " themes") ~ " both audiences discussed",
+            size="xl") }}
+    {{ stat("Clinician tone", gap.widest.hcp_label, tip="tone", size="sm") }}
+    {{ stat("Patient tone", gap.widest.patient_label, size="sm") }}
+    {{ stat("Independent sources",
+            sources(gap.widest.sources) if gap.widest.sources is not none else "not counted",
+            "behind this theme", tip="3+ sources", size="sm") }}
   </div>
+  {% elif gap.single %}
+  <p class="card-lead">No theme can be compared across the two audiences.</p>
+  <p class="t-support">Every one of the {{ gap.count_single }} themes was raised by one audience
+  and not the other, so there is no distance to measure on any of them.</p>
   {% else %}
-  <p class="card-lead">No theme can be compared across the two audiences yet.</p>
-  <p class="metric-sub">Every theme was raised by one side only. That is not agreement — the other side did not raise it.</p>
+  {{ empty("No theme has a tone reading from either audience.",
+           "Nothing collected in this sweep could be read as positive or negative, so neither audience has a position to compare.") }}
   {% endif %}
-  </div>
-</div>
 
-<div class="forest-plot-wrap">
-  {{ forest_svg|safe }}
-</div>
+  {# No dumbbell at all when there is not one reading to place on the axis:
+     the macro would draw its own empty state, and two sentences saying the
+     same nothing is the word laundering this rebuild is against. The named
+     empty state above carries the cause, which the macro's cannot. #}
+  {% if gap.total %}{{ dumbbell(gap, 3) }}{% endif %}
 
-<details class="disclosure">
-  <summary>How to read this</summary>
-  <div class="disclosure-body">
-    <p>{{ plot_guide.lede }}</p>
-    <dl class="plot-legend-key">
-      {% for mark, desc in plot_guide.marks %}
-      <div><dt>{{ mark }}</dt><dd>{{ desc }}</dd></div>
+  {% call read_more("How the two audiences are told apart") %}
+  <p>Who is speaking is taken from the site a mention came from — a clinician
+  forum counts as clinicians, a patient community counts as patients — not from
+  the author’s own words. A site that is neither is counted on its own and is
+  never folded into either audience.</p>
+  <p>That is why a theme can be well supported and still have no gap: the
+  distance only exists where both audiences spoke about the same theme.</p>
+  {% endcall %}
+{% endcall %}
+
+{# ================================================== 2. what moved ====== #}
+{% call card(label_of.get("momentum", "What moved"), 2, tip="change", id="momentum") %}
+  {% if not has_baseline %}
+  {{ empty("This is the first sweep of this topic, so nothing can be compared yet.",
+           "Change is measured against one named earlier sweep, never against a rolling window — so it begins with the second sweep.") }}
+  {% elif momentum_bullets %}
+    {% if top_mover and top_mover.delta > 0 %}
+    <p class="card-lead"><strong>{{ top_mover.name }}</strong> rose the most since the {{ prior_short }} sweep.</p>
+    {% elif top_mover %}
+    <p class="card-lead"><strong>{{ top_mover.name }}</strong> fell the most since the {{ prior_short }} sweep.</p>
+    {% else %}
+    <p class="card-lead">Nothing moved: every theme holds the volume it had on {{ prior_long }}.</p>
+    {% endif %}
+    <figure class="fig">
+      {# One scale for the whole column — the route passes the largest value in
+         view on every row — so the bars are comparable with each other and not
+         each with itself. The tick is where the theme stood last sweep. #}
+      {% for m in momentum_bullets %}
+      {{ bullet(m.name, m.now, m.prior, prior_short, scale=m.scale, unit="mentions") }}
       {% endfor %}
-    </dl>
-  </div>
-</details>
-{% if ne_rows %}
-<details class="disclosure">
-  <summary>Why {{ ne_rows|length }} theme{{ '' if ne_rows|length == 1 else 's' }} can't be compared</summary>
-  <div class="disclosure-body">
-    <p>{{ plot_guide.why_ne }}</p>
-    <ul>
-      {% for r in ne_rows %}<li><strong>{{ r.name }}</strong> — {{ r.reason }}</li>{% endfor %}
+      {% if top_mover %}
+      {{ figure_caption(top_mover.name ~ ": " ~ top_mover.prior ~ " to " ~ top_mover.now ~ " mentions against the sweep of " ~ prior_long ~ ".",
+                        momentum_bullets|length ~ " themes, one bar each") }}
+      {% else %}
+      {{ figure_caption("No theme changed volume against the sweep of " ~ prior_long ~ ".",
+                        momentum_bullets|length ~ " themes, one bar each") }}
+      {% endif %}
+    </figure>
+    {% call read_more("Every theme, with its change (" ~ momentum_bullets|length ~ ")") %}
+    {{ table_scroll_open("Change per theme") }}
+    <table class="data-table">
+      <caption class="visually-hidden">Volume per theme now and on {{ prior_long }}, with the change between them.</caption>
+      <thead><tr>
+        <th scope="col">Theme</th>
+        <th scope="col" class="num">Now</th>
+        <th scope="col" class="num">{{ prior_short }}</th>
+        <th scope="col" class="num">Change</th>
+        <th scope="col" class="num">Change %</th>
+      </tr></thead>
+      <tbody>
+        {% for m in momentum_bullets %}
+        <tr>
+          <th scope="row" class="cell-title">{{ m.name }}</th>
+          <td class="num">{{ m.now }}</td>
+          <td class="num">{{ m.prior if m.prior is not none else "first sweep" }}</td>
+          <td class="num">{{ "%+d"|format(m.delta) if m.delta is not none else "first sweep" }}</td>
+          {# A percentage of nothing is undefined, not infinite. The cell says
+             so in two words and the reason is carried once, below the table. #}
+          <td class="num">{% if m.delta_pct is none %}<span class="muted">no base</span>{% else %}{{ m.delta_pct|pct }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <p class="t-meta">No base: the theme was not counted in the {{ prior_short }} sweep, so growth from it has nothing to divide by.</p>
+    {% endcall %}
+  {% else %}
+  {{ empty("No theme came out of this sweep, so there is nothing to compare.",
+           "The sweep it was built from collected nothing that clustered.") }}
+  {% endif %}
+{% endcall %}
+
+{# ========================================= 3. what changed on its own == #}
+{% call card(label_of.get("anomalies", "What changed on its own"), 2, tip="anomaly", id="anomalies") %}
+  {% if not has_baseline %}
+  {{ empty("Nothing can be called unusual yet.",
+           "What counts as normal for a theme is set by this topic’s earlier sweeps, and this is the first.") }}
+  {% elif anomaly_pairs %}
+  <p class="card-lead">{{ anomaly_pairs|length }}
+    {{ "theme" if anomaly_pairs|length == 1 else "themes" }}
+    moved sharply against {{ "its" if anomaly_pairs|length == 1 else "their" }} own recent baseline.</p>
+  <figure class="fig">
+    <ul class="bar-list">
+      {% for a in anomaly_pairs %}
+      {# The baseline is a median across recent sweeps, so it can land on a
+         half. Trailing ".0" is noise, a real .5 is not — print the integer
+         only when it is one. #}
+      {% set base = (a.baseline|int if (a.baseline is not none and a.baseline == a.baseline|int) else a.baseline) %}
+      <li>
+        <p class="t-support"><strong>{{ a.name }}</strong> — {{ a.kind_label }}</p>
+        {{ pair_bars(base, a.observed, "recent baseline", "this sweep", a.absent_note) }}
+        {% if a.note %}<p class="t-meta">{{ a.note }}</p>{% endif %}
+      </li>
+      {% endfor %}
     </ul>
-  </div>
-</details>
-{% endif %}
+    {{ figure_caption("Flagged: " ~ (anomaly_pairs|map(attribute="name")|join(", ")) ~ ".") }}
+  </figure>
+  {% else %}
+  {{ empty("No theme moved far enough from its own baseline to flag.",
+           "A theme has to move sharply against the median of this topic’s recent sweeps, and be said often enough for the move to mean anything.") }}
+  {% endif %}
+{% endcall %}
 
-<div class="tabs">
-  <input class="tab-input" type="radio" name="insight-view" id="tab-momentum" checked>
-  <input class="tab-input" type="radio" name="insight-view" id="tab-anomalies">
-  <input class="tab-input" type="radio" name="insight-view" id="tab-themes">
-  <input class="tab-input" type="radio" name="insight-view" id="tab-stance">
-  <input class="tab-input" type="radio" name="insight-view" id="tab-entities">
-  <div class="tabbar" role="group" aria-label="insight view">
-    <label for="tab-momentum">Momentum</label>
-    <label for="tab-anomalies">Anomalies</label>
-    <label for="tab-themes">Themes</label>
-    <label for="tab-stance">Stance by author class</label>
-    <label for="tab-entities">Entities</label>
-  </div>
-
-  <div class="tab-panel panel-momentum">
-    {% if not has_baseline %}
-    <p class="empty-state">No prior snapshot exists for this topic yet, so momentum has nothing to compare against.</p>
-    {% elif momentum_rows %}
-    <div class="table-scroll" tabindex="0" role="region" aria-label="Momentum by theme">
+{# ==================================================== 4. themes ======== #}
+{% call card(label_of.get("themes", "Themes"), 2, tip="theme", id="themes") %}
+  {% if theme_bars %}
+  <p class="card-lead"><strong>{{ theme_bars[0].label }}</strong> is the most discussed theme in this sweep.</p>
+  {{ bar_list(theme_bars,
+              summary=theme_bars[0].label ~ " leads with " ~ theme_bars[0].value_label ~ " of " ~ theme_total ~ " mentions.",
+              data_label="Themes by volume") }}
+    {% call read_more("Every theme, with where it was found (" ~ theme_rows|length ~ ")") %}
+    {{ table_scroll_open("Themes, sites and sources") }}
     <table class="data-table">
-      <caption class="visually-hidden">Volume change per theme against the prior snapshot.</caption>
-      <thead><tr><th scope="col">Theme</th><th scope="col" class="num">Volume now</th><th scope="col" class="num">Volume prior</th><th scope="col" class="num">Delta</th><th scope="col" class="num">Delta %</th><th scope="col">Note</th></tr></thead>
-      <tbody>
-        {% for m in momentum_rows %}
-        <tr>
-          <th scope="row" class="cell-title">{{ m.theme_name }}</th>
-          <td class="num">{{ m.volume_now }}</td>
-          <td class="num">{% if m.volume_prior is none %}—{% else %}{{ m.volume_prior }}{% endif %}</td>
-          <td class="num">{% if m.delta is none %}—{% else %}{{ m.delta }}{% endif %}</td>
-          <td class="num">{{ m.delta_pct|pct }}</td>
-          <td class="cell-sub">{{ m.reason if m.reason else "—" }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    </div>
-    {% else %}
-    <p class="empty-state">No themes in this snapshot to compare.</p>
-    {% endif %}
-  </div>
-
-  <div class="tab-panel panel-anomalies">
-    {% if not has_baseline %}
-    <p class="empty-state">No prior snapshot exists to compare against, so no anomalies can be detected yet.</p>
-    {% elif anomaly_rows %}
-    <div class="table-scroll" tabindex="0" role="region" aria-label="Anomalies">
-    <table class="data-table">
-      <caption class="visually-hidden">Themes that appeared, vanished, spiked or collapsed against their recent baseline.</caption>
-      <thead><tr><th scope="col">Theme</th><th scope="col">Kind</th><th scope="col" class="num">Observed</th><th scope="col" class="num">Baseline</th><th scope="col">Detail</th><th scope="col">Note</th></tr></thead>
-      <tbody>
-        {% for a in anomaly_rows %}
-        <tr>
-          <th scope="row" class="cell-title">{{ a.theme_name }}</th>
-          <td>{{ anomaly_label(a.kind) }}</td>
-          <td class="num">{{ a.observed }}</td>
-          <td class="num">{% if a.baseline is none %}—{% else %}{{ a.baseline }}{% endif %}</td>
-          <td class="cell-sub">{{ a.detail }}</td>
-          <td class="cell-sub">{{ a.note if a.note else "—" }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    </div>
-    {% else %}
-    <p class="empty-state">No anomalies were detected against the prior baseline.</p>
-    {% endif %}
-  </div>
-
-  <div class="tab-panel panel-themes">
-    {% if theme_rows %}
-    <div class="table-scroll" tabindex="0" role="region" aria-label="Themes">
-    <table class="data-table">
-      <caption class="visually-hidden">Every theme in this snapshot, with where it was found, what kind of sites, and how many independent sources support it.</caption>
-      <thead><tr><th scope="col">Theme</th><th scope="col" class="num">Volume</th><th scope="col">Venue mix</th><th scope="col">Kind mix</th><th scope="col" class="num">Sources {{ info('sources') }}</th></tr></thead>
+      <caption class="visually-hidden">Every theme in this sweep, the sites it was found on, what kind of sites those are, and how many independent sources support it.</caption>
+      <thead><tr>
+        <th scope="col">Theme</th>
+        <th scope="col" class="num">Mentions</th>
+        <th scope="col">Sites it came from</th>
+        <th scope="col">What kind of sites</th>
+        <th scope="col" class="num">Independent sources</th>
+      </tr></thead>
       <tbody>
         {% for tr in theme_rows %}
         <tr>
           <th scope="row" class="cell-title">{{ tr.theme.name }}</th>
           <td class="num">{{ tr.theme.volume }}</td>
-          <td class="cell-sub">{% for v, n in tr.venue_mix %}{{ v }} ({{ n }}){% if not loop.last %}, {% endif %}{% else %}—{% endfor %}</td>
-          <td class="cell-sub">{% for k, n in tr.kind_mix %}{{ kind_label(k) }} ({{ n }}){% if not loop.last %}, {% endif %}{% else %}—{% endfor %}</td>
-          {# Pips plus the number: the count is the label, so no category word
-             has to be learned. The old row carried both a "Tier" badge and the
-             count, which said the same thing twice. #}
+          <td class="cell-sub">{% for v, n in tr.venue_mix %}{{ v }} ({{ n }}){% if not loop.last %}, {% endif %}{% else %}not recorded{% endfor %}</td>
+          <td class="cell-sub">{% for k, n in tr.kind_mix %}{{ kind_label(k) }} ({{ n }}){% if not loop.last %}, {% endif %}{% else %}not recorded{% endfor %}</td>
+          {# Pips plus the numeral: the count is the label, so there is no
+             category word to learn. What the count licenses is one (i) away,
+             beside the same figure in the scorecard at the top. #}
           <td class="num">{{ sources(tr.sources) }}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
     </div>
-    {% else %}
-    <p class="empty-state">No themes in this snapshot.</p>
-    {% endif %}
-  </div>
+    {% endcall %}
+  {% else %}
+  {{ empty("No theme came out of this sweep.",
+           "Either nothing was collected, or nothing collected grouped with anything else.") }}
+  {% endif %}
+{% endcall %}
 
-  <div class="tab-panel panel-stance">
-    <p class="body-text">
-      Split by who is speaking. There is no blended figure across HCP and
-      patient — a single number over both would be a patient-sentiment number
-      wearing a clinical label.
-    </p>
-    {% if stance_rows %}
-    <div class="table-scroll" tabindex="0" role="region" aria-label="Stance by author class">
+{# ============================================ 5. sentiment by speaker == #}
+{% call card(label_of.get("stance", "Sentiment by speaker"), 2, tip="sentiment", id="stance") %}
+  {% if sentiment_rows %}
+  {# How much of the sweep could be read at all, across every theme. A mention
+     nobody could read either way is counted on its own and never as a neutral
+     opinion, so this is the first thing the section has to say. #}
+  {% set sn = namespace(read=0, total=0) %}
+  {% for row in sentiment_rows %}
+    {% set sn.total = sn.total + row.mix.n %}
+    {% for s in row.mix.segments %}{% if s.key != "unclear" %}{% set sn.read = sn.read + s.count %}{% endif %}{% endfor %}
+  {% endfor %}
+  {% if sn.total == 0 %}
+  <p class="card-lead">No mention in this sweep carries a sentiment reading.</p>
+  {% elif sn.read == 0 %}
+  <p class="card-lead">Not one of the {{ sn.total }} mentions in this sweep could be read as positive or negative.</p>
+  {% else %}
+  <p class="card-lead">{{ sn.read }} of {{ sn.total }} mentions could be read either way.</p>
+  {% endif %}
+  {% for row in sentiment_rows %}
+  {# `fid` namespaces this bar's SVG pattern ids, which are document-global.
+     Never inside a `read_more`: that macro emits its body twice, and two
+     copies of one pattern id is a duplicate id in the document. #}
+  {{ sentiment_bar("mix-" ~ loop.index, row.mix, row.name) }}
+  {% endfor %}
+    {% call read_more("Every theme, split by who is speaking") %}
+    {{ table_scroll_open("Sentiment per theme, split by speaker") }}
     <table class="data-table">
-      <caption class="visually-hidden">Stance counts per theme, split by author class. Never blended across classes.</caption>
-      <thead><tr><th scope="col">Theme</th><th scope="col">Author class</th><th scope="col">Stance counts</th><th scope="col">Basis</th></tr></thead>
+      <caption class="visually-hidden">Sentiment counts per theme, split by who is speaking. Never blended into one figure across audiences.</caption>
+      <thead><tr>
+        <th scope="col">Theme</th>
+        <th scope="col">Who is speaking</th>
+        <th scope="col">How they read</th>
+      </tr></thead>
       <tbody>
-        {% for sr in stance_rows %}
-          {% if sr.by_class %}
-            {% for cls, counts in sr.by_class %}
+        {% for row in sentiment_rows %}
+          {% if row.by_class %}
+            {% for c in row.by_class %}
             <tr>
-              {% if loop.first %}<th scope="rowgroup" class="cell-title" rowspan="{{ sr.by_class|length }}">{{ sr.name }}</th>{% endif %}
-              <td>{{ class_label(cls) }}</td>
-              <td class="cell-sub">{% for stance, n in counts.items() %}{{ stance_label(stance) }} {{ n }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
-              {% if loop.first %}<td class="cell-sub" rowspan="{{ sr.by_class|length }}">{{ sr.basis }}</td>{% endif %}
+              {% if loop.first %}<th scope="rowgroup" class="cell-title" rowspan="{{ row.by_class|length }}">{{ row.name }}</th>{% endif %}
+              <td>{{ c.label }}</td>
+              <td class="cell-sub">{% for s in c.mix.segments %}{% if s.count %}{{ s.label }} {{ s.count_label }}{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}</td>
             </tr>
             {% endfor %}
           {% else %}
           <tr>
-            <th scope="row" class="cell-title">{{ sr.name }}</th>
-            <td colspan="2" class="muted">no mentions could be attributed to a speaker</td>
-            <td class="cell-sub">{{ sr.basis }}</td>
+            <th scope="row" class="cell-title">{{ row.name }}</th>
+            <td colspan="2" class="muted">no mention could be attributed to a speaker</td>
           </tr>
           {% endif %}
         {% endfor %}
       </tbody>
     </table>
     </div>
-    {% else %}
-    <p class="empty-state">No stance data for this snapshot.</p>
+    {% if sentiment_rows[0].basis == "venue" %}
+    <p>Who is speaking is taken from the site each mention came from, not from
+    the author’s own words, so a clinician posting in a patient community is
+    counted with the patients.</p>
     {% endif %}
-  </div>
+    {% endcall %}
+  {% else %}
+  {{ empty("No theme in this sweep has a sentiment reading.",
+           "Sentiment is read per theme, and this sweep produced none.") }}
+  {% endif %}
+{% endcall %}
 
-  <div class="tab-panel panel-entities">
-    {% if entity_rows %}
-    <div class="table-scroll" tabindex="0" role="region" aria-label="Entities">
+{# ===================================================== 6. names ======== #}
+{% call card(label_of.get("entities", "Names"), 2, id="entities") %}
+  {% if not entity_rows %}
+  {{ empty("This topic has no brand, molecule or competitor names set, so nothing was looked for.",
+           "Names are set on the topic itself and are matched against every mention in every sweep of it.") }}
+  {% elif entity_total == 0 %}
+  {# Looked for and not found is a finding. It is not the same as never
+     looking, and it must not render as an empty bar chart. #}
+  {{ empty("None of the " ~ entity_rows|length ~ " names set on this topic was matched in this sweep.",
+           "Every mention collected talks about the subject without naming a brand or a molecule.") }}
+  {% else %}
+  <p class="card-lead"><strong>{{ entity_bars[0].label }}</strong> is the most-named of the
+  {{ entity_rows|length }} names set on this topic.</p>
+  {{ bar_list(entity_bars,
+              summary=entity_bars[0].label ~ " is named in " ~ entity_bars[0].value_label ~ " of " ~ entity_total ~ " matched mentions.",
+              data_label="Names by mentions") }}
+  {% endif %}
+  {% if entity_rows %}
+  <p class="t-meta">{{ unmapped_count }} {{ "mention" if unmapped_count == 1 else "mentions" }} matched none of these names.</p>
+    {% call read_more("Every name and the spellings it was matched on (" ~ entity_rows|length ~ ")") %}
+    {{ table_scroll_open("Names, roles and spellings") }}
     <table class="data-table">
-      <caption class="visually-hidden">Brand, molecule and competitor names resolved in this snapshot.</caption>
-      <thead><tr><th scope="col">Entity</th><th scope="col">Role</th><th scope="col">Aliases</th><th scope="col" class="num">Signals mentioning it</th></tr></thead>
+      <caption class="visually-hidden">Brand, molecule and competitor names set on this topic, with the spellings each one was matched on.</caption>
+      <thead><tr>
+        <th scope="col">Name</th>
+        <th scope="col">Role</th>
+        <th scope="col">Also matched on</th>
+        <th scope="col" class="num">Mentions</th>
+      </tr></thead>
       <tbody>
         {% for e in entity_rows %}
         <tr>
           <th scope="row" class="cell-title">{{ e.canonical }}</th>
           <td>{{ e.role }}</td>
-          <td class="cell-sub">{{ e.aliases|join(", ") }}</td>
+          <td class="cell-sub">{{ e.aliases|join(", ") if e.aliases else "no other spelling" }}</td>
           <td class="num">{{ e.signal_count }}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
     </div>
-    {% else %}
-    <p class="empty-state">No entities to resolve — the topic has no brand, molecule or competitor names set.</p>
-    {% endif %}
-    <p class="cell-sub">{{ unmapped_count }} signal(s) matched none of these entities.</p>
-  </div>
-</div>
+    {% endcall %}
+  {% endif %}
+{% endcall %}
 
-<h2>Deliverables</h2>
-<p class="body-text field-note">The findings above, as the artifacts they land in — the analysis group is real; the report becomes real once you generate it.</p>
 {{ deliverable_downloads(deliv_tiers) }}
 </div>
 {% endblock %}

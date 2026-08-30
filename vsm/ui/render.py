@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import math
 import re
+from datetime import date as _date
 from html import escape
 from typing import Any, Mapping, Sequence
 
@@ -34,11 +35,26 @@ __all__ = [
     "net_stance_text",
     "fmt_dt",
     "fmt_date_long",
+    "fmt_date_short",
+    "iso_attr",
     "markdown_to_html",
     "markdown_inline_html",
     "markdown_sections",
     "markdown_paragraphs",
     "markdown_excerpt_html",
+    # The figure geometry the macros in _macros.html draw from. See
+    # docs/design/COMPONENTS.md for the contract each of these publishes.
+    "bar_rows",
+    "series_points",
+    "gap_chart",
+    "sentiment_mix",
+    "coverage_grid",
+    "meter",
+    "POLYLINE_MIN",
+    "PROPORTION_MIN_N",
+    "PERCENT_MIN_N",
+    "SENTIMENT_ORDER",
+    "COVERAGE_STATES",
 ]
 
 # Vi's palette (see ds/colors_and_type.css): black rules and structure, Vi
@@ -142,12 +158,52 @@ def sweep_size(value: str | None) -> str:
 
 
 def fmt_dt(value: str | None) -> str:
-    """A dated frame's label. Never guesses a format that doesn't parse."""
+    """A capture time's label, carrying its zone: `2026-08-25 14:03 UTC`.
+
+    The zone is not decoration. This app's whole commercial claim is that a
+    figure traces to a dated row, and a bare `14:03` cannot be resolved to an
+    actual instant by anyone reading it — which was the state of every one of
+    the five tool screens where "when was this collected" is the load-bearing
+    question. The stamp is appended only when the source string actually
+    carries one, because inventing a zone would be worse than omitting it.
+
+    Slice rather than parse-and-reformat: a malformed string still shows
+    *something* instead of 500ing a whole page over one bad timestamp.
+    Templates pair this with :func:`iso_attr` in a `<time datetime="...">` so
+    the machine-readable original stays on the page.
+    """
     if not value:
         return "undated"
-    # Signals and runs both stamp ISO-8601. Slice rather than parse-and-
-    # reformat: a malformed string still shows *something* instead of 500ing.
-    return value[:16].replace("T", " ")
+    head = str(value)[:16].replace("T", " ")
+    tail = str(value)[16:]
+    if tail.endswith("Z") or "+00:00" in tail or "-00:00" in tail:
+        return f"{head} UTC"
+    # A non-UTC offset is reported verbatim rather than named: naming a zone
+    # from an offset alone is a guess (−05:00 is two different zones).
+    if len(tail) >= 6 and tail[-6] in "+-":
+        return f"{head} UTC{tail[-6:]}"
+    return head
+
+
+def iso_attr(value: str | None) -> str:
+    """The machine-readable original, for a `<time datetime="...">` attribute.
+
+    Returns `""` when there is nothing to stamp, so a template can write
+    `<time datetime="{{ x|iso }}">` unconditionally: an empty `datetime` is
+    ignored by parsers, whereas a `<time>` carrying a human label and no
+    attribute silently claims to be machine-readable and is not.
+    """
+    return "" if not value else str(value)
+
+
+def fmt_date_short(value: str | None) -> str:
+    """`19 Aug` — a sweep's name on screen, where the year is noise.
+
+    Never used anywhere that can reach paper: ux-guidelines row 85 forbids an
+    ambiguous date, and "19 Aug" on a printed page a client opens in February
+    is exactly that. Use :func:`fmt_date_long` there.
+    """
+    return _short_date(value)
 
 
 _MONTHS = (
@@ -992,3 +1048,665 @@ def markdown_excerpt_html(text: str | None, *, limit: int = 260, min_len: int = 
         head = joined[:limit].rsplit(" ", 1)[0]
         joined = (head or joined[:limit]) + "…"
     return markdown_to_html(joined)
+
+
+# ==========================================================================
+# Figure geometry: numbers in, positions out.
+# ==========================================================================
+#
+# Everything below is pure arithmetic over values `vsm.analysis` already
+# computed. None of it emits markup — the macros in `_macros.html` do that —
+# and none of it derives a new fact. The split exists for two reasons.
+#
+# 1. **StrictUndefined.** A template that reaches for `row.pct` on a row that
+#    happens to lack it is a 500, not a blank. Every function here returns the
+#    *same keys on every path*, so a macro can address any field of any row
+#    without a guard, and a screen author cannot be caught out by a shape that
+#    only appears when the data is unusual. Uniform shapes, guarded once here,
+#    rather than a guard at each of ~40 call sites.
+# 2. **Testability.** Placing a dot on an axis is arithmetic and belongs where
+#    arithmetic can be asserted, not inside a Jinja expression.
+#
+# The encodings themselves are the conventional ones (see
+# `docs/design/COMPONENTS.md`); the thresholds below are the ones the
+# accessibility rulebook fixed, and each is named at its constant.
+
+#: Below this many sweeps a polyline is a chart of nothing: two points always
+#: make a straight line and three make a shape the eye over-reads. charts.csv
+#: row 1 ("Trend Over Time") lists "fewer than 4 data points" under *When NOT
+#: to Use* and sends that case to a stat card instead. So 1 point is a dot, 2
+#: are two dots against a rule, 3 are three dots, and only 4+ get a line.
+POLYLINE_MIN = 4
+
+#: Below this many mentions a proportional bar is noise dressed as a
+#: measurement — a "67% negative" derived from three rows is a false
+#: statement. Under it the raw counts are printed instead.
+PROPORTION_MIN_N = 5
+
+#: And percentages are only printed at all from here up (UX-PLAN §5). Between
+#: PROPORTION_MIN_N and this the bar is drawn — the *shape* of a mix is real
+#: at n=8 — but it is labelled in counts, because "38%" of eight is not.
+PERCENT_MIN_N = 20
+
+#: The five sentiment values, in the one order every row uses. A fixed order is
+#: what makes two rows comparable at a glance. "Couldn't tell" is last and is
+#: drawn unfilled, so it can never be misread as an opinion.
+SENTIMENT_ORDER: tuple[tuple[str, str], ...] = (
+    ("positive", "Positive"),
+    ("mixed", "Mixed"),
+    ("neutral", "Neutral"),
+    ("negative", "Negative"),
+    ("unclear", "Couldn’t tell"),
+)
+
+#: The four things that can be true of a site in a sweep, in reading order.
+#: Four *nominal* states, not an ordered ramp: "blocked us" is not more of
+#: anything than "returned nothing", so charts.csv row 5's sequential colour
+#: guidance is deliberately not applied (see COMPONENTS.md).
+COVERAGE_STATES: tuple[tuple[str, str], ...] = (
+    ("collected", "Returned rows"),
+    ("empty", "Returned nothing"),
+    ("blocked", "Blocked us"),
+    ("not_tried", "Not tried"),
+)
+
+
+def _num(value: Any) -> float | None:
+    """A number, or ``None`` — never a crash and never a silent zero.
+
+    A zero and an absent value are different facts everywhere in this product,
+    so a value that cannot be read as a number comes back as ``None`` and the
+    caller renders the word, not the numeral.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if math.isnan(out) or math.isinf(out) else out
+
+
+def _count_label(value: float | None) -> str:
+    """A count with thousands separators, or the *word* for its absence.
+
+    ux-guidelines row 86 asks for grouped thousands; this codebase's own rule
+    asks that a null be a word and a zero a numeral. Both are settled here so
+    no template has to remember either.
+    """
+    if value is None:
+        return "not counted"
+    if float(value).is_integer():
+        return f"{int(value):,}"
+    return f"{value:,.2f}"
+
+
+def _pct_of(part: float, whole: float) -> float:
+    return 0.0 if whole <= 0 else round(100.0 * part / whole, 2)
+
+
+def _plural(n: int, word: str, plural: str | None = None) -> str:
+    return word if n == 1 else (plural or word + "s")
+
+
+def _iso_day(value: Any) -> int | None:
+    """An ISO date's day number, for spacing a series by real elapsed time.
+
+    Returns ``None`` rather than raising on anything unparsable: a malformed
+    stamp should cost the *spacing*, not the whole figure, and the caller
+    falls back to even spacing and says so.
+    """
+    head = str(value or "")[:10]
+    parts = head.split("-")
+    if len(parts) != 3 or not all(p.isdigit() for p in parts):
+        return None
+    try:
+        return _date(int(parts[0]), int(parts[1]), int(parts[2])).toordinal()
+    except ValueError:
+        return None
+
+
+def _short_date(value: Any) -> str:
+    """`19 Aug` — the name of a sweep on screen.
+
+    Deliberately without the year, because on screen the sweep axis carries
+    only weeks and the year is noise. Anything that can reach paper uses
+    :func:`fmt_date_long` instead, per ux-guidelines row 85: "19 Aug" on a
+    page a client reads six months later is ambiguous.
+    """
+    head = str(value or "")[:10]
+    parts = head.split("-")
+    if len(parts) != 3 or not all(p.isdigit() for p in parts):
+        return head or "undated"
+    month = int(parts[1])
+    if not 1 <= month <= 12:
+        return head
+    return f"{int(parts[2])} {_MONTHS[month - 1][:3]}"
+
+
+# -------------------------------------------------------------- bar list --
+
+def bar_rows(
+    rows: Any,
+    *,
+    sort: bool = True,
+    limit: int | None = None,
+    unit: str = "mentions",
+) -> list[dict[str, Any]]:
+    """A ranked horizontal bar list: the shape for 3-15 named categories.
+
+    charts.csv row 2 (*Compare Categories*) is unambiguous here — "always sort
+    descending by value", never a pie — and quick-reference §10's
+    `axis-readability` forbids rotated or truncated labels, which is what
+    rules out the vertical bar its own threshold line would otherwise pick:
+    theme names are long free text.
+
+    Accepts either mappings (``label``, ``value``, and optionally ``href``,
+    ``note``, ``emphasis``) or ``(label, value)`` pairs, and always returns the
+    full key set:
+
+    ``label`` ``value`` ``value_label`` ``pct`` ``share_pct`` ``href`` ``note``
+    ``emphasis`` ``rank``
+
+    ``pct`` is the bar's length — a share of the *largest* row, which is what
+    makes a ranked list readable. ``share_pct`` is the share of the total, for
+    a caller that wants to say "38% of everything collected"; the two are
+    different questions and conflating them is a common defect.
+    """
+    items: list[dict[str, Any]] = []
+    for raw in rows or ():
+        if isinstance(raw, Mapping):
+            label = str(raw.get("label", ""))
+            value = _num(raw.get("value")) or 0.0
+            href = str(raw.get("href") or "")
+            note = str(raw.get("note") or "")
+            emphasis = bool(raw.get("emphasis"))
+        else:
+            pair = list(raw)
+            label = str(pair[0]) if pair else ""
+            value = (_num(pair[1]) if len(pair) > 1 else 0.0) or 0.0
+            href, note, emphasis = "", "", False
+        items.append({
+            "label": label, "value": value, "href": href,
+            "note": note, "emphasis": emphasis,
+        })
+    if sort:
+        items.sort(key=lambda r: (-r["value"], r["label"].lower()))
+    if limit is not None:
+        items = items[:limit]
+    top = max((r["value"] for r in items), default=0.0)
+    total = sum(r["value"] for r in items)
+    for i, r in enumerate(items, start=1):
+        r["rank"] = i
+        r["pct"] = _pct_of(r["value"], top)
+        r["share_pct"] = _pct_of(r["value"], total)
+        r["value_label"] = _count_label(r["value"])
+        r["unit"] = unit
+    return items
+
+
+# ------------------------------------------------------------- series ----
+
+def series_points(
+    points: Any,
+    *,
+    width: int = 150,
+    height: int = 38,
+    pad: int = 6,
+    polyline_min: int = POLYLINE_MIN,
+    unit: str = "mentions",
+) -> dict[str, Any]:
+    """A sweep series, spaced by the dates it actually happened on.
+
+    Even spacing would misstate cadence: a topic swept on the 1st, the 8th and
+    then not again until the 29th has a three-week hole in it, and that hole is
+    information. So x is the real elapsed day count and a missed week reads as
+    a gap.
+
+    ``shape`` names what the caller must draw, and is the whole point of this
+    function:
+
+    ``empty``  nothing collected — the caller renders a named empty state
+    ``dot``    one sweep: one dot carrying its own value. Not a trend
+    ``pair``   two sweeps: two dots against a rule, never a connecting slope
+    ``dots``   three sweeps: three dots, still no line
+    ``line``   four or more: a polyline with every dot visible
+
+    Input items are mappings with ``date`` and ``value``, optionally ``href``
+    and ``label``. Anything whose date will not parse drops the whole series to
+    index spacing and says so in ``spacing``.
+    """
+    parsed: list[dict[str, Any]] = []
+    for raw in points or ():
+        if isinstance(raw, Mapping):
+            date = raw.get("date")
+            value = _num(raw.get("value"))
+            href = str(raw.get("href") or "")
+        else:
+            pair = list(raw)
+            date = pair[0] if pair else None
+            value = _num(pair[1]) if len(pair) > 1 else None
+            href = ""
+        parsed.append({
+            "date": str(date or ""), "value": value or 0.0,
+            "href": href, "day": _iso_day(date),
+        })
+
+    n = len(parsed)
+    lo = min((p["value"] for p in parsed), default=0.0)
+    hi = max((p["value"] for p in parsed), default=0.0)
+    shape = (
+        "empty" if n == 0 else
+        "dot" if n == 1 else
+        "pair" if n == 2 else
+        "line" if n >= polyline_min else
+        "dots"
+    )
+    baseline_y = float(height - pad)
+    inner_w = float(width - 2 * pad)
+    inner_h = float(height - 2 * pad)
+
+    days = [p["day"] for p in parsed]
+    # Three different reasons a series can end up evenly spaced, and only one
+    # of them is a fallback worth confessing to the reader: a date that would
+    # not parse. Two sweeps on the same day, or a single sweep, raise no
+    # spacing question at all — reporting those as "a date could not be read"
+    # was a false alarm on the commonest state this app has.
+    date_failed = any(d is None for d in days)
+    even = date_failed or (n > 1 and days[0] == days[-1])
+    span_days = 0 if even or n < 2 else (days[-1] - days[0])
+    if span_days <= 0:
+        even = True
+
+    span_value = (hi - lo) or 1.0
+    out_points: list[dict[str, Any]] = []
+    for i, p in enumerate(parsed):
+        if n == 1:
+            x = pad + inner_w / 2
+        elif even:
+            x = pad + inner_w * i / (n - 1)
+        else:
+            x = pad + inner_w * (p["day"] - days[0]) / span_days
+        y = baseline_y - ((p["value"] - lo) / span_value) * inner_h
+        out_points.append({
+            "x": round(x, 2), "y": round(y, 2),
+            "value": p["value"], "value_label": _count_label(p["value"]),
+            "date": p["date"], "date_label": _short_date(p["date"]),
+            "date_long": fmt_date_long(p["date"]),
+            "href": p["href"], "is_last": i == n - 1, "index": i,
+        })
+
+    if shape == "empty":
+        summary = f"No sweep has collected any {unit} yet."
+    elif shape == "dot":
+        one = out_points[0]
+        summary = f"{one['value_label']} {unit} on {one['date_label']} — one sweep, so no trend yet."
+    else:
+        summary = (
+            f"{n} sweeps, {_count_label(lo)} to {_count_label(hi)} {unit}; "
+            f"{out_points[-1]['value_label']} on {out_points[-1]['date_label']}."
+        )
+
+    return {
+        "shape": shape,
+        "count": n,
+        "width": width, "height": height, "pad": pad,
+        "baseline_y": baseline_y,
+        "points": out_points,
+        "polyline": " ".join(f"{p['x']},{p['y']}" for p in out_points) if shape == "line" else "",
+        "lo": lo, "hi": hi,
+        "lo_label": _count_label(lo), "hi_label": _count_label(hi),
+        "first_label": out_points[0]["date_label"] if out_points else "",
+        "last_label": out_points[-1]["date_label"] if out_points else "",
+        "latest": out_points[-1] if out_points else None,
+        "spacing": (
+            "index" if date_failed
+            else "date" if not even
+            else "even"
+        ),
+        "unit": unit,
+        "summary": summary,
+    }
+
+
+# ----------------------------------------------------------- the gap -----
+
+#: What to say when only one audience raised a theme. Never a status token and
+#: never a zero: UX-PLAN §7.2 calls this the system's highest-risk null,
+#: because a gap of zero and "nobody on that side said anything" look
+#: identical and mean opposite things.
+_ONLY_ONE_SIDE = {
+    "clinicians": "Only clinicians discussed this",
+    "patients": "Only patients discussed this",
+    "neither": "Neither audience discussed this",
+}
+
+
+def gap_chart(rows: Any, *, domain: float = 1.0) -> dict[str, Any]:
+    """Clinician tone against patient tone, on one shared −1…+1 axis.
+
+    A dumbbell, because the connector's *length is the gap* — the most direct
+    encoding of divergence there is, and it degrades honestly: when one
+    audience did not speak there is one dot and no connector, so the row
+    cannot be misread as agreement. charts.csv row 14 excludes a radar chart
+    from exactly this case twice over ("values need precise comparison",
+    "audience unfamiliar with radar"), and the recipient here is a commercial
+    lead reading a printed page.
+
+    Themes only one side raised are returned in ``single``, separately, so they
+    can never be visually averaged into the comparison (UX-PLAN §7.2).
+
+    Every row carries the same keys whichever list it lands in.
+    """
+    comparable: list[dict[str, Any]] = []
+    single: list[dict[str, Any]] = []
+
+    for raw in rows or ():
+        if not isinstance(raw, Mapping):
+            continue
+        hcp = _num(raw.get("hcp_net"))
+        patient = _num(raw.get("patient_net"))
+        gap = _num(raw.get("divergence"))
+        if gap is None and hcp is not None and patient is not None:
+            gap = patient - hcp
+        if hcp is not None and patient is not None:
+            present = "both"
+        elif hcp is not None:
+            present = "clinicians"
+        elif patient is not None:
+            present = "patients"
+        else:
+            present = "neither"
+
+        def _pct(v: float | None) -> float | None:
+            if v is None:
+                return None
+            clamped = max(-domain, min(domain, v))
+            return round((clamped + domain) / (2 * domain) * 100.0, 2)
+
+        hcp_pct, patient_pct = _pct(hcp), _pct(patient)
+        lo_pct = min(x for x in (hcp_pct, patient_pct) if x is not None) if present != "neither" else 50.0
+        hi_pct = max(x for x in (hcp_pct, patient_pct) if x is not None) if present != "neither" else 50.0
+        volume = int(_num(raw.get("volume")) or 0)
+        sources = _num(raw.get("independent_sources"))
+        comparable_row = present == "both" and gap is not None
+
+        row = {
+            "name": str(raw.get("name") or raw.get("theme_name") or ""),
+            "volume": volume,
+            "volume_label": _count_label(volume),
+            "sources": None if sources is None else int(sources),
+            "hcp": hcp, "patient": patient,
+            "hcp_label": net_stance_short(hcp, "hcp"),
+            "patient_label": net_stance_short(patient, "patient"),
+            "hcp_pct": hcp_pct, "patient_pct": patient_pct,
+            "gap": gap,
+            "gap_label": "no comparison" if not comparable_row else f"{gap:+.2f}",
+            "comparable": comparable_row,
+            "present": present,
+            "missing_label": "" if comparable_row else _ONLY_ONE_SIDE[present if present != "both" else "neither"],
+            "reason": str(raw.get("reason") or ""),
+            "left_pct": lo_pct,
+            "width_pct": round(hi_pct - lo_pct, 2),
+            "dot_pct": hcp_pct if hcp_pct is not None else (patient_pct if patient_pct is not None else 50.0),
+            "tier": str(raw.get("tier") or ""),
+        }
+        row["summary"] = (
+            f"{row['name']}: clinicians {row['hcp_label']}, patients "
+            f"{row['patient_label']}, gap {row['gap_label']}."
+            if comparable_row else
+            f"{row['name']}: {row['missing_label'].lower()}, so there is no gap to measure."
+        )
+        (comparable if comparable_row else single).append(row)
+
+    comparable.sort(key=lambda r: (-abs(r["gap"] or 0.0), r["name"].lower()))
+    single.sort(key=lambda r: (-r["volume"], r["name"].lower()))
+    widest = comparable[0] if comparable else None
+
+    if widest is not None:
+        summary = (
+            f"Clinicians and patients read {widest['name']} most differently — "
+            f"a gap of {widest['gap_label']} across {len(comparable)} comparable "
+            f"{_plural(len(comparable), 'theme')}."
+        )
+    elif single:
+        summary = (
+            f"No theme can be compared: all {len(single)} were raised by one "
+            "audience only, which is not agreement."
+        )
+    else:
+        summary = "No theme has a tone reading for either audience yet."
+
+    return {
+        "rows": comparable,
+        "single": single,
+        "widest": widest,
+        "count_comparable": len(comparable),
+        "count_single": len(single),
+        "total": len(comparable) + len(single),
+        "domain": domain,
+        "axis_low": "Patients more negative",
+        "axis_mid": "No gap",
+        "axis_high": "Clinicians more negative",
+        "summary": summary,
+    }
+
+
+# --------------------------------------------------------- sentiment -----
+
+def sentiment_mix(
+    counts: Any,
+    *,
+    min_n: int = PROPORTION_MIN_N,
+    percent_min_n: int = PERCENT_MIN_N,
+) -> dict[str, Any]:
+    """The five-way sentiment mix as a 100% stacked bar — or, below n=5, not.
+
+    charts.csv row 3 rules out a pie or donut here on two counts at once
+    ("accessibility-first context", "user needs precise values"); row 19 rules
+    out a waffle in a per-theme row and names the escape itself — "for > 5
+    categories switch to stacked 100% bar". At exactly five the stacked bar is
+    the only shape that survives both.
+
+    Two thresholds, and they are different questions. Under ``min_n`` the bar
+    is not drawn at all, because a proportion of three rows is noise dressed as
+    a measurement. Under ``percent_min_n`` the bar *is* drawn — the shape of a
+    mix is real at n=8 — but it is labelled in counts, because "38%" of eight
+    claims a precision the sample does not have.
+
+    ``counts`` is a mapping of the internal stance keys to integers; anything
+    missing is a zero, which is the one place in this codebase where that is
+    the honest reading (nobody said it).
+    """
+    src = counts if isinstance(counts, Mapping) else {}
+    segments: list[dict[str, Any]] = []
+    total = 0
+    for key, label in SENTIMENT_ORDER:
+        value = int(_num(src.get(key)) or 0)
+        total += value
+        segments.append({"key": key, "label": label, "count": value})
+
+    show_pct = total >= percent_min_n
+    for seg in segments:
+        seg["pct"] = _pct_of(seg["count"], total)
+        seg["unfilled"] = seg["key"] == "unclear"
+        seg["count_label"] = _count_label(seg["count"])
+        # Whole percent, never a decimal: a tenth of a percentage point on a
+        # sample of twenty-something is precision the sample cannot support,
+        # and it is the difference between a figure a reader believes and one
+        # they do not.
+        seg["pct_label"] = f"{round(seg['pct'])}%"
+        seg["value_label"] = seg["pct_label"] if show_pct else _count_label(seg["count"])
+
+    read = [s for s in segments if s["key"] != "unclear"]
+    top = max(read, key=lambda s: s["count"], default=None)
+    if total == 0:
+        summary = "No mention in this group could be read for sentiment."
+    elif top is None or top["count"] == 0:
+        summary = f"None of the {total} {_plural(total, 'mention')} could be read either way."
+    elif show_pct:
+        summary = (
+            f"{top['label']} leads at {round(top['pct'])}% of {total} "
+            f"{_plural(total, 'mention')}."
+        )
+    else:
+        summary = (
+            f"{top['label']} leads — {top['count']} of {total} "
+            f"{_plural(total, 'mention')}."
+        )
+
+    return {
+        "segments": segments,
+        "n": total,
+        "n_label": _count_label(total),
+        "proportional": total >= min_n,
+        "show_pct": show_pct,
+        "min_n": min_n,
+        "too_few_note": (
+            f"{total} {_plural(total, 'mention')} — too few to draw as a "
+            f"proportion, so the counts are printed instead."
+        ),
+        "summary": summary,
+    }
+
+
+# ---------------------------------------------------------- coverage -----
+
+def coverage_grid(coverage: Any, *, known: Any = None) -> dict[str, Any]:
+    """One cell per site: what each of ~40 sites actually did in this sweep.
+
+    Four *nominal* states, so this is a categorical unit grid and not the
+    sequential heat map charts.csv row 5 would otherwise suggest — "returned
+    nothing" is not less of anything than "blocked us", and a blue-to-red ramp
+    would imply an order that does not exist. Row 5's required fallback, a grid
+    data table plus an intensity summary, still binds and the macro renders it.
+
+    Three of the four states are also *named* below the strip, per UX-PLAN
+    §7.5: a site that returned nothing, a site that refused us and a site
+    nobody asked are three different facts and a shared silence hides two of
+    them.
+    """
+    src = coverage if isinstance(coverage, Mapping) else {}
+
+    def _list(key: str) -> list[str]:
+        raw = src.get(key)
+        return [str(v) for v in raw] if isinstance(raw, (list, tuple)) else []
+
+    collected = _list("venues_collected")
+    empty = _list("venues_empty")
+    blocked = _list("venues_restricted")
+    attempted = _list("venues_attempted")
+    registry = [str(v) for v in known] if isinstance(known, (list, tuple)) else []
+
+    seen = {*collected, *empty, *blocked, *attempted}
+    not_tried = sorted(set(registry) - seen)
+
+    by_state = {
+        "collected": sorted(set(collected)),
+        "empty": sorted(set(empty) - set(collected)),
+        "blocked": sorted(set(blocked) - set(collected) - set(empty)),
+        "not_tried": not_tried,
+    }
+
+    labels = dict(COVERAGE_STATES)
+    cells: list[dict[str, Any]] = []
+    states: list[dict[str, Any]] = []
+    for key, label in COVERAGE_STATES:
+        sites = by_state[key]
+        states.append({
+            "key": key, "label": label, "count": len(sites), "sites": sites,
+            # The sites themselves, and the state as one countable phrase —
+            # the second is what a screen-reader description joins on, so it
+            # is built here rather than assembled inside a Jinja loop that
+            # cannot tell which items it actually emitted.
+            "named": ", ".join(sites),
+            "named_count": f"{len(sites)} {label.lower()}",
+        })
+        for site in sites:
+            cells.append({"site": site, "state": key, "state_label": label})
+
+    total = len(cells)
+    got = len(by_state["collected"])
+    if total == 0:
+        summary = "No site has been swept yet."
+    else:
+        summary = (
+            f"{got} of {total} {_plural(total, 'site')} returned rows"
+            + (f"; {len(by_state['empty'])} returned nothing" if by_state["empty"] else "")
+            + (f"; {len(by_state['blocked'])} blocked us" if by_state["blocked"] else "")
+            + "."
+        )
+
+    return {
+        "cells": cells,
+        "states": states,
+        "counts": {s["key"]: s["count"] for s in states},
+        "labels": labels,
+        "total": total,
+        "has_data": total > 0,
+        "summary": summary,
+    }
+
+
+# ------------------------------------------------------------- meter -----
+
+def meter(
+    spent: Any,
+    estimate: Any = None,
+    cap: Any = None,
+    *,
+    stopped: bool = False,
+    decimals: int = 2,
+) -> dict[str, Any]:
+    """Spend against a cap, as one bullet: fill spent, tick estimate, rule cap.
+
+    charts.csv row 8 (*Performance vs Target*) allows exactly one metric per
+    meter and requires "the number and target text beside the gauge" — this
+    palette is monochrome, so the numbers are not a nicety, they are the only
+    precise channel. "Stopped at the cap" becomes a *shape* (the fill
+    terminating in a stop bar) rather than a status word, which is the cloud
+    console convention and is what stops a successful partial from reading as
+    a failure.
+    """
+    spent_v = _num(spent)
+    est_v = _num(estimate)
+    cap_v = _num(cap)
+    scale = max([v for v in (spent_v, est_v, cap_v) if v is not None] or [0.0]) or 1.0
+
+    over = bool(spent_v is not None and cap_v is not None and spent_v > cap_v + 1e-9)
+    if stopped:
+        state = "stopped"
+    elif over:
+        state = "over"
+    else:
+        state = "within"
+
+    # A null is a word and a zero is a numeral — this codebase's one
+    # non-negotiable rule. `usd(None)` gives an em dash, which reads as "not
+    # applicable" when the fact is "we do not know what this cost".
+    spent_label = "not recorded" if spent_v is None else usd(spent_v, decimals)
+    parts = [f"Spent {spent_label}"]
+    if est_v is not None:
+        parts.append(f"estimated {usd(est_v, decimals)}")
+    if cap_v is not None:
+        parts.append(f"cap {usd(cap_v, decimals)}")
+    summary = " · ".join(parts) + (
+        " — stopped at the cap and kept what it collected." if stopped
+        else " — over the cap." if over else "."
+    )
+
+    return {
+        "spent": spent_v, "estimate": est_v, "cap": cap_v,
+        "spent_label": spent_label,
+        "estimate_label": "not estimated" if est_v is None else usd(est_v, decimals),
+        "cap_label": "no cap set" if cap_v is None else usd(cap_v, decimals),
+        "spent_pct": _pct_of(spent_v or 0.0, scale),
+        "estimate_pct": None if est_v is None else _pct_of(est_v, scale),
+        "cap_pct": None if cap_v is None else _pct_of(cap_v, scale),
+        "has_estimate": est_v is not None,
+        "has_cap": cap_v is not None,
+        "stopped": bool(stopped),
+        "over": over,
+        "state": state,
+        "summary": summary,
+    }

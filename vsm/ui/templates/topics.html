@@ -1,107 +1,193 @@
 {% extends "_base.html" %}
+{% from "_macros.html" import page_header, chip, sort_th, sparkline, stamp, delta, mark, info, empty, read_more %}
 {% block title %}Topics — Vi Signal Mine{% endblock %}
 {% block content %}
+{#
+  The watchlist. One question: **which topic do I want, out of many?**
+
+  So this stays a table — the task is lookup, and UX-PLAN §4's "a table is
+  correct when the task is lookup" is the clause that governs here. What
+  changed is what the cells hold. Every row used to be six digits; each one now
+  carries the *shape* of the thing it names: a date-spaced sparkline of what
+  each sweep collected, a change against a named earlier sweep, and a spend bar
+  on a scale shared by every visible row, so "which of these is eating the
+  budget" is answered by length rather than by reading five money strings and
+  subtracting.
+
+  Three layers, as UX-PLAN §12 requires, differentiated on size, colour,
+  position, enclosure and density (never weight above 500 — the pinned face
+  ships Book and Medium and nothing else):
+
+    1 answer   the topic name, and the mentions its last sweep collected
+    2 support  the change against a named baseline, the dates, the counts
+    3 depth    how the list is built, behind `read_more`
+
+  Two things were deleted rather than moved, and both are deletions of noise:
+  the page's explainer ("The sparkline is its signal volume across snapshots")
+  described a figure already on the screen, used two banned words, and
+  explained how to read a chart; and the filter help text that lived in a
+  `title` attribute — unreachable by keyboard, invisible on touch, absent in
+  print — is now visible caption text on the one chip it applies to.
+
+  All six sorts now live in the column headers — where every product in this
+  category puts them — each carrying `aria-sort` set server-side from the query
+  string, and the date column reversing on a second visit. That replaces a
+  second row of chips whose six labels repeated the column headings a few
+  centimetres below them.
+#}
 <div class="page page-wide">
-<section class="page-head">
-  <div>
-    <p class="eyebrow">Watched over time</p>
-    <h1>Topics</h1>
-  </div>
-  {% if storage_is_durable() %}
+
+{% call page_header("Topics", tip="sweep") %}
+  {% if total > 0 and storage_is_durable() %}
   <a class="btn btn-primary" href="/topics/new">New topic</a>
+  {% elif total > 0 %}
+  {# §7.7: a write control that cannot work says why, in the slot it would
+     have occupied. A button that refuses is worse than an absent one. #}
+  <p class="storage-notice">{{ read_only_control_note }}</p>
   {% endif %}
-</section>
-<p class="page-caption">{{ explainer('topics') }}</p>
-{% if not storage_is_durable() %}
-<p class="storage-notice">{{ read_only_control_note }}</p>
-{% endif %}
+{% endcall %}
 
 {% if total > 0 %}
 <form class="list-tools" method="get" action="/topics" role="search">
   <div class="list-tools-search">
     <label for="q" class="visually-hidden">Search topics</label>
-    <input id="q" type="search" name="q" value="{{ q }}" placeholder="Search name, brand, molecule, area">
+    {# `autocomplete` and `spellcheck` off: nothing here is an address or a
+       credential, and every molecule name in the store draws a red squiggle. #}
+    <input id="q" type="search" name="q" value="{{ q }}" autocomplete="off"
+           spellcheck="false" placeholder="Search name, brand, molecule, area…">
+    {# The sort and the filter ride along, so searching no longer silently
+       throws away the view the reader had set up. #}
+    <input type="hidden" name="sort" value="{{ sort }}">
+    <input type="hidden" name="show" value="{{ show }}">
     <button class="btn btn-ghost btn-sm" type="submit">Search</button>
     {% if q or show != 'all' or sort != 'recent' %}
     <a class="link-back" href="/topics">Clear</a>
     {% endif %}
   </div>
   <div class="list-tools-row">
-    <span class="list-tools-label" id="sort-label">Sort</span>
-    <div class="chip-row" role="group" aria-labelledby="sort-label">
-      {% for key, label in sorts %}
-      <a class="chip {% if sort == key %}chip-on{% endif %}"
-         {% if sort == key %}aria-current="true"{% endif %}
-         href="/topics?q={{ q|urlencode }}&amp;show={{ show }}&amp;sort={{ key }}">{{ label }}</a>
-      {% endfor %}
-    </div>
-  </div>
-  <div class="list-tools-row">
     <span class="list-tools-label" id="show-label">Show</span>
     <div class="chip-row" role="group" aria-labelledby="show-label">
-      {% for key, label in filters %}
-      <a class="chip {% if show == key %}chip-on{% endif %}"
-         {% if show == key %}aria-current="true"{% endif %}
-         title="{{ filter_help[key] }}"
-         href="/topics?q={{ q|urlencode }}&amp;sort={{ sort }}&amp;show={{ key }}">{{ label }}</a>
+      {% for f in filter_chips %}
+      {# The note renders on the selected chip only, and not on the default
+         view: what the reader is looking at earns an explanation, four
+         competing ones do not, and "Everything in the store" under a chip
+         labelled "All topics" is the same fact in a second voice. #}
+      {{ chip(f.label, f.href, f.on, f.note if (f.on and f.key != 'all') else "") }}
       {% endfor %}
     </div>
   </div>
   <p class="list-tools-count">
     {% if matched == total %}{{ total }} topic{{ '' if total == 1 else 's' }}{% else %}{{ matched }} of {{ total }} topics{% endif %}
-    {% if show != 'all' %}<span class="muted">— {{ filter_help[show] }}</span>{% endif %}
   </p>
 </form>
 {% endif %}
 
 {% if rows %}
+{# One scale for the whole spend column. Given its own scale each bar would be
+   full width and the column would compare nothing. #}
+{% set spend_top = rows|map(attribute='spend_to_date')|max %}
 <div class="table-scroll" tabindex="0" role="region" aria-label="Topics">
 <table class="data-table topics-table">
-  <caption class="visually-hidden">Every topic being watched, with its last snapshot, spend to date and signal volume.</caption>
+  <caption class="visually-hidden">Every topic being watched: what its last sweep collected, how that moved, when it was last swept, and what it has cost.</caption>
   <thead>
     <tr>
-      <th scope="col">Topic</th>
-      <th scope="col">Last snapshot</th>
-      <th scope="col" class="num">Snapshots</th>
-      <th scope="col" class="num">Spend to date</th>
-      <th scope="col">Volume</th>
+      {{ sort_th("Topic", "name", sort, sort_base) }}
+      {# Hand-written rather than `sort_th` for one reason: this column carries
+         the definition of the thing it counts, and the (i) has to sit beside
+         its own label. Rendered once, in the head, never per row — fifty rows
+         of the same popover would be fifty elements sharing one id. #}
+      <th scope="col" aria-sort="{{ 'descending' if sort == 'volume' else 'none' }}">
+        <a class="sort-link {% if sort == 'volume' %}sort-link-on{% endif %}" href="{{ sort_base }}volume">Mentions{% if sort == 'volume' %} <span class="sort-mark" aria-hidden="true">{{ mark("down") }}</span>{% endif %}</a>
+        {{ info("mention") }}
+      </th>
+      {# The one column whose sort reverses on a second visit, which is the
+         convention everywhere and the only way all six sorts stay reachable
+         from the header row. `sort_th` states one key and one direction, so
+         this one is written out. #}
+      {% set date_sort = 'oldest' if sort == 'recent' else 'recent' %}
+      <th scope="col" aria-sort="{{ 'descending' if sort == 'recent' else ('ascending' if sort == 'oldest' else 'none') }}">
+        <a class="sort-link {% if sort in ('recent', 'oldest') %}sort-link-on{% endif %}" href="{{ sort_base }}{{ date_sort }}">Last sweep{% if sort == 'recent' %} <span class="sort-mark" aria-hidden="true">{{ mark("down") }}</span>{% elif sort == 'oldest' %} <span class="sort-mark" aria-hidden="true">{{ mark("up") }}</span>{% endif %}<span class="visually-hidden"> — sort {{ 'oldest' if date_sort == 'oldest' else 'newest' }} first</span></a>
+      </th>
+      {{ sort_th("Sweeps", "activity", sort, sort_base, true) }}
+      {{ sort_th("Spend", "spend", sort, sort_base, true) }}
       <th scope="col"><span class="visually-hidden">Actions</span></th>
     </tr>
   </thead>
   <tbody>
     {% for row in rows %}
+    {% set s = row.volume_series %}
     <tr>
-      <td>
+      {# The row's identity is a row header, not a cell: five columns of
+         numbers name nothing to a screen reader without one. #}
+      <th scope="row">
         <a class="topic-name-link" href="/topics/{{ row.topic.topic_id }}">{{ row.topic.name }}</a>
-        <div class="cell-sub">
-          {% if row.topic.therapeutic_area %}{{ row.topic.therapeutic_area }} — {% endif %}{{ row.topic.spend_band|sweep_size }} sweep
-        </div>
-      </td>
-      <td class="num">
-        {% if row.last_snapshot_run_id is not none %}
-        <a href="/runs/{{ row.last_snapshot_run_id }}/snapshot">{{ row.last_snapshot_at|dt }}</a>
-        {% else %}
-        <span class="muted">no snapshot yet</span>
-        {% endif %}
-      </td>
-      <td class="num">{{ row.snapshot_count }}</td>
-      <td class="num">{{ row.spend_to_date|usd(2) }}</td>
+        <span class="cell-sub">
+          {%- if row.topic.therapeutic_area %}{{ row.topic.therapeutic_area }} · {% endif -%}
+          {%- if row.topic.brand %}{{ row.topic.brand }} · {% endif -%}
+          {{ row.topic.spend_band|sweep_size }} sweep
+        </span>
+      </th>
+
       <td>
-        {% if row.sparkline %}
-        {{ row.sparkline|safe }}
-        <span class="cell-sub">{{ row.latest_volume }} signals now</span>
-        {% elif row.snapshot_count == 1 %}
-        <span class="muted">{{ row.latest_volume }} signals — single snapshot, no trend yet</span>
+        {% if s.shape == "empty" %}
+        {{ sparkline(s) }}
         {% else %}
-        <span class="muted">no snapshots yet</span>
+        {% set now = s.points[-1] %}
+        {#- A series that never moved is stated once, by the caption, as
+            "flat at n". A `+0%` chip beside it would be the same fact in a
+            second voice — and a sign on a zero claims a direction. -#}
+        {% set flat = s.count >= 2 and s.lo == s.hi %}
+        <span class="cell-title">{{ now.value_label }}</span>
+        {% if s.count >= 2 and not flat %}
+        {% set prior = s.points[-2] %}
+        {% if prior.value %}
+        {{ delta(((now.value - prior.value) * 100.0 / prior.value)|round(1), prior.date_label) }}
+        {% else %}
+        {# A percentage against a baseline of zero is not a number. The count
+           is, so the count is what gets shown — with the baseline named, as
+           every delta on this product must be. #}
+        <span class="delta {{ 'delta-up' if now.value > 0 else 'delta-none' }}">{{ mark("up" if now.value > 0 else "flat") }}{{ now.value_label }} new<span class="delta-base"> vs none on {{ prior.date_label }}</span></span>
+        {% endif %}
+        {% endif %}
+        {#- The caption states a value the row does not already print: the
+            range the shape spans. It never explains how to read the shape. -#}
+        {% if s.shape == "dot" %}
+        {{ sparkline(s, "One sweep, so nothing to compare against yet.") }}
+        {% elif flat %}
+        {{ sparkline(s, "Flat at " ~ s.hi_label ~ " mentions in every sweep.") }}
+        {% else %}
+        {{ sparkline(s, s.lo_label ~ " to " ~ s.hi_label ~ " mentions, sweep to sweep.") }}
+        {% endif %}
         {% endif %}
       </td>
+
+      <td>
+        {% if row.last_snapshot_run_id is not none %}
+        {# The year is carried: this page prints, and "19 Aug" on a page a
+           client opens in February names no particular day. #}
+        <a href="/runs/{{ row.last_snapshot_run_id }}/snapshot">{{ stamp(row.last_snapshot_at, true) }}</a>
+        {% else %}
+        <span class="muted">never swept</span>
+        {% endif %}
+      </td>
+
+      <td class="num">{{ row.snapshot_count }}</td>
+
       <td class="num">
+        {{ row.spend_to_date|usd(2) }}
+        {% if spend_top %}
+        {#- Length against a shared scale, so the column is comparable. The
+            figure beside it is the precise channel; the track's edge is
+            `--rule-control`, which is the one hairline token that clears 3:1
+            and so may carry a boundary that means something. -#}
+        <span class="bar-track" style="display: block; width: 72px; margin-left: auto" aria-hidden="true"><span class="bar-fill" style="width: {{ (100.0 * row.spend_to_date / spend_top)|round(1) }}%"></span></span>
+        {% endif %}
+      </td>
+
+      <td class="num">
+        <a class="btn btn-ghost btn-sm" href="/topics/{{ row.topic.topic_id }}/confirm">Run a sweep</a>
         {% if storage_is_durable() %}
         <a class="link-back" href="/topics/{{ row.topic.topic_id }}/edit">Edit</a>
-        {% endif %}
-        <a class="btn btn-ghost btn-sm" href="/topics/{{ row.topic.topic_id }}/confirm">Run snapshot</a>
-        {% if storage_is_durable() %}
         <a class="link-danger" href="/topics/{{ row.topic.topic_id }}/delete">Delete</a>
         {% endif %}
       </td>
@@ -118,20 +204,36 @@
 {% elif uncapped and matched > row_cap %}
 <p class="list-cap">Showing all {{ matched }} topics.</p>
 {% endif %}
+
+{# Layer 3. None of this is on the face of the list, and none of it is
+   deleted: it is the material that decides whether a reader trusts the two
+   numbers this screen sorts on. #}
+{% call read_more("How this list is built") %}
+<p>Search matches a topic’s name, brand, generic name, therapeutic area and its
+competitor list. It deliberately does not match the never-say terms or the
+questions, so hunting for a competitor never returns the topics that forbid
+naming it.</p>
+<p>Spend to date counts every run the topic has ever paid for, including the
+analysis and report passes, not only its sweeps — so a topic can carry a cost
+larger than its sweeps alone explain. Mentions are the rows the most recent
+sweep collected. A sweep collects the web as it was on its own date, and
+running it again collects today’s, so an older figure cannot be re-made.</p>
+{% endcall %}
+
 {% elif total > 0 %}
 {# Filtered to nothing. Distinct from the first-run state below: telling
    someone with sixty topics how to create their first one is not help. #}
 <div class="empty-result">
-  <p class="hint-text">Nothing matches this view.</p>
-  <p class="page-caption">{{ filter_lede }}</p>
-  <a class="btn btn-ghost" href="/topics">Show all {{ total }} topics</a>
+  {{ empty("Nothing matches this view.", filter_lede, "/topics", "Show all " ~ total ~ " topics") }}
 </div>
+
 {% else %}
 <div class="first-run">
-  <p class="hint-text">
-    Momentum and anomaly need a topic watched more than once: the first
-    snapshot never draws a trend line, because one point is not a trend.
-  </p>
+  <h2>Nothing is being watched yet</h2>
+  {# The one fact that decides how this tool gets used, and the reason the
+     second sweep matters more than the first. #}
+  <p class="hint-text">The smallest useful thing here is one topic swept twice:
+  a change exists only where a topic has been swept more than once.</p>
   <ol class="first-run-steps">
     {% for title, body in first_run_steps %}
     <li>
@@ -143,6 +245,13 @@
     </li>
     {% endfor %}
   </ol>
+  {% if storage_is_durable() %}
+  {# The screen's one primary action, and on an empty screen it belongs in the
+     empty state rather than in a header beside nothing. #}
+  <a class="btn btn-primary" href="/topics/new">New topic</a>
+  {% else %}
+  <p class="storage-notice">{{ read_only_control_note }}</p>
+  {% endif %}
 </div>
 {% endif %}
 </div>

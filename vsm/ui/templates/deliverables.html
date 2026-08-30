@@ -1,32 +1,60 @@
 {% extends "_base.html" %}
-{% from "_macros.html" import deliverable_tiers %}
+{% from "_macros.html" import page_header, deliverable_tiers, stat %}
 {% block title %}What you get — Vi Signal Mine{% endblock %}
 {% block content %}
-<div class="page page-wide">
-<p class="eyebrow">For the client meeting</p>
-<section class="page-head">
-  <h1>What you get</h1>
-</section>
-<p class="page-caption">{{ explainer('deliverables') }}</p>
-<p class="lede-text">
-  A dated read on what is being said about your brand — every claim carrying
-  the number of independent sources behind it, and every source traceable to
-  the post it came from. Four documents are written to be handed over as they
-  are; six machine-readable files behind them are the evidence for every line.
-</p>
+{#
+  The catalogue: what lands when a run finishes, read before anything is spent.
 
+    layer 1  the counts — four documents, six evidence files — at figure size,
+             derived from the same `tiers` the cards below are built from, so
+             the summary can never disagree with the list
+    layer 2  each tier's lede and each card's promise, at meta weight
+    layer 3  the rendered sample inside each card, which is the shape of the
+             output rather than a description of it
+
+  Three sentences said "four documents plus the evidence behind them" in the
+  first ninety words: the screen explainer, a hand-written page lede, and the
+  tier lede sitting immediately below both. The scorecard states it once, as
+  numbers, and the tier lede — which sits on the thing it describes — keeps
+  the words. The old lede's other claim (every claim carries its sources,
+  every source traces to a post) is not deleted: it is the Provenance appendix
+  card's own headline, one screenful down.
+#}
+<div class="page page-wide">
+
+{#- One primary action. Seeing a real finished report beats any description of
+    one, so that takes the accent whenever this instance has produced a report;
+    otherwise the action is to go and make one. -#}
+{% set meta = ["For the client meeting"] %}
 {% if example is not none %}
-<p class="body-text">
-  <a class="btn btn-primary" href="/runs/{{ example.run_id }}/report">See a finished report</a>
-  <span class="field-note">Produced by this instance, for “{{ example.topic_name }}”.</span>
-</p>
+  {% set meta = meta + ["Example report from “" ~ example.topic_name ~ "”"] %}
+{% else %}
+  {% set meta = meta + ["No report produced on this instance yet"] %}
 {% endif %}
+{% call page_header("What you get", meta=meta) %}
+  {% if example is not none %}
+  <a class="btn btn-primary" href="/runs/{{ example.run_id }}/report">See a finished report</a>
+  {% else %}
+  <a class="btn btn-primary" href="/topics">Start from a topic</a>
+  {% endif %}
+{% endcall %}
+
+{#- The explainer's first sentence only. Its second — "four documents written
+    to be handed over, and the evidence behind them" — is the tier lede below,
+    word for word in substance. The guard keeps a one-sentence rewrite whole. -#}
+{% set note = explainer('deliverables') %}
+<p class="lede-text">{{ note.split('. ')[0] }}{{ '.' if '. ' in note else '' }}</p>
+
+<div class="scorecard">
+  {% for t in tiers %}
+  {{ stat(t.label, t.cards|length, sub=t.cards|map(attribute="format_label")|unique|join(", ")) }}
+  {% endfor %}
+</div>
 
 {{ deliverable_tiers(tiers, false, 2) }}
 
-<p class="body-text field-note">
-  Ready to see this fill in for real? <a href="/topics">Start from a topic</a> — only
-  its name is required.
-</p>
+{% if example is not none %}
+<p class="body-text"><a class="link-back" href="/topics">Start from a topic</a> — only its name is required.</p>
+{% endif %}
 </div>
 {% endblock %}

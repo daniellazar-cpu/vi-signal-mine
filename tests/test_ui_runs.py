@@ -54,13 +54,23 @@ def test_the_insight_view_leads_with_the_dual_lens_gap(env):
     assert gap_at != -1 and momentum_at != -1 and gap_at < momentum_at
 
 
-def test_first_snapshot_says_no_prior_snapshot_in_words(env):
-    """Not an empty chart. An empty chart reads as 'nothing is happening'."""
+def test_a_first_sweep_says_there_is_no_baseline_in_words(env):
+    """Not an empty chart. An empty chart reads as 'nothing is happening'.
+
+    The assertion was `"no prior snapshot" in body`, which pinned the state to
+    the internal word: "snapshot" is banned from anything a reader sees (it is
+    "sweep"), and that string was reaching the page as a raw `reason` field
+    from `vsm/analysis/momentum.py`. The state itself is what matters, so the
+    test now requires it to be named — in a real empty state, in the product's
+    own vocabulary — rather than requiring one particular sentence.
+    """
     c, ts, rs, topic = env
     snap = _snapshot(rs, topic, _rows(2, 1))
     ins = run_insight(topic, snap.run_id, rs)
     body = c.get(f"/runs/{ins.run_id}/insight").text
-    assert "no prior snapshot" in body.lower()
+    assert "first sweep of this topic" in body.lower()
+    assert 'class="empty-state"' in body, "the state is drawn, not named"
+    assert "no prior snapshot" not in body.lower(), "the internal word is back"
 
 
 def test_a_finished_run_renders_without_scripting(env):
@@ -70,21 +80,25 @@ def test_a_finished_run_renders_without_scripting(env):
     assert "complete" in body.lower()
 
 
-def test_the_plot_legend_appears_beside_the_forest_plot(env):
-    """PLOT_GUIDE belongs beside the plot, not on a help page — and behind a
+def test_the_method_behind_the_gap_sits_beside_the_gap(env):
+    """The method belongs beside the figure, not on a help page — and behind a
     disclosure rather than in front of the reader.
 
-    The summary no longer says "Why some rows say NE": `NE` was an internal
-    token surfaced raw, and naming the fact ("can't be compared") is the point
-    of the vocabulary pass. The structural requirement this test was written for
-    is unchanged — the guide is on this page, and it is inside a `<details>`.
+    Two earlier versions of this test pinned `PLOT_GUIDE` strings ("Why some
+    rows say NE", then "Box size" and "How to read this"). `NE` went first
+    because it was an internal token surfaced raw; the rest went with the
+    forest plot itself, since "Box size" and "Whisker" describe marks the gap
+    figure does not have. A legend for a retired chart is not method. What the
+    reader actually needs — how a mention is attributed to clinicians or to
+    patients — is asserted instead, in the same place and behind the same kind
+    of control.
     """
     c, ts, rs, topic = env
     snap = _snapshot(rs, topic, _rows(2, 2))
     ins = run_insight(topic, snap.run_id, rs)
     body = c.get(f"/runs/{ins.run_id}/insight").text
-    assert "Box size" in body                      # a PLOT_GUIDE mark label
-    assert "<details" in body and "How to read this" in body
+    assert "<details" in body and "told apart" in body
+    assert "taken from the site a mention came from" in body
     assert "say NE" not in body, "the raw token is back"
 
 

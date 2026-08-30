@@ -136,7 +136,13 @@
 {% macro download_control(d) %}
 <a class="btn btn-ghost btn-sm deliv-download" href="{{ d.href }}" download>
   Download<span class="visually-hidden"> {{ d.name }}</span>
-  <span class="deliv-download-meta">{{ d.format_label }}{% if d.size_label %} · {{ d.size_label }}{% endif %}</span>
+  {#- A non-breaking space between the format and its size: this line sits
+      inside a narrow flex control, so "Markdown · 1.4 MB" broke with the unit
+      stranded on its own row — the value and its unit reading as two separate
+      facts on the one screen where a person is deciding which file to hand
+      over. `_size_label` in app.py holds the number and its unit together the
+      same way. -#}
+  <span class="deliv-download-meta">{{ d.format_label }}&nbsp;· {{ d.size_label if d.size_label else "size not recorded" }}</span>
   <span aria-hidden="true">↓</span>
 </a>
 <span class="deliv-file">{{ d.file }}</span>
@@ -196,14 +202,26 @@
   JavaScript. Degrades to `title` where `popover` is unsupported, and the text
   stays in the DOM for a screen reader either way.
 #}
-{%- set d = definitions[term] -%}
-{%- set pid = "tip-" ~ term|replace(" ", "-")|replace("+", "plus") -%}
+{#- `define()` rather than `definitions[term]`: a term with no entry is a copy
+    gap, and an `UndefinedError` on a client-facing page is a far worse outcome
+    than a missing (i). An unknown term renders nothing at all, so the gap shows
+    up in review as an absent affordance rather than an empty popover. -#}
+{%- set d = define(term) -%}
+{%- if d[0] -%}
+{%- set pid = "tip-" ~ term|replace(" ", "-")|replace("+", "plus")|replace("'", "") -%}
+{#- `aria-details` and `aria-describedby` both point at the popover: the
+    button used to announce only "What gap means" while the definition sat in
+    a sibling div with nothing in the DOM connecting the two. Being present in
+    the accessibility tree is not the same as being reachable from the
+    control, so a screen-reader user got the question and never the answer. -#}
 <button type="button" class="info" popovertarget="{{ pid }}"
-        aria-label="What {{ term }} means" title="{{ d[0] }}">i</button>
+        aria-label="What {{ term }} means" aria-details="{{ pid }}"
+        aria-describedby="{{ pid }}" title="{{ d[0] }}">i</button>
 <div popover id="{{ pid }}" class="tooltip" role="tooltip">
   <p><span class="tooltip-term">{{ term }}</span> — {{ d[0] }}</p>
   {% if d[1] %}<p>{{ d[1] }}</p>{% endif %}
 </div>
+{%- endif -%}
 {% endmacro %}
 
 {% macro delta(pct, baseline_label) %}
@@ -211,11 +229,16 @@
   A change chip against a *named* baseline. A delta with no "vs what" is the
   commonest lie in this category, so the baseline is a required argument.
 #}
+{#- The direction mark is drawn, not typed. `content: "\25B2"` on
+    `.delta-up::before` fell back per-glyph to Helvetica Neue or Arial, because
+    Neue Montreal is unlikely to carry U+25B2 — so the arrow was set in a
+    different typeface from its own number and shifted between machines and in
+    print. No icon font can be loaded here, so the app draws it. -#}
 {%- if pct is none -%}
-<span class="delta delta-none">no baseline<span class="delta-base"> · first sweep</span></span>
+<span class="delta delta-none">{{ mark("flat") }}no baseline<span class="delta-base"> · first sweep</span></span>
 {%- else -%}
 <span class="delta {{ 'delta-up' if pct > 0 else ('delta-down' if pct < 0 else 'delta-none') }}">
-  {{ pct|pct }}<span class="delta-base"> vs {{ baseline_label }}</span>
+  {{ mark("up" if pct > 0 else ("down" if pct < 0 else "flat")) }}{{ pct|pct }}<span class="delta-base"> vs {{ baseline_label }}</span>
 </span>
 {%- endif -%}
 {% endmacro %}
@@ -261,6 +284,11 @@
 
   Here the useful thing is only: which files exist, how big, and get them.
 #}
+{#- The lede lives here, once, and the four screens that carried a
+    hand-written variant of "some of these are ready and some are not" should
+    carry none: the list already shows it, because every pending row is
+    labelled "Not run yet". Four bespoke restatements of a visible state was
+    the word-laundering complaint in miniature. -#}
 <div class="downloads">
   <div class="downloads-head">
     <h{{ heading_level }}>Downloads</h{{ heading_level }}>
@@ -308,4 +336,738 @@
   </section>
   {% endfor %}
 </div>
+{% endmacro %}
+
+{# =========================================================================
+   THE ENCODINGS
+   =========================================================================
+
+   The owner's diagnosis was "it looks like an Excel in HTML": nearly every
+   screen was a <table> of digits and a reader had to compute the meaning.
+   Everything below exists so quantity is *seen*.
+
+   Five rules hold for every macro in this section, and none of them is
+   optional — each one is a specific finding from the accessibility rulebook
+   in docs/design/COMPONENTS.md:
+
+   1. **The number is always in the DOM as text.** No figure's value is
+      reachable only by looking at a shape. In a no-JavaScript app the hover
+      layer every charting library relies on simply does not exist, so what
+      that layer would have revealed has to be in the markup from the start.
+   2. **Colour is never the only channel.** Length, position, fill pattern,
+      outline style or a printed number carries it too, so every figure
+      survives greyscale print and colour blindness.
+   3. **Every figure is a <figure> with a <figcaption> that states its key
+      value** — never instructions for reading the chart. If a chart needs
+      instructions, it is the wrong chart.
+   4. **Text inside a figure is HTML, not SVG**, wherever a label can be long.
+      SVG text does not wrap or reflow, and theme names are unbounded free
+      text; ux-guidelines row 112 (Critical) forbids clipping text in a
+      fixed box. SVG is used only where the marks carry no text of their own.
+   5. **An empty region is a named empty state**, never a blank axis frame.
+      Five different truths produce an empty figure on this product and a
+      shared blank would collapse them — use `empty()`.
+
+   Geometry comes from `vsm.ui.render` (bar_rows, series_points, gap_chart,
+   sentiment_mix, coverage_grid, meter), registered as Jinja globals. Those
+   functions guarantee a uniform key set on every path, which is what lets
+   these macros address any field without a guard under StrictUndefined.
+   ========================================================================= #}
+
+
+{% macro mark(direction) %}
+{#
+  A direction glyph, drawn rather than typed.
+
+  This replaces `content: "\25B2"` on `.delta-up::before`. Neue Montreal
+  almost certainly has no U+25B2, so each triangle fell back per-glyph to
+  Helvetica Neue or Arial — a direction mark set in a different typeface from
+  its own number, shifting between machines and in print. No icon font can be
+  loaded here (no CDN, no external assets), so the only stable glyph is one
+  this app draws itself.
+
+  `direction` is "up" | "down" | "flat".
+#}
+{%- if direction == "up" -%}
+<svg class="mark" viewBox="0 0 8 8" width="8" height="8" aria-hidden="true" focusable="false"><path d="M4 1.2 7.2 6.4H0.8z"/></svg>
+{%- elif direction == "down" -%}
+<svg class="mark" viewBox="0 0 8 8" width="8" height="8" aria-hidden="true" focusable="false"><path d="M4 6.8 0.8 1.6h6.4z"/></svg>
+{%- else -%}
+<svg class="mark" viewBox="0 0 8 8" width="8" height="8" aria-hidden="true" focusable="false"><rect x="0.8" y="3.5" width="6.4" height="1"/></svg>
+{%- endif -%}
+{% endmacro %}
+
+
+{% macro figure_caption(summary, extra="") %}
+{#
+  The caption states the figure's key value. It never explains how to read
+  the shape — quick-reference §10 `screen-reader-summary` asks for "the
+  chart's key insight", and UX-PLAN §5 bans instructions for reading a chart.
+  The two are compatible only if the caption is a value, not a legend in prose.
+#}
+<figcaption class="fig-cap">{{ summary }}{% if extra %} <span class="fig-cap-extra">{{ extra }}</span>{% endif %}</figcaption>
+{% endmacro %}
+
+
+{# ------------------------------------------------------------- bar list -- #}
+
+{% macro bar_list(rows, summary="", unit="mentions", data_label="", empty_note="") %}
+{#
+  A ranked horizontal bar list — the shape for 3-15 named categories.
+
+  charts.csv row 2 is unambiguous: sort descending by value, cap at 15
+  categories, never a pie (15 categories is unreadable as angle). Its own
+  threshold line prefers a *vertical* bar under 20 categories, and that is
+  correctly overridden here: quick-reference §10 `axis-labels` and
+  `axis-readability` forbid truncated or rotated labels, and a theme name is
+  long free text, so the label has to run horizontally.
+
+  `rows` is the output of `bar_rows(...)`. The label cell is `minmax(0, …)`
+  and content-height, never a fixed 12rem box, so a long theme name wraps
+  instead of being clipped at 200% zoom or under a user text-spacing
+  override (ux-guidelines row 112, Critical).
+
+  Each row prints its own count, which is also the figure's data table: a
+  label-and-value list *is* the tabular equivalent, so no second table is
+  needed. Bars are drawn in ink, not violet — the accent is reserved for the
+  one primary action per screen, and fifteen violet bars beside a violet
+  button stop the accent signalling anything.
+#}
+<figure class="fig fig-bars">
+  {% if not rows %}
+  {#- Never an empty <ul>. Five different truths produce an empty region on
+      this product, so the caller names which one holds; the fallback below is
+      only honest because it claims nothing about the cause. -#}
+  <p class="fig-empty">{{ empty_note if empty_note else "Nothing counted here yet." }}</p>
+  {% else %}
+  <ul class="bar-list"{% if data_label %} aria-label="{{ data_label }}"{% endif %}>
+    {% for r in rows %}
+    <li class="bar-row {% if r.emphasis %}bar-row-lead{% endif %}">
+      <span class="bar-label">{% if r.href %}<a href="{{ r.href }}">{{ r.label }}</a>{% else %}{{ r.label }}{% endif %}{% if r.note %}<span class="bar-note">{{ r.note }}</span>{% endif %}</span>
+      <span class="bar-track" aria-hidden="true"><span class="bar-fill" style="width: {{ r.pct }}%"></span></span>
+      <span class="bar-count">{{ r.value_label }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {{ figure_caption(summary if summary else (rows|length ~ " " ~ ("category" if rows|length == 1 else "categories") ~ ", largest first, counted in " ~ unit ~ ".")) }}
+</figure>
+{% endmacro %}
+
+
+{# --------------------------------------------------------------- bullet -- #}
+
+{% macro bullet(label, value, prior=none, prior_label="", scale=none, unit="") %}
+{#
+  One row that shows a level *and* its change: a solid bar for now, a tick
+  where it stood last sweep.
+
+  charts.csv row 8 allows one metric per meter and requires the number and
+  the target printed beside the bar — the palette is monochrome, so text is
+  the only precise channel here, not a nicety.
+
+  When `prior` is `none` the tick is absent and the value line reads "first
+  sweep" **in words**. Never a dash, never 0%, never +100% (UX-PLAN §7.1):
+  a missing baseline must not look like nothing changed.
+
+  `scale` is the value the bar's full width represents. Pass the largest
+  value in view so a column of bullets is comparable; omitted, it falls back
+  to the larger of `value` and `prior`, which makes a single bullet full-width
+  and is only right when the bullet stands alone.
+#}
+{%- set top = scale if scale else ([value, prior if prior is not none else 0]|max or 1) -%}
+{%- set fill_pct = (100.0 * value / top) if top else 0 -%}
+{%- set tick_pct = (100.0 * prior / top) if (prior is not none and top) else none -%}
+<div class="bullet">
+  <span class="bullet-label">{{ label }}</span>
+  <span class="bullet-track" aria-hidden="true">
+    <span class="bullet-fill" style="width: {{ fill_pct|round(2) }}%"></span>
+    {% if tick_pct is not none %}<span class="bullet-tick" style="left: {{ tick_pct|round(2) }}%"></span>{% endif %}
+  </span>
+  <span class="bullet-value">{{ value }}{% if unit %} {{ unit }}{% endif %}<span class="bullet-prior">{% if prior is none %} · first sweep{% else %} · was {{ prior }}{% if prior_label %} on {{ prior_label }}{% endif %}{% endif %}</span></span>
+</div>
+{% endmacro %}
+
+
+{# ------------------------------------------------------------ sparkline -- #}
+
+{% macro sparkline(series, label="", title="") %}
+{#
+  Volume across sweeps, spaced by the dates the sweeps actually happened on.
+
+  charts.csv row 1 lists "fewer than 4 data points" under *When NOT to Use*
+  for a line chart and sends that case to a stat card, so `series.shape`
+  decides what is drawn and this macro never draws a line through fewer than
+  four sweeps:
+
+    empty  a named empty state, not a blank frame
+    dot    one dot carrying its value — one point is not a trend
+    pair   two dots against a rule, never a connecting slope
+    dots   three dots, still no line
+    line   four or more: a polyline with every dot visible
+
+  Even spacing would misstate cadence, so a missed week reads as a gap. When
+  a date will not parse the series falls back to index spacing and
+  `series.spacing` says so, which the caption reports rather than hiding.
+
+  `series` is the output of `series_points(...)`. SVG here rather than HTML
+  because the marks carry no text of their own — every number is in the
+  caption and in the `aria-label`.
+#}
+{%- if series.shape == "empty" -%}
+<span class="spark-empty">no sweep yet</span>
+{%- else -%}
+<figure class="fig fig-spark">
+  <svg class="sparkline" viewBox="0 0 {{ series.width }} {{ series.height }}"
+       width="{{ series.width }}" height="{{ series.height }}"
+       role="img" aria-label="{{ title if title else series.summary }}">
+    <title>{{ title if title else series.summary }}</title>
+    {#- The spacing note is only printed when a date genuinely failed to
+        parse. A single sweep, or two on the same day, raises no spacing
+        question, and saying "a date could not be read" there was a false
+        alarm on the commonest state this app has. -#}
+    <desc>{{ series.count }} sweep{{ '' if series.count == 1 else 's' }} from {{ series.first_label }} to {{ series.last_label }}, {{ series.lo_label }} to {{ series.hi_label }} {{ series.unit }}.{% if series.spacing == 'date' %} Points are spaced by real elapsed dates, so a missed week shows as a gap.{% elif series.spacing == 'index' %} Points are spaced evenly because a sweep date could not be read.{% endif %}</desc>
+    <line class="spark-base" x1="{{ series.pad }}" y1="{{ series.baseline_y }}"
+          x2="{{ series.width - series.pad }}" y2="{{ series.baseline_y }}" />
+    {% if series.polyline %}
+    <polyline class="spark-line" points="{{ series.polyline }}" fill="none" />
+    {% endif %}
+    {% for p in series.points %}
+    <circle class="spark-dot {% if p.is_last %}spark-dot-last{% endif %}" cx="{{ p.x }}" cy="{{ p.y }}" r="{{ 3 if p.is_last else 2.4 }}" />
+    {% endfor %}
+  </svg>
+  {{ figure_caption(label if label else series.summary) }}
+</figure>
+{%- endif -%}
+{% endmacro %}
+
+
+{# ------------------------------------------------------------- dumbbell -- #}
+
+{% macro dumbbell(chart, level=3, heading="Clinicians vs patients") %}
+{#
+  The clinician-versus-patient gap, one shared −1…+1 axis, one row per theme.
+  The connector's *length is the gap* — the most direct encoding of
+  divergence there is.
+
+  charts.csv row 14 excludes a radar chart from this exact case twice over
+  ("values need precise comparison (use grouped bar)", "audience unfamiliar
+  with radar charts"), and the recipient is a commercial lead reading a
+  printed page.
+
+  Two things this must never do, both from UX-PLAN §7.2 — the system's
+  highest-risk null:
+
+  * A theme only one audience raised draws **one dot and no connector**, and
+    its row says which audience is missing in words.
+  * Those themes are grouped separately, at the foot, under their own
+    heading, so they can never be visually averaged into the comparison.
+
+  HTML and CSS rather than SVG: the theme name is unbounded free text and SVG
+  text neither wraps nor reflows. Every value is printed in its own cell, so
+  the figure is its own data table.
+
+  `chart` is the output of `gap_chart(...)`. `level` is the heading level for
+  the one-audience group's sub-heading, so the page's outline stays sequential.
+#}
+{%- set sub = level + 1 if level < 6 else 6 -%}
+<figure class="fig fig-gap">
+  {% if chart.total %}
+  {#- The axis legend sits in the same three-column grid as every row, so the
+      end labels line up with the ends of the track they describe rather than
+      with the page. The empty spacers are what hold columns 1 and 3. -#}
+  <div class="gap-axis-head" aria-hidden="true">
+    <span class="gap-axis-spacer"></span>
+    <span class="gap-axis-scale">
+      <span class="gap-axis-end">{{ chart.axis_low }}</span>
+      <span class="gap-axis-mid">{{ chart.axis_mid }}</span>
+      <span class="gap-axis-end">{{ chart.axis_high }}</span>
+    </span>
+    <span class="gap-axis-spacer"></span>
+  </div>
+  {% endif %}
+  {% if chart.rows %}
+  <ul class="gap-list">
+    {% for r in chart.rows %}
+    <li class="gap-row">
+      <span class="gap-name">{{ r.name }}<span class="gap-sub">{{ r.volume_label }} {{ 'mention' if r.volume == 1 else 'mentions' }}</span></span>
+      <span class="gap-track" aria-hidden="true">
+        <span class="gap-connector" style="left: {{ r.left_pct }}%; width: {{ r.width_pct }}%"></span>
+        <span class="gap-dot gap-dot-hcp" style="left: {{ r.hcp_pct }}%"></span>
+        <span class="gap-dot gap-dot-patient" style="left: {{ r.patient_pct }}%"></span>
+      </span>
+      <span class="gap-values">
+        <span class="gap-value gap-value-lead">{{ r.gap_label }}</span>
+        <span class="gap-value-sub">clinicians {{ r.hcp_label }} · patients {{ r.patient_label }}</span>
+      </span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="fig-empty">No theme has a tone reading from both audiences, so nothing on this axis can be compared.</p>
+  {% endif %}
+  {{ figure_caption(chart.summary, (chart.count_comparable ~ " of " ~ chart.total ~ " themes have a reading from both audiences") if chart.total else "") }}
+</figure>
+
+{% if chart.single %}
+{# Their own group, their own heading, below the comparison — never mixed in
+   with it. "Discussed by one audience only" is a fact about the theme, not a
+   degraded version of a gap. #}
+<section class="gap-single">
+  <h{{ level }} class="gap-single-head">Discussed by one audience only ({{ chart.count_single }})</h{{ level }}>
+  <ul class="gap-list gap-list-single">
+    {% for r in chart.single %}
+    <li class="gap-row gap-row-single">
+      <span class="gap-name">{{ r.name }}<span class="gap-sub">{{ r.volume_label }} {{ 'mention' if r.volume == 1 else 'mentions' }}</span></span>
+      <span class="gap-track" aria-hidden="true">
+        <span class="gap-dot gap-dot-lone" style="left: {{ r.dot_pct }}%"></span>
+        <span class="gap-slot"></span>
+      </span>
+      <span class="gap-values">
+        <span class="gap-value gap-value-none">no comparison</span>
+        <span class="gap-value-sub">{{ r.missing_label }}{% if r.reason %} — {{ r.reason }}{% endif %}</span>
+      </span>
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="gap-single-note">Silence from one audience is not agreement: these are not gaps of zero.</p>
+</section>
+{% endif %}
+{% endmacro %}
+
+
+{# ------------------------------------------------------ sentiment mix ---- #}
+
+{% macro sentiment_bar(fid, mix, label="") %}
+{#
+  The five-way sentiment mix as a 100% stacked bar, fixed segment order,
+  `n` printed adjacent.
+
+  charts.csv row 3 rules out a pie or a donut on two counts at once
+  ("accessibility-first context", "user needs precise values"); row 19 rules
+  out a waffle in a row this tight and names the escape itself — "for > 5
+  categories switch to stacked 100% bar". At exactly five the stacked bar is
+  the one shape that survives both rows.
+
+  Below n=5 **no proportional bar is drawn at all**: the raw counts are
+  printed instead, because a proportion of three rows is noise dressed as a
+  measurement. Between 5 and 20 the bar is drawn but labelled in counts, not
+  percentages — the shape of a mix is real at n=8, "38%" of eight is not.
+
+  Every segment gets a pattern fill or a hairline outline, never a shade of
+  one hue: the a11y notes on charts.csv rows 3, 5, 19 and 25 all end "do not
+  rely on color alone". "Couldn't tell" is unfilled and always last, so it can
+  never read as an opinion.
+
+  `fid` is a page-unique string. It namespaces the SVG `<pattern>` ids, which
+  are document-global — two mixes on one page sharing an id would silently
+  paint one of them with the other's texture. Use the theme id, e.g.
+  `sentiment_bar("t-" ~ theme.theme_id, mix)`.
+#}
+<figure class="fig fig-mix">
+  {% if mix.n == 0 %}
+  <p class="fig-empty">No mention in this group could be read for sentiment.</p>
+  {% elif not mix.proportional %}
+  {# Counts, not a bar. Stated as a fact about the sample, once. #}
+  <p class="mix-counts">
+    {% for s in mix.segments %}{% if s.count %}<span class="mix-count"><span class="mix-swatch mix-swatch-{{ s.key }}" aria-hidden="true"></span>{{ s.label }} {{ s.count_label }}</span>{% endif %}{% endfor %}
+  </p>
+  <p class="mix-note">{{ mix.too_few_note }}</p>
+  {% else %}
+  {#- Uniform scaling, deliberately: `preserveAspectRatio="none"` on a bar
+      stretched to a container's width skews every `<pattern>` inside it —
+      a 45° hatch arrives at 30°, a dot arrives as an ellipse, and a stroke
+      width differs on the two axes. So the bar keeps its own aspect ratio and
+      is capped at its natural width by `.mix-bar` in app.css. A sentiment mix
+      does not need 900 pixels; it needs its textures to survive. -#}
+  <svg class="mix-bar" viewBox="0 0 300 14"
+       role="img" aria-label="{{ mix.summary }}">
+    <title>{{ mix.summary }}</title>
+    <desc>{% for s in mix.segments %}{{ s.label }} {{ s.count_label }}{% if not loop.last %}, {% endif %}{% endfor %}. {{ mix.n_label }} mentions in total.</desc>
+    <defs>
+      <pattern id="{{ fid }}-hatch" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+        <rect class="pat-ground" width="4" height="4" />
+        <line class="pat-ink" x1="0" y1="0" x2="0" y2="4" stroke-width="2" />
+      </pattern>
+      <pattern id="{{ fid }}-dots" width="3" height="3" patternUnits="userSpaceOnUse">
+        <rect class="pat-ground" width="3" height="3" />
+        <circle class="pat-ink-fill" cx="1.5" cy="1.5" r="0.85" />
+      </pattern>
+      <pattern id="{{ fid }}-vert" width="4" height="4" patternUnits="userSpaceOnUse">
+        <rect class="pat-ground" width="4" height="4" />
+        <line class="pat-ink" x1="1" y1="0" x2="1" y2="4" stroke-width="1.6" />
+      </pattern>
+    </defs>
+    {% set ns = namespace(x=0) %}
+    {% for s in mix.segments %}
+    {% if s.pct > 0 %}
+    <rect class="mix-seg mix-seg-{{ s.key }}" x="{{ (ns.x * 3)|round(2) }}" y="0" width="{{ (s.pct * 3)|round(2) }}" height="14"
+          {% if s.key == 'mixed' %}fill="url(#{{ fid }}-hatch)"{% elif s.key == 'neutral' %}fill="url(#{{ fid }}-dots)"{% elif s.key == 'negative' %}fill="url(#{{ fid }}-vert)"{% endif %}><title>{{ s.label }} {{ s.count_label }}</title></rect>
+    {% set ns.x = ns.x + s.pct %}
+    {% endif %}
+    {% endfor %}
+    <rect class="mix-frame" x="0" y="0" width="300" height="14" fill="none" />
+  </svg>
+  <ul class="mix-legend">
+    {% for s in mix.segments %}
+    <li class="mix-legend-item {% if not s.count %}mix-legend-zero{% endif %}">
+      <span class="mix-swatch mix-swatch-{{ s.key }}" aria-hidden="true"></span>
+      <span class="mix-legend-label">{{ s.label }}</span>
+      <span class="mix-legend-value">{{ s.count_label }}{% if mix.show_pct %} <span class="mix-legend-pct">{{ s.pct_label }}</span>{% endif %}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {{ figure_caption((label ~ " — " if label else "") ~ mix.summary, "n = " ~ mix.n_label) }}
+</figure>
+{% endmacro %}
+
+
+{# ------------------------------------------------------ coverage strip --- #}
+
+{% macro coverage_strip(fid, grid, level=3) %}
+{#
+  One cell per site: what each of ~40 sites actually did in this sweep.
+
+  charts.csv row 5 is the closest match for a 40-cell grid and clears its
+  "fewer than 20 cells" exclusion, but its colour guidance ("cool blue to hot
+  red", a numeric legend) is for *ordered intensity*. These four values are
+  nominal — "blocked us" is not more of anything than "returned nothing" — so
+  a ramp would imply an order that does not exist. Four distinct treatments
+  instead: solid, hairline outline, hatched, dashed outline. The row's
+  required fallback, "grid data table plus intensity summary", still binds and
+  is rendered below.
+
+  UX-PLAN §7.5: three of the four states are also **named** in text, in three
+  separate lists with three separate counts. A site that returned nothing, a
+  site that refused us and a site nobody asked are three different facts, and
+  a shared silence hides two of them.
+
+  `fid` namespaces the hatch pattern id (see `sentiment_bar`).
+  `grid` is the output of `coverage_grid(...)`.
+#}
+{%- set cols = 20 -%}
+{%- set cell = 16 -%}
+{%- set gap = 4 -%}
+{%- set rows_n = ((grid.cells|length + cols - 1) // cols) if grid.cells else 1 -%}
+<figure class="fig fig-coverage">
+  {% if not grid.has_data %}
+  <p class="fig-empty">No site has been swept yet, so there is nothing to cover.</p>
+  {% else %}
+  <svg class="cov-strip"
+       viewBox="0 0 {{ cols * (cell + gap) }} {{ rows_n * (cell + gap) }}"
+       role="img" aria-label="{{ grid.summary }}">
+    <title>{{ grid.summary }}</title>
+    {#- Only the states that actually happened, and joined on the *rendered*
+        items rather than on the loop, so a run where nothing was blocked does
+        not end in a dangling semicolon. -#}
+    <desc>One cell per site. {{ grid.states|selectattr("count")|map(attribute="named_count")|join("; ") }}. The full list is in the table below.</desc>
+    <defs>
+      <pattern id="{{ fid }}-cov-hatch" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+        <rect class="pat-ground" width="4" height="4" />
+        <line class="pat-ink" x1="0" y1="0" x2="0" y2="4" stroke-width="1.8" />
+      </pattern>
+    </defs>
+    {% for c in grid.cells %}
+    <rect class="cov-cell cov-cell-{{ c.state }}"
+          x="{{ (loop.index0 % cols) * (cell + gap) }}"
+          y="{{ (loop.index0 // cols) * (cell + gap) }}"
+          width="{{ cell }}" height="{{ cell }}"
+          {% if c.state == 'blocked' %}fill="url(#{{ fid }}-cov-hatch)"{% endif %}><title>{{ c.site }} — {{ c.state_label|lower }}</title></rect>
+    {% endfor %}
+  </svg>
+  <ul class="cov-legend">
+    {% for s in grid.states %}
+    <li class="cov-legend-item {% if not s.count %}cov-legend-zero{% endif %}">
+      <span class="cov-swatch cov-swatch-{{ s.key }}" aria-hidden="true"></span>
+      <span class="cov-legend-label">{{ s.label }}</span>
+      <span class="cov-legend-value">{{ s.count }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% for s in grid.states %}
+  {% if s.count and s.key != "collected" %}
+  <p class="cov-named"><span class="cov-named-label">{{ s.label }} ({{ s.count }})</span> {{ s.named }}</p>
+  {% endif %}
+  {% endfor %}
+  {% endif %}
+  {{ figure_caption(grid.summary) }}
+  {% if grid.has_data %}
+  {% call read_more("Every site, one row each (" ~ grid.total ~ ")") %}
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Coverage by site">
+  <table class="data-table">
+    <caption class="visually-hidden">What each site did in this sweep.</caption>
+    <thead><tr><th scope="col">Site</th><th scope="col">What it did</th></tr></thead>
+    <tbody>
+      {% for c in grid.cells %}
+      <tr><th scope="row">{{ c.site }}</th><td>{{ c.state_label }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endcall %}
+  {% endif %}
+</figure>
+{% endmacro %}
+
+
+{# ----------------------------------------------------------- spend meter -- #}
+
+{% macro spend_meter(m, label="Spend against the cap") %}
+{#
+  Fill is what was spent, the tick is the estimate, the hard rule is the cap.
+
+  charts.csv row 8 allows one metric per meter and requires the number, the
+  target and the threshold labels *printed beside* the bar — this is a
+  monochrome palette, so the numbers are the only precise channel, not a
+  nicety. "Stopped at the cap" becomes a **shape** (the fill terminating in a
+  stop bar) rather than a status word, which is the cloud-console convention
+  and is what keeps a successful partial from reading as a failure
+  (UX-PLAN §7.3).
+
+  The track's own edge is `--rule-control` (3.03:1 on white), not `--rule`:
+  a boundary that carries meaning has to clear 3:1, and `--rule` at 0.10
+  alpha is a decorative gridline.
+
+  `m` is the output of `meter(...)`.
+#}
+<figure class="fig fig-meter">
+  <div class="meter" role="group" aria-label="{{ label }}: {{ m.summary }}">
+    <span class="meter-track" aria-hidden="true">
+      <span class="meter-fill meter-fill-{{ m.state }}" style="width: {{ m.spent_pct }}%"></span>
+      {% if m.stopped %}<span class="meter-stop" style="left: {{ m.spent_pct }}%"></span>{% endif %}
+      {% if m.has_estimate %}<span class="meter-tick" style="left: {{ m.estimate_pct }}%"></span>{% endif %}
+      {% if m.has_cap %}<span class="meter-cap" style="left: {{ m.cap_pct }}%"></span>{% endif %}
+    </span>
+    <dl class="meter-values">
+      <div><dt>Spent</dt><dd class="meter-spent">{{ m.spent_label }}</dd></div>
+      <div><dt>Estimated</dt><dd>{{ m.estimate_label }}</dd></div>
+      <div><dt>Cap</dt><dd>{{ m.cap_label }}</dd></div>
+    </dl>
+  </div>
+  {{ figure_caption(m.summary) }}
+</figure>
+{% endmacro %}
+
+
+{# ------------------------------------------------------- before / after -- #}
+
+{% macro pair_bars(before, after, before_label, after_label, absent_note="") %}
+{#
+  An anomaly is not a chart: it is an event with a before and an after.
+
+  UX-PLAN §4 — "`theme_appeared` has no baseline: the prior slot is empty and
+  captioned 'not present on 12 Aug'. Never a zero-height bar." A zero-height
+  bar and "this theme did not exist yet" look identical and mean different
+  things, so when `before` is `none` the prior slot renders as an outlined
+  empty frame carrying `absent_note` in words.
+#}
+{%- set top = [before if before is not none else 0, after if after is not none else 0]|max or 1 -%}
+<div class="pair">
+  <span class="pair-side">
+    <span class="pair-bar-wrap" aria-hidden="true">
+      {% if before is none %}<span class="pair-bar pair-bar-absent"></span>{% else %}<span class="pair-bar" style="height: {{ (100.0 * before / top)|round(1) }}%"></span>{% endif %}
+    </span>
+    <span class="pair-value">{% if before is none %}<span class="pair-none">{{ absent_note if absent_note else "not present then" }}</span>{% else %}{{ before }}{% endif %}</span>
+    <span class="pair-label">{{ before_label }}</span>
+  </span>
+  <span class="pair-arrow" aria-hidden="true">{{ mark("up" if (after or 0) > (before or 0) else ("down" if (after or 0) < (before or 0) else "flat")) }}</span>
+  <span class="pair-side">
+    <span class="pair-bar-wrap" aria-hidden="true">
+      <span class="pair-bar pair-bar-now" style="height: {{ (100.0 * (after or 0) / top)|round(1) }}%"></span>
+    </span>
+    <span class="pair-value">{{ after if after is not none else 0 }}</span>
+    <span class="pair-label">{{ after_label }}</span>
+  </span>
+</div>
+{% endmacro %}
+
+
+{# =========================================================================
+   LAYERING AND CHROME
+   The components that hold the three layers apart — answer, support, depth.
+   ========================================================================= #}
+
+{% macro read_more(summary, open=false) %}
+{#
+  Layer 3, behind a control: method, caveats, the rows, the rationale, the
+  long form. Nothing is deleted to reach layer 3 — it moves (UX-PLAN §12).
+
+  Two mechanics worth knowing before using this.
+
+  * A **closed** `<details>` does not render its content slot at all, so it
+    cannot be forced open by CSS at a breakpoint or at print time. This app
+    ships no JavaScript, so for years the honest position here was "Chrome
+    prints it, other engines may not". This macro fixes that by rendering
+    `caller()` **twice**: once inside the disclosure for screen, once inside
+    a print-only block that is `display: none` until `@media print`. The print
+    copy is `aria-hidden` so a screen reader hears the content once.
+  * Because the content is emitted twice, **it must not contain an `id`, a
+    form control, or an in-page anchor target** — two elements would share
+    one id. Put those in the always-visible layer.
+
+  `open` sets the default state server-side, which is the only place it can
+  be set. Open it when the reader is already looking for the detail (an error
+  explanation, a blocked guard); leave it closed for background.
+#}
+<details class="disclosure"{% if open %} open{% endif %}>
+  <summary>{{ summary }}</summary>
+  <div class="disclosure-body">{{ caller() }}</div>
+</details>
+<div class="print-only disclosure-body" aria-hidden="true">
+  <p class="print-only-head">{{ summary }}</p>
+  {{ caller() }}
+</div>
+{% endmacro %}
+
+
+{% macro card(title, level=2, tip="", id="") %}
+{#
+  A titled section, bounded by a hairline. Enclosure is the third
+  differentiation axis after size and colour (UX-PLAN §12): it is what
+  separates one section's content from the next without a heading having to
+  do all the work.
+
+  `level` keeps the page outline sequential — ux-guidelines row 39 forbids a
+  skipped heading level, and a `<summary>` is not a substitute for a heading.
+  `tip` is a DEFINITIONS key, so a term can carry its definition at first
+  point of use rather than in a paragraph nobody asked for.
+
+  Usage:
+    {% call card("What moved", 2, tip="sweep") %} … {% endcall %}
+#}
+<section class="card"{% if id %} id="{{ id }}"{% endif %}>
+  <div class="card-header">
+    <h{{ level }} class="card-title">{{ title }}{% if tip %} {{ info(tip) }}{% endif %}</h{{ level }}>
+  </div>
+  <div class="card-body">{{ caller() }}</div>
+</section>
+{% endmacro %}
+
+
+{% macro stat(label, value, sub="", tip="", size="") %}
+{#
+  One metric: value first and largest, label above it at meta weight, the
+  qualifier under it. The category-standard scorecard cell.
+
+  `size` is "" (the screen's headline figure) or "sm" (a supporting figure).
+  Deltas are never set at figure size — a delta is not more important than
+  the level it modifies (UX-PLAN §4).
+#}
+<div class="metric">
+  <span class="metric-label">{{ label }}{% if tip %} {{ info(tip) }}{% endif %}</span>
+  <span class="metric-value{% if size == 'sm' %} metric-value-sm{% elif size == 'xl' %} metric-value-xl{% endif %}">{{ value }}</span>
+  {% if sub %}<span class="metric-sub">{{ sub }}</span>{% endif %}
+</div>
+{% endmacro %}
+
+
+{% macro empty(fact, cause="", href="", action="") %}
+{#
+  A named empty state: which of the possible truths holds, and one action.
+
+  quick-reference §10 `empty-data-state` and ux-guidelines row 79 both
+  require this, and it is load-bearing here because TOOL-ELEMENTS §5 lists
+  five distinct truths that all produce an empty region — "first sweep",
+  "nothing moved", "collected but not analysed", "never collected", "filtered
+  to nothing". A shared "No data" would collapse all five, which is a defect,
+  not a simplification.
+
+  Template: [Fact]. [Cause if known]. → [one link].
+#}
+<div class="empty-state">
+  <p class="empty-fact">{{ fact }}</p>
+  {% if cause %}<p class="empty-cause">{{ cause }}</p>{% endif %}
+  {% if href and action %}<a class="btn btn-ghost btn-sm" href="{{ href }}">{{ action }}</a>{% endif %}
+</div>
+{% endmacro %}
+
+
+{% macro chip(label, href, on=false, note="", removes="") %}
+{#
+  A filter chip as a native `<a>`, with its state in the text.
+
+  ux-guidelines row 117 (Critical): "Interactive chips need a native role,
+  accessible name, state, keyboard operation and visible focus… Don't use a
+  clickable div or reveal the only action on hover." Row 114 adds "don't
+  encode status with color alone", which is why the selected chip carries
+  `aria-current` and a visually-hidden "selected", not just a darker rule.
+
+  `note` is a short explanation rendered as *visible* caption text, never a
+  `title` attribute: a native tooltip is unreachable by keyboard, invisible
+  on touch and absent in print — this codebase already states that rule as
+  the reason tier badges link to /how instead of using `title`.
+
+  `removes` names what following the link takes away ("Clear site"), which
+  makes the remove affordance a real, permanently visible control.
+#}
+<a class="chip {% if on %}chip-on{% endif %}" href="{{ href }}"{% if on %} aria-current="true"{% endif %}>{{ label }}{% if on %}<span class="visually-hidden"> — selected</span>{% endif %}{% if removes %}<span class="chip-remove">{{ removes }}</span>{% endif %}{% if note %}<span class="chip-note">{{ note }}</span>{% endif %}</a>
+{% endmacro %}
+
+
+{% macro sort_th(label, key, sort, base, numeric=false) %}
+{#
+  A sortable column header that reports its own state.
+
+  quick-reference §10 `sortable-table`: "Data tables must support sorting with
+  aria-sort indicating current sort state", repeated by charts.csv row 2's
+  a11y fallback. This costs no JavaScript — the sort is a link carrying a
+  query parameter and `aria-sort` is a static attribute set server-side from
+  it — and yet `aria-sort` appeared nowhere in this app.
+
+  `sort` is the current sort key; `key` is this column's. `base` is the URL
+  prefix already carrying every other parameter, ending in `sort=`.
+#}
+<th scope="col"{% if numeric %} class="num"{% endif %} aria-sort="{{ 'descending' if sort == key else 'none' }}">
+  <a class="sort-link {% if sort == key %}sort-link-on{% endif %}" href="{{ base }}{{ key }}">{{ label }}{% if sort == key %} <span class="sort-mark" aria-hidden="true">{{ mark("down") }}</span>{% endif %}</a>
+</th>
+{% endmacro %}
+
+
+{% macro stamp(value, long=false) %}
+{#
+  A time a machine can resolve and a person can read.
+
+  `fmt_dt` alone returned a bare "2026-08-25 14:03" with no zone and no
+  machine-readable original, so a capture time could not be resolved to an
+  actual instant by anything reading the page — on the five screens where
+  "when was this collected" is the load-bearing question. The report screen
+  already did this correctly; this makes it one call.
+#}
+<time datetime="{{ value|iso }}">{{ value|date_long if long else value|dt }}</time>
+{% endmacro %}
+
+
+{% macro error_summary(errors, labels={}, anchors={}, heading="This form was not saved") %}
+{#
+  The error summary a failed submit needs, at the top of the form.
+
+  ux-guidelines row 109 (High): "Place it at the top of the form; move focus
+  to its heading or container after failed submit; link each item to its
+  invalid field; retain inline errors" — plus row 44 (`role="alert"`) and row
+  55 (`aria-describedby` on the field itself, which stays the template's job).
+  This is also the no-JavaScript-correct substitute for on-blur validation:
+  here the server round-trip *is* the validation event.
+
+  `tabindex="-1"` so the template can send focus here with `#form-errors`
+  after the redirect, and so a keyboard reader landing on it by Tab does not
+  skip it.
+
+  `errors` is the route's `{field: message}` dict. `labels` maps a field name
+  to the visible label of its control and `anchors` to the control's own `id`;
+  both fall back sensibly, but pass `anchors` whenever the form's ids are not
+  `f-<field>` (topic_form's therapeutic_area input is `f-area`, for instance),
+  because a summary item linking to an id that does not exist is worse than no
+  link at all.
+#}
+{% if errors %}
+<div class="panel-error form-errors" id="form-errors" role="alert" tabindex="-1">
+  <p class="form-errors-head">{{ heading }} — {{ errors|length }} {{ 'thing' if errors|length == 1 else 'things' }} need{{ 's' if errors|length == 1 else '' }} attention.</p>
+  <ul class="form-errors-list">
+    {% for field, message in errors.items() %}
+    <li><a href="#{{ anchors.get(field, 'f-' ~ field|replace('_', '-')) }}">{{ labels.get(field, field|replace('_', ' ')) }}</a> — {{ message }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
 {% endmacro %}

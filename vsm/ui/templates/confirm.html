@@ -1,76 +1,138 @@
 {% extends "_base.html" %}
-{% from "_macros.html" import title_block, deliverable_promise %}
+{% from "_macros.html" import page_header, card, info, bar_list, spend_meter,
+                              read_more, deliverable_promise, table_scroll_open %}
 {% block title %}Confirm spend — {{ topic.name }} — Vi Signal Mine{% endblock %}
 {% block content %}
+{#
+  The only screen that spends real money, so it answers two questions and
+  carries nothing that answers neither: what will this cost, and what do I get.
+
+  Three layers, separated on size, colour, position and enclosure at once.
+
+    1  The estimate, at figure size, unenclosed at the top of the page. It is
+       the answer, and it is the only thing set that large.
+    2  The meter that puts that figure against the cap, and the three sweep
+       sizes drawn to one scale — a difference in length rather than three
+       numbers a reader has to subtract in their head.
+    3  The line-item breakdown, behind a disclosure. What the estimate is made
+       of is a method question; "serp", "discover" and "unlocker" are supplier
+       words that mean nothing to someone deciding about a price. Layered,
+       not cut: the numbers are still exact and still on the page.
+
+  The four-fact definition grid that used to open this page is gone as a
+  block, not as material. The topic and its area are the header's meta line,
+  the sweep size is the emphasised bar below, and the cap is the meter's own
+  hard rule — each now next to the thing it qualifies instead of four facts in
+  a row at one weight.
+#}
 <div class="page page-narrow">
-{# "This screen spends money" was stated three times before the cost was
-   shown — an eyebrow, a caption, and a paragraph. The h1 and the commit
-   button's own label carry it; the one thing worth adding is that the number
-   is a ceiling. #}
-<section class="page-head">
-  <h1>Confirm spend</h1>
-</section>
-<p class="page-caption">The estimate is a ceiling. A run stops cleanly rather than exceeding it.</p>
-{{ title_block([
-  ("Topic", topic.name),
-  ("Therapeutic area", topic.therapeutic_area if topic.therapeutic_area else "not set — a general venue set"),
-  ("Sweep size", band.name|sweep_size),
-  ("Run cost cap", cap_usd|usd(2)),
+
+{{ page_header("Confirm spend", meta=[
+     topic.name,
+     topic.therapeutic_area if topic.therapeutic_area else "no therapeutic area set — a general site list",
 ]) }}
 
-<section class="confirm-panel">
+{#- Layer 1. One figure, one screen: the cost, before anything qualifies it,
+    unenclosed and at the top — position and size are two of the three axes
+    that separate it from everything below.
+
+    A scorecard cell's own parts rather than the `stat()` macro that assembles
+    them, for two reasons that only bite when the cell is alone on a screen:
+    `.scorecard` is a fixed two-column grid below 700px, so one metric in it
+    leaves an empty grey rectangle beside the answer, and `.metric`'s padding
+    pushes the one number that matters 16px out of line with the h1 above it.
+    `.page-caption` rather than `.metric-sub` for the qualifier: same size and
+    ink, and it carries the space this block needs before the first card. -#}
+<p class="metric-label">Estimated total {{ info("estimate") }}</p>
+<p class="fig-xl">{{ estimate.total_usd|usd(2) }}</p>
+<p class="page-caption">{{ band.name|sweep_size }} sweep</p>
+
+{% call card("This run against the cap", 2, tip="cap") %}
+  {#- Nothing has been spent yet, and that is a zero rather than a null: no
+      money has left. The estimate is a tick and the cap a hard rule, so how
+      much room the run has is a distance, not a subtraction. What happens on
+      reaching the cap — it stops and keeps everything collected — is the (i)
+      beside this heading, which is where a definition belongs rather than in a
+      sentence restating the figure beside it. -#}
+  {{ spend_meter(meter(0, estimate.total_usd, cap_usd),
+                 label="This run against the cap") }}
+
+  {% call read_more("What makes up the estimate") %}
+    {{ table_scroll_open("Estimate, item by item") }}
+    <table class="data-table breakdown-table">
+      <caption class="visually-hidden">What the estimate is made of, item by item.</caption>
+      <thead>
+        <tr>
+          <th scope="col">Item</th>
+          <th scope="col" class="num">Cost</th>
+          <th scope="col">Basis</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in estimate.breakdown %}
+        <tr>
+          <th scope="row" class="cell-title">{{ item.item }}</th>
+          <td class="num">{{ item.usd|usd(4) }}</td>
+          <td class="cell-sub">{{ item.note }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  {% endcall %}
+{% endcall %}
+
+{#- The three sizes on one scale, cheapest first, the chosen one emphasised —
+    the route builds them so the screen and the form price a sweep identically.
+
+    Two changes to what the route hands over, both to stop a row stating the
+    same fact twice: the note becomes the difference from the size chosen here
+    (the question a person actually has at this point — what does the wider one
+    cost me?) rather than a second printing of the number already at the bar's
+    end, and the chosen row drops its link, because a link to the page you are
+    on is not an option. -#}
+{% set size_rows = [] %}
+{% for b in size_bars %}
+  {%- set diff = b.value - estimate.total_usd -%}
+  {%- set _ = size_rows.append({
+        "label": b.label,
+        "value": b.value,
+        "emphasis": b.emphasis,
+        "href": "" if b.emphasis else b.href,
+        "note": "chosen" if b.emphasis
+                else (diff|abs)|usd(2) ~ (" more" if diff > 0 else " less"),
+      }) -%}
+{% endfor %}
+{% set cheapest = size_bars|sort(attribute="value")|first %}
+{% set dearest = size_bars|sort(attribute="value")|last %}
+
+{% call card("What each sweep size costs", 2, tip="sweep size") %}
+  {{ bar_list(bar_rows(size_rows, sort=false, unit="dollars"),
+              summary=(cheapest.label ~ " costs " ~ (cheapest.value|usd(2)) ~ "; "
+                       ~ dearest.label ~ " is " ~ (dearest.value / cheapest.value)|round(1)
+                       ~ " times that.")
+                      if cheapest.value else
+                      ((band.name|sweep_size) ~ " is the size chosen here."),
+              data_label="Sweep sizes by estimated cost",
+              empty_note="No sweep sizes are configured, so nothing can be priced.") }}
   {% if changes_band %}
-  <p class="body-text field-note">
-    This changes the sweep size from <strong>{{ topic.spend_band|sweep_size }}</strong>
-    to <strong>{{ band.name|sweep_size }}</strong> — confirming saves that before running.
-  </p>
+  <p class="t-support">Running this also saves {{ band.name|sweep_size }} as this topic’s sweep size.</p>
   {% endif %}
+{% endcall %}
 
-  <div class="estimate-total">
-    <span class="estimate-total-label">Estimated total</span>
-    <span class="estimate-total-value">{{ estimate.total_usd|usd(2) }}</span>
-  </div>
+{{ deliverable_promise(tiers, 2) }}
 
-  <div class="table-scroll" tabindex="0" role="region" aria-label="Cost estimate breakdown">
-  <table class="data-table breakdown-table">
-    <caption class="visually-hidden">What the estimate is made of, item by item.</caption>
-    <thead>
-      <tr><th scope="col">Item</th><th scope="col" class="num">Cost</th><th scope="col">Basis</th></tr>
-    </thead>
-    <tbody>
-      {% for item in estimate.breakdown %}
-      <tr>
-        <th scope="row" class="cell-title">{{ item.item }}</th>
-        <td class="num">{{ item.usd|usd(4) }}</td>
-        <td class="cell-sub">{{ item.note }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  </div>
-
-  {# Names, not the catalogue: the full card treatment was ~350 words of this
-     page's 700, on the one screen where a person is deciding about a number.
-     The promise the owner asked for is kept; the detail is one click away. #}
-  {{ deliverable_promise(tiers, 2) }}
-
-  <p class="confirm-cap">
-    Over <strong>{{ cap_usd|usd(2) }}</strong> a run stops and keeps what it collected.
-    <a class="link-back" href="/deliverables">What you get</a>
-  </p>
-
-  {% if storage_is_durable() %}
-  <div class="confirm-actions">
-    <a class="link-back" href="/topics/{{ topic.topic_id }}/edit">Change size or cancel</a>
-    <form method="post" action="/topics/{{ topic.topic_id }}/mine">
-      <input type="hidden" name="band" value="{{ band.name }}">
-      <button class="btn btn-commit" type="submit">Spend {{ estimate.total_usd|usd(2) }} — run snapshot</button>
-    </form>
-  </div>
-  {% else %}
-  <p class="storage-notice">{{ read_only_control_note }}</p>
-  <p><a class="link-back" href="/topics">Back to topics</a></p>
-  {% endif %}
-</section>
+{% if storage_is_durable() %}
+<div class="confirm-actions">
+  <a class="link-back" href="/topics/{{ topic.topic_id }}/edit">Edit this topic</a>
+  <form method="post" action="/topics/{{ topic.topic_id }}/mine">
+    <input type="hidden" name="band" value="{{ band.name }}">
+    <button class="btn btn-commit" type="submit">Spend {{ estimate.total_usd|usd(2) }} — run the sweep</button>
+  </form>
+</div>
+{% else %}
+<p class="storage-notice">{{ read_only_control_note }}</p>
+<p><a class="link-back" href="/topics">Back to Topics</a></p>
+{% endif %}
 </div>
 {% endblock %}

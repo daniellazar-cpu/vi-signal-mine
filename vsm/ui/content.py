@@ -30,7 +30,9 @@ __all__ = [
     "FIRST_RUN_STEPS",
     "EPHEMERAL_STORAGE_NOTICE",
     "READ_ONLY_CONTROL_NOTE",
+    "TOPIC_NAME_REQUIRED",
     "explainer",
+    "define",
 ]
 
 TAGLINE = "What people are saying about a brand or product online — and what changed."
@@ -58,6 +60,15 @@ EPHEMERAL_STORAGE_NOTICE = (
 #: hole is exactly the "sprawl" this whole approach exists to avoid. Deliberately
 #: the same short line everywhere, rather than a bespoke sentence per control.
 READ_ONLY_CONTROL_NOTE = "Not available — this instance is read-only. See the note above."
+
+#: The one required field's rejection message. Its own sentence, deliberately
+#: not `FIELD_GUIDE["name"]["help"]`: reusing the help text printed the same
+#: sentence twice on a failed submit — once in grey under the input, once in a
+#: ruled error box — and never said that anything had gone wrong. An error
+#: names the problem and then the fix, in that order.
+TOPIC_NAME_REQUIRED = (
+    "Enter a topic name — a brand, a molecule, a category or a question."
+)
 
 WHAT_IT_IS = (
     "Vi Signal Mine watches a topic over time. It collects what is being said "
@@ -143,7 +154,7 @@ PLOT_GUIDE = {
 TIERS = (
     ("3+ sources", "Three or more independent sources. Safe to state as-is."),
     ("2 sources", "Two independent sources. Attribute it rather than stating it flat."),
-    ("1 source", "One source. Quote it, don't generalise from it."),
+    ("1 source", "One source. Quote it, don’t generalise from it."),
 )
 
 #: One line each. Only terms a first-time reader actually hits.
@@ -217,42 +228,42 @@ FIELD_GUIDE = {
         "label": "Topic",
         "required": True,
         "help": "What you want watched. A brand, a molecule, a category, a question.",
-        "placeholder": "e.g. Zepbound — obesity",
+        "placeholder": "e.g. Zepbound — obesity…",
         "when_blank": "",
     },
     "brand": {
         "label": "Brand name",
         "required": False,
         "help": "The product as patients and clinicians actually write it.",
-        "placeholder": "e.g. Zepbound",
+        "placeholder": "e.g. Zepbound…",
         "when_blank": "Searches on the topic name alone.",
     },
     "molecule": {
         "label": "Molecule (INN)",
         "required": False,
         "help": "The generic name. Clinicians often use it where patients use the brand — including it finds conversation the brand name misses.",
-        "placeholder": "e.g. tirzepatide",
+        "placeholder": "e.g. tirzepatide…",
         "when_blank": "Fine to skip — not every topic has one, and some categories have several.",
     },
     "competitors": {
         "label": "Competitors",
         "required": False,
         "help": "How a conversation refers to the category. Naming them widens what gets found and lets the report compare.",
-        "placeholder": "e.g. Wegovy, Saxenda",
+        "placeholder": "e.g. Wegovy, Saxenda…",
         "when_blank": "The run still works; it just will not tell you about the category around you.",
     },
     "therapeutic_area": {
         "label": "Therapeutic area",
         "required": False,
         "help": "Routes the search to the venues that matter for this area, before spending anything on the open web.",
-        "placeholder": "e.g. obesity",
+        "placeholder": "e.g. obesity…",
         "when_blank": "Searches a general venue set, which costs the same and finds less.",
     },
     "questions": {
         "label": "Questions you care about",
         "required": False,
         "help": "What you would ask if you could ask the internet directly. Shapes which themes get surfaced first.",
-        "placeholder": "e.g. what do prescribers say about tolerability?",
+        "placeholder": "e.g. what do prescribers say about tolerability?…",
         "when_blank": "Themes are ranked by volume alone.",
     },
 }
@@ -347,7 +358,7 @@ DELIVERABLES = (
             "was captured, how, and the URL. This is what lets someone check "
             "the report instead of believing it."
         ),
-        "for_whom": "Anyone who asks 'where did this come from?'",
+        "for_whom": "Anyone who asks “where did this come from?”",
         "sample": (
             "| ref | source | captured | method |\n"
             "|---|---|---|---|\n"
@@ -542,7 +553,7 @@ DEFINITIONS: dict[str, tuple[str, str]] = {
     ),
     "3+ sources": (
         "Three or more independent sources. Safe to state as-is.",
-        "Two sources: attribute it. One: quote it, don't generalise from it.",
+        "Two sources: attribute it. One: quote it, don’t generalise from it.",
     ),
     "gap": (
         "How differently clinicians and patients read the same theme.",
@@ -583,7 +594,69 @@ DEFINITIONS: dict[str, tuple[str, str]] = {
         "Named rather than hidden: a site that returned nothing looks identical "
         "to a site nobody asked, and only one of those is a finding.",
     ),
+    "blocked us": (
+        "The site refused the request, so nothing from it was collected.",
+        "It may still appear as a search result. What is missing is the page "
+        "itself, not the fact that the site exists.",
+    ),
+    "not tried": (
+        "The site is on the list but this sweep never reached it.",
+        "A wider sweep size reaches further down the list. This is a fact "
+        "about the sweep, not about the site.",
+    ),
+    "coverage": (
+        "Which sites were asked, and what each one gave back.",
+        "A site that returned nothing is a finding in its own right, so it is "
+        "named rather than dropped from the count.",
+    ),
+    "cap": (
+        "The most a single run is allowed to spend.",
+        "A run that reaches it stops cleanly and keeps everything collected "
+        "up to that point. Reaching the cap is not a failure.",
+    ),
+    "estimate": (
+        "What the run is expected to cost, priced before it starts.",
+        "Priced from the sweep size: the number of queries and page fetches. "
+        "A page fetch costs about twenty times a search call.",
+    ),
+    "theme": (
+        "A group of mentions about the same thing, named by what they share.",
+        "Volume is how many mentions fell into the group. A theme is always "
+        "reported: counting is arithmetic, whereas a claim about it needs "
+        "sources behind it.",
+    ),
+    "anomaly": (
+        "Something that changed on its own between two sweeps.",
+        "A theme that appeared, vanished, rose sharply or dropped sharply "
+        "against its own recent baseline. Measured, never forecast.",
+    ),
+    "change": (
+        "How a theme's volume moved against a named earlier sweep.",
+        "Always measured against one specific date rather than a rolling "
+        "window, so the comparison can be checked.",
+    ),
+    "sentiment": (
+        "How a theme is talked about: positive, mixed, neutral, negative, or "
+        "not readable either way.",
+        "Reported separately for clinicians and for patients. A single number "
+        "over both would be a patient figure wearing a clinical label.",
+    ),
 }
+
+
+def define(term: str) -> tuple[str, str]:
+    """A term's definition, or a pair of empty strings when it has none.
+
+    Returns rather than raises, for the reason :func:`explainer` does: a
+    missing definition is a copy gap and must never take a page down with it.
+    `DEFINITIONS[term]` in a template would be an `UndefinedError` and a 500
+    on a client-facing page, which is a far worse outcome than a missing (i).
+
+    The `info()` macro renders nothing at all for an unknown term, so a gap is
+    visible in review as a missing affordance rather than hidden behind a
+    plausible-looking one.
+    """
+    return DEFINITIONS.get(term, ("", ""))
 
 
 #: Run modes as verbs. `mine` is an internal word for what the step does, and

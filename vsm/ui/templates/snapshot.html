@@ -1,155 +1,294 @@
 {% extends "_base.html" %}
-{% from "_macros.html" import page_header, flow_rail, deliverable_downloads %}
-{% block title %}Snapshot — Vi Signal Mine{% endblock %}
+{% from "_macros.html" import page_header, flow_rail, deliverable_downloads,
+   card, stat, empty, chip, sort_th, stamp, read_more, bar_list, sparkline,
+   coverage_strip, spend_meter, table_scroll_open %}
+{% block title %}Sweep — Vi Signal Mine{% endblock %}
+
+{#
+  THE SWEEP SCREEN — "what did this sweep actually collect, and what did it miss?"
+
+  Coverage is the story, so it is a first-class section with its own strip and
+  its own named lists rather than a four-cell definition grid. A site that
+  returned nothing, a site that refused us and a site nobody asked are three
+  different facts (TOOL-ELEMENTS §5, UX-PLAN §7.5): a silent filter must never
+  render as an empty world.
+
+  Three layers, per UX-PLAN §12. Layer 1 is the scorecard and the coverage
+  strip. Layer 2 is the sparklines, the legend counts and the named site lists.
+  Layer 3 — the per-site table, the collector's own notes — sits behind
+  `read_more`, which prints its body a second time so nothing is lost on paper.
+#}
 
 {% block top_rail %}
 {{ flow_rail(topic, flow, "snapshot") }}
+{% if sweep_rail %}
+{# The sweep axis: one frame per sweep, and the navigation control for the
+   whole topic. `aria-current` rather than border-colour alone. It is hidden in
+   print, so the short date is safe here — the long form is in the DOM for a
+   screen reader. #}
+<div class="dated-strip" role="navigation" aria-label="sweeps of this topic">
+  {% for f in sweep_rail %}
+  <a class="dated-frame {% if f.is_current %}dated-frame-current{% endif %}"
+     {% if f.is_current %}aria-current="page"{% endif %}
+     href="{{ f.href }}"><time datetime="{{ f.started_at|iso }}">{{ f.short }}</time><span class="visually-hidden"> — {{ f.long }}</span></a>
+  {% endfor %}
+</div>
+{% endif %}
 {% endblock %}
 
 {% block content %}
+{#- Q1 in UX-PLAN §11: `collection_tier` is not a quality grade, it is what a
+    site permits. Worded as a permission so it cannot be read as the same fact
+    as "how we got it" one column over. -#}
+{% set ACCESS_BASIS = {"A": "Own API allowed", "B": "Public pages allowed",
+                       "C": "Search results only"} %}
+{% set HOW_WE_GOT_IT = {"api": "The site’s own API", "public_web_fetch": "Page fetched",
+                        "serp_result": "Search result", "discover": "Discovery result"} %}
+{% set counts = coverage_view.counts %}
+{% set mentions_label = "{:,}".format(total_rows) %}
+{#- "stopped at the cap" belongs to the *complete* family and says what it
+    kept; it is not a failure with a softer word (UX-PLAN §7.3). -#}
+{% set status_label = ("Stopped at the cap — kept " ~ mentions_label ~ (" mention" if total_rows == 1 else " mentions"))
+     if run.status == "stopped_on_budget"
+     else {"pending": "Not started", "running": "Running", "complete": "Complete",
+           "failed": "Failed"}.get(run.status, run.status|replace("_", " ")) %}
+{% set status_html %}<span class="status-badge status-{{ run.status }}">{{ status_label }}</span>{% endset %}
+
 <div class="page page-wide">
-{{ page_header("Snapshot",
-     [run.started_at|dt,
-      (topic.spend_band|sweep_size ~ " sweep") if topic is not none else "—",
-      run.cost_usd|usd(4)]) }}
-<p class="page-meta"><span class="status-badge status-{{ run.status }}">{{ run.status|replace("_", " ") }}</span></p>
+{% call page_header("Sweep",
+     [stamp(run.started_at, true)]
+     + ([(topic.spend_band|sweep_size) ~ " sweep"] if topic is not none else [])
+     + [status_html],
+     tip="sweep") %}
+  {% if storage_is_durable() %}
+  <form method="post" action="/runs/{{ run.run_id }}/insight">
+    <button class="btn btn-primary" type="submit">Analyse this sweep</button>
+  </form>
+  {% else %}
+  <p class="storage-notice">{{ read_only_control_note }}</p>
+  {% endif %}
+{% endcall %}
+
+{#- A named cause earns a sentence when the run did not end on the happy path
+    (UX-PLAN §5). On a clean run the note is background and moves to layer 3
+    inside the coverage disclosure. -#}
+{% if run.status != "complete" and run.note %}
+<p class="t-support">{{ run.note }}</p>
+{% endif %}
+
+{# ------------------------------------------------------- what came back -- #}
+
+{% call card("What came back", 2) %}
+<div class="scorecard">
+  {{ stat("Mentions collected", mentions_label, tip="mention", size="xl") }}
+  {% if coverage_view.has_data %}
+  {#- No `tip` here: the (i) popover ids are namespaced by term, so a term used
+      twice on one page emits the same id twice. "coverage" carries its
+      definition on the section below, which is where the reader acts on it. -#}
+  {{ stat("Sites that returned rows", counts.collected ~ " of " ~ coverage_view.total) }}
+  {{ stat("Sites that returned nothing", counts.empty, tip="returned nothing") }}
+  {{ stat("Sites that blocked us", counts.blocked, tip="blocked us") }}
+  {% else %}
+  {#- A word, not a zero: "0 sites answered" would be a measurement, and what
+      is actually true here is that nothing per-site was recorded. -#}
+  {{ stat("Sites", "not recorded") }}
+  {% endif %}
+</div>
+{{ sparkline(volume_series) }}
+{% endcall %}
+
+{# ------------------------------------------------------------- coverage -- #}
+
+{% call card("Coverage", 2, tip="coverage") %}
+{% if coverage_view.has_data %}
+{{ coverage_strip("cov", coverage_view) }}
+{% elif coverage is none %}
+{{ empty("Coverage was not recorded for this sweep.",
+         "The site-by-site ledger is missing, so which sites answered and which stayed silent cannot be shown. " ~ mentions_label ~ " mentions were still collected.") }}
+{% else %}
+{{ empty("The coverage record names no site.",
+         "The sweep wrote a ledger and left it empty, so nothing here can say whether a site was asked. " ~ mentions_label ~ " mentions were still collected.") }}
+{% endif %}
 
 {% if coverage is not none %}
-<h2>Coverage</h2>
+{% call read_more("What the collector recorded") %}
 <dl class="meta-grid">
-  <div><dt>Venues attempted</dt><dd>{% if coverage.venues_attempted is defined %}{{ coverage.venues_attempted|length }}{% else %}not recorded{% endif %}</dd></div>
-  <div><dt>Venues collected</dt><dd>{% if coverage.venues_collected is defined %}{{ coverage.venues_collected|length }}{% else %}not recorded{% endif %}</dd></div>
-  <div><dt>Venues answered empty</dt><dd>{% if coverage.venues_empty is defined %}{{ coverage.venues_empty|length }}{% else %}not recorded{% endif %}</dd></div>
-  <div><dt>Venues restricted (tier C)</dt><dd>{% if coverage.venues_restricted is defined %}{{ coverage.venues_restricted|length }}{% else %}not recorded{% endif %}</dd></div>
+  <div><dt>Sites asked</dt><dd>{% if coverage.venues_attempted is defined %}{{ coverage.venues_attempted|length }}{% else %}not recorded{% endif %}</dd></div>
+  {#- Only when the two disagree: a site the collector asked but recorded no
+      outcome for has no cell in the strip, and that gap is worth naming. -#}
+  {% if coverage.venues_attempted is defined and coverage.venues_attempted|length != coverage_view.total %}
+  <div><dt>Sites with a recorded outcome</dt><dd>{{ coverage_view.total }}</dd></div>
+  {% endif %}
+  {% if run.note %}<div><dt>Run note</dt><dd>{{ run.note }}</dd></div>{% endif %}
 </dl>
-{% if coverage.venues_empty is defined and coverage.venues_empty %}
-<p class="body-text field-note">
-  Answered with nothing, named rather than silently dropped:
-  {{ coverage.venues_empty|join(", ") }}.
-</p>
-{% endif %}
 {% if coverage.notes is defined and coverage.notes %}
 <ul class="note-list">
   {% for note in coverage.notes %}<li>{{ note }}</li>{% endfor %}
 </ul>
 {% endif %}
+{% endcall %}
 {% endif %}
+{% endcall %}
 
-<h2>Signal mix{% if any_filter_active %} (filtered){% endif %}</h2>
-{% if mix %}
-<div class="bar-list">
-  {% for m in mix %}
-  <div class="bar-row">
-    <span class="bar-label">{{ m.label }}</span>
-    <div class="bar-track"><div class="bar-fill" style="width: {{ m.pct }}%"></div></div>
-    <span class="bar-count">{{ m.count }}</span>
-  </div>
-  {% endfor %}
-</div>
-{% else %}
-<p class="empty-state">No signals to plot{% if any_filter_active %} for this filter{% endif %}.</p>
-{% endif %}
+{# ------------------------------------------------------------- mentions -- #}
 
-<h2>Signals ({{ rows|length }} of {{ total_rows }})</h2>
+{% set mix_summary = (mix_bars[0].label ~ " leads with " ~ mix_bars[0].value_label
+     ~ " of " ~ "{:,}".format(matched_rows) ~ (" mention" if matched_rows == 1 else " mentions")
+     ~ (" in this selection." if any_filter_active else ".")) if mix_bars else "" %}
+
+{% call card("Mentions", 2) %}
 <form class="filter-form" method="get" action="/runs/{{ run.run_id }}/snapshot">
   <div class="filter-field">
-    <label for="f-venue">Venue</label>
+    <label for="f-venue">Site</label>
     <select id="f-venue" name="venue">
-      <option value="">All</option>
+      <option value="">Every site</option>
       {% for v in options.venues %}
       <option value="{{ v }}" {% if filters.venue == v %}selected{% endif %}>{{ v }}</option>
       {% endfor %}
     </select>
   </div>
   <div class="filter-field">
-    <label for="f-kind">Venue kind</label>
+    <label for="f-kind">Type of site</label>
     <select id="f-kind" name="kind">
-      <option value="">All</option>
+      <option value="">Every type</option>
       {% for k in options.kinds %}
       <option value="{{ k }}" {% if filters.kind == k %}selected{% endif %}>{{ kind_label(k) }}</option>
       {% endfor %}
     </select>
   </div>
   <div class="filter-field">
-    <label for="f-tier">Collection tier</label>
+    <label for="f-tier">Access basis</label>
     <select id="f-tier" name="tier">
-      <option value="">All</option>
+      <option value="">Every basis</option>
       {% for t in options.tiers %}
-      <option value="{{ t }}" {% if filters.tier == t %}selected{% endif %}>{{ t }}</option>
+      <option value="{{ t }}" {% if filters.tier == t %}selected{% endif %}>{{ ACCESS_BASIS.get(t, t) }}</option>
       {% endfor %}
     </select>
   </div>
   <div class="filter-field">
-    <label for="f-date">Date</label>
+    <label for="f-date">Captured</label>
     <select id="f-date" name="date">
-      <option value="">All</option>
+      <option value="">Every day</option>
       {% for d in options.dates %}
-      <option value="{{ d }}" {% if filters.date == d %}selected{% endif %}>{{ d }}</option>
+      <option value="{{ d }}" {% if filters.date == d %}selected{% endif %}>{{ d|date_long }}</option>
       {% endfor %}
     </select>
   </div>
-  <button class="btn btn-ghost" type="submit">Apply filters</button>
-  {% if any_filter_active %}
-  <a class="link-back" href="/runs/{{ run.run_id }}/snapshot">Clear filters</a>
-  {% endif %}
+  {#- The sort and the row cap are part of the view, so applying a filter must
+      not silently reset either. -#}
+  {% if sort != "captured" %}<input type="hidden" name="sort" value="{{ sort }}">{% endif %}
+  {% if uncapped %}<input type="hidden" name="all" value="1">{% endif %}
+  <button class="btn btn-ghost" type="submit">Apply</button>
 </form>
 
+{#- Amplitude's convention, and UX-PLAN §1 adopts it: the active filter set is
+    permanently visible above the list as removable chips, so a subset can
+    never be misread as the whole. Native <a>, state in the text, no hover-only
+    remove affordance. -#}
+{% if active_filters %}
+<div class="chip-row">
+  {% for f in active_filters %}
+  {{ chip(f.label ~ ": " ~ (ACCESS_BASIS.get(f.value, f.value) if f.key == "tier" else (f.value|date_long if f.key == "date" else f.value)),
+          f.clear_href, on=true, removes="Clear") }}
+  {% endfor %}
+  {% if active_filters|length > 1 %}
+  {{ chip("Every mention", "/runs/" ~ run.run_id ~ "/snapshot", removes="Clear all") }}
+  {% endif %}
+</div>
+{% endif %}
+
+{#- Drawn only when there is something to draw. With nothing collected — or
+    nothing matching — the named empty state below carries the fact, and a
+    figure repeating it in a dashed frame would state one truth twice. -#}
+{% if mix_bars %}
+{{ bar_list(mix_bars, summary=mix_summary, unit="mentions",
+            data_label="Types of site by mentions collected") }}
+{% endif %}
+
 {% if rows %}
-<div class="table-scroll" tabindex="0" role="region" aria-label="Collected signals">
-<table class="data-table signals-table">
-  <caption class="visually-hidden">Every signal collected in this snapshot, with its venue, capture time, collection method and source URL.</caption>
+{{ table_scroll_open("Collected mentions") }}
+<table class="data-table">
+  <caption class="visually-hidden">Every mention collected in this sweep: the site, what type of site it is, what that site permits, when it was captured, its theme, an excerpt and a link to the page.</caption>
   <thead>
     <tr>
-      <th scope="col">Venue</th>
-      <th scope="col">Kind</th>
-      <th scope="col">Tier</th>
-      <th scope="col">Captured</th>
-      <th scope="col">Theme</th>
+      {{ sort_th("Site", "venue", sort, sort_base) }}
+      {{ sort_th("Type of site", "kind", sort, sort_base) }}
+      <th scope="col">Access basis</th>
+      {{ sort_th("Captured", "captured", sort, sort_base) }}
+      {{ sort_th("Theme", "theme", sort, sort_base) }}
       <th scope="col">Excerpt</th>
       <th scope="col">Source</th>
     </tr>
   </thead>
   <tbody>
+    {#- `signals.json` is free-shape: the route only guarantees `venue_kind`
+        and `date_only`, and a row that predates a field simply does not carry
+        it. Read every other field defensively, because under StrictUndefined
+        one such row would 500 the whole page rather than losing one cell. -#}
     {% for row in rows %}
+    {% set site = row.venue if row.venue is defined and row.venue else "" %}
+    {% set basis = row.collection_tier if row.collection_tier is defined and row.collection_tier else "" %}
+    {% set method = row.collection_method if row.collection_method is defined and row.collection_method else "" %}
+    {% set url = row.url if row.url is defined and row.url else "" %}
+    {% set excerpt = row.excerpt if row.excerpt is defined and row.excerpt else "" %}
+    {% set theme = row.theme if row.theme is defined and row.theme else "" %}
     <tr>
-      <th scope="row" class="cell-title">{{ row.venue }}</th>
-      <td>{{ kind_label(row.venue_kind) if row.venue_kind else "not on the gold-list registry" }}</td>
-      <td class="cell-sub">{% if row.collection_tier is defined and row.collection_tier %}{{ row.collection_tier }}{% else %}not recorded{% endif %}</td>
-      <td>{{ row.captured_at|dt }}</td>
-      <td>{{ row.theme if row.theme else "—" }}</td>
+      <th scope="row" class="cell-title">{{ site if site else "site not recorded" }}</th>
+      <td>{{ kind_label(row.venue_kind) }}</td>
+      <td class="cell-sub">{{ ACCESS_BASIS.get(basis, basis) if basis else "not recorded" }}</td>
+      <td>{{ stamp(row.captured_at if row.captured_at is defined else none) }}</td>
+      <td>{{ theme if theme else "not grouped" }}</td>
       <td>
-        {% if row.excerpt %}{{ row.excerpt }}
-        {% elif row.author_type is defined and row.author_type == "patient" %}<span class="muted">patient-generated — themes only, no excerpt kept</span>
-        {% else %}<span class="muted">no excerpt kept</span>{% endif %}
+        {%- if excerpt %}{{ excerpt }}
+        {%- elif row.author_type is defined and row.author_type == "patient" %}<span class="muted">patient-generated — themes only, no excerpt kept</span>
+        {%- else %}<span class="muted">no excerpt kept</span>{% endif %}
       </td>
-      <td>{% if row.url %}<a href="{{ row.url }}">{{ row.collection_method if row.collection_method else "link" }}<span class="visually-hidden"> — {{ row.venue }}</span> <span aria-hidden="true">↗</span></a>{% else %}<span class="muted">no url</span>{% endif %}</td>
+      <td>
+        {%- if url %}<a href="{{ url }}">Open page{% if site %}<span class="visually-hidden"> on {{ site }}</span>{% endif %}</a>
+        {%- else %}<span class="muted">no link recorded</span>{% endif %}
+        <span class="cell-sub">{{ HOW_WE_GOT_IT.get(method, method) if method else "not recorded" }}</span>
+      </td>
     </tr>
     {% endfor %}
   </tbody>
 </table>
 </div>
-{% else %}
-<p class="empty-state">
-  {% if total_rows == 0 %}
-  This snapshot collected no signals.{% if run.note %} {{ run.note }}.{% endif %}
-  {% else %}
-  No signals match these filters.
-  {% endif %}
-</p>
+{% if capped %}
+<p class="t-meta">First {{ "{:,}".format(row_cap) }} of {{ "{:,}".format(matched_rows) }} mentions. <a href="{{ all_href }}">Show all {{ "{:,}".format(matched_rows) }}</a></p>
+{% elif any_filter_active %}
+<p class="t-meta">{{ "{:,}".format(matched_rows) }} of {{ mentions_label }} mentions match.</p>
 {% endif %}
+{% elif total_rows == 0 %}
+{{ empty("This sweep collected nothing.",
+         run.note if run.note else "",
+         ("/topics/" ~ topic.topic_id ~ "/confirm") if topic is not none else "",
+         "Run another sweep" if topic is not none else "") }}
+{% else %}
+{{ empty("No mention matches these filters.",
+         mentions_label ~ " mentions were collected in this sweep.",
+         "/runs/" ~ run.run_id ~ "/snapshot", "Clear all filters") }}
+{% endif %}
+{% endcall %}
 
-<h2>Deliverables</h2>
-<p class="body-text field-note">What this topic can produce, from here on — the signal ledger and coverage are already real; the rest fills in as insight and report run.</p>
+{# ---------------------------------------------------------------- spend -- #}
+
+{% set spend_caption = (spend_series.count ~ " sweeps, " ~ (spend_series.lo|usd(2))
+     ~ " to " ~ (spend_series.hi|usd(2)) ~ " each.") if spend_series.count > 1
+     else (("One sweep on record, at " ~ (spend_series.hi|usd(2)) ~ ".")
+           if spend_series.count == 1 else "") %}
+
+{% call card("Spend", 2, tip="cap") %}
+{{ spend_meter(spend) }}
+{#- The series is behind a control and its scope is named in the summary,
+    because it is not the same figure as the meter: the meter reads this run's
+    cap ledger (`cost.json`), the series reads each run record's own billed
+    total. On the offline demonstration miner those two legitimately differ,
+    and side by side they would read as one number contradicting itself. -#}
+{% call read_more("What each sweep of this topic was billed") %}
+{{ sparkline(spend_series, label=spend_caption, title="what each sweep of this topic was billed") }}
+{% endcall %}
+{% endcall %}
+
 {{ deliverable_downloads(deliv_tiers) }}
-
-<div class="form-actions form-actions-end">
-  {% if storage_is_durable() %}
-  <form method="post" action="/runs/{{ run.run_id }}/insight">
-    <button class="btn btn-primary" type="submit">Run insight on this snapshot</button>
-  </form>
-  {% else %}
-  <p class="storage-notice">{{ read_only_control_note }}</p>
-  {% endif %}
-</div>
 </div>
 {% endblock %}

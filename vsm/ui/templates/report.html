@@ -1,5 +1,6 @@
 {% extends "_base.html" %}
-{% from "_macros.html" import flow_rail, deliverable_downloads, tier_badge, ref_marks %}
+{% from "_macros.html" import flow_rail, deliverable_downloads, tier_badge, ref_marks,
+   sources, stat, empty, dumbbell, bar_list, stamp %}
 {% block title %}Pulse report — {% if topic is not none %}{{ topic.name }} — {% endif %}Vi Signal Mine{% endblock %}
 
 {% block top_rail %}
@@ -8,22 +9,43 @@
 
 {% block content %}
 {# ---------------------------------------------------------------------------
-   This screen is a document, not a page of data. The reference is a pharma
-   commercial review deck or a journal article: authority from typography and
-   restraint, findings quotable straight off the screen, one numbered figure,
-   tables with captions, and an appendix that reads as an appendix.
+   THE CLIENT DOCUMENT.
 
-   Two rules hold everywhere below.
+   Not a dashboard and not a page of data: a briefing document with a cover, a
+   numbered figure, captioned tables and an appendix that reads as an appendix.
+   The reference is a pharma commercial review deck or a journal article —
+   authority from typography and restraint, findings quotable straight off the
+   page, every figure traceable to a dated row with a URL.
 
-   * Nothing here is a "preview". The word was tool language on the largest
-     type on the page, above a document whose own title then reappeared
-     smaller, inside a bordered box.
-   * `None` is never a blank and never a zero. Every absent figure on this
-     page states the reason it is absent — the window, the signal count, the
-     divergence column, the citation list.
+   Four rules hold everywhere below.
+
+   * **Three layers, separated on more than three axes at once.** The answer is
+     the largest type in full ink (the cover figure, the finding claim); the
+     support sits beside it at meta size in secondary ink (the badge, the pips,
+     the volume); the depth moves to a *place* — the appendix, the methodology —
+     rather than to a control. This page carries no disclosure element at all,
+     on purpose and under test: whatever a given print engine does with a
+     closed one cannot matter for the document a client is handed. Enclosure,
+     position and density do the work a summary control does elsewhere.
+
+   * **Quantity is seen.** The theme volumes are a ranked bar list and the
+     clinician-patient gap is a dumbbell whose connector length *is* the gap.
+     Neither is a wall of digits, and each still prints every number as text —
+     there is no hover layer in this app for a value to hide in.
+
+   * **`None` is never a blank and never a zero.** Every absent figure states
+     the reason it is absent: the window, the mention count, the two stance
+     columns, the gap column, the citation list. A theme one audience never
+     raised is grouped away from the comparison entirely, because averaging it
+     in would say the silence was agreement.
+
+   * **Nothing describes a number already on screen.** The prose that survives
+     is the prose that adds something the figures cannot: the bar a statement
+     had to clear, why a theme cannot be compared, what was excluded.
    --------------------------------------------------------------------------- #}
 <article class="page doc">
 
+{# --------------------------------------------------------------- cover -- #}
 <header class="doc-cover">
   <p class="eyebrow">Pulse report</p>
   <h1 class="doc-title">{{ doc.title }}</h1>
@@ -31,35 +53,36 @@
     {% if doc.window_note %}
     Dated window <span class="doc-window-note">{{ doc.window_note }}</span>
     {% elif doc.window_single_day %}
-    Collected on <time datetime="{{ doc.window_from }}">{{ doc.window_from|date_long }}</time>
+    Collected on {{ stamp(doc.window_from, true) }}
     {% else %}
-    Collected <time datetime="{{ doc.window_from }}">{{ doc.window_from|date_long }}</time>
-    to <time datetime="{{ doc.window_to }}">{{ doc.window_to|date_long }}</time>
+    Collected {{ stamp(doc.window_from, true) }} to {{ stamp(doc.window_to, true) }}
     {% endif %}
   </p>
 
-  <dl class="doc-cover-facts">
-    <div>
-      <dt>Signals collected</dt>
-      <dd>{% if doc.signal_count is not none %}{{ doc.signal_count }} across {{ doc.venue_count }} venue{% if doc.venue_count != 1 %}s{% endif %}{% else %}<span class="doc-reason">{{ doc.signal_note }}</span>{% endif %}</dd>
-    </div>
-    <div>
-      <dt>Themes</dt>
-      <dd>{{ doc.theme_count }}</dd>
-    </div>
-    <div>
-      <dt>Support</dt>
-      <dd>{{ doc.tier_counts.corroborated }} with 3+ sources · {{ doc.tier_counts.emerging }} with 2 · {{ doc.tier_counts.single_source }} with 1</dd>
-    </div>
-    <div>
-      <dt>Sources cited</dt>
-      <dd>{{ doc.citation_count }}</dd>
-    </div>
-  </dl>
+  {# The cover's figures, at cover weight. One xl per screen: the size of the
+     evidence base is the thing a reader has to hold in their head before any
+     statement below means anything. The support distribution rides under the
+     theme count as its own qualifier rather than as a fourth cell — how well
+     backed the themes are is a fact *about* those themes, not a separate one. #}
+  <div class="scorecard">
+    {% if doc.signal_count is not none %}
+    {{ stat("Mentions read", "{:,}".format(doc.signal_count),
+            sub="across " ~ doc.venue_count ~ (" site" if doc.venue_count == 1 else " sites"),
+            size="xl") }}
+    {% else %}
+    {{ stat("Mentions read", "not readable here", sub=doc.signal_note) }}
+    {% endif %}
+    {{ stat("Themes observed", doc.theme_count,
+            sub=doc.tier_counts.corroborated ~ " with 3+ sources · "
+                ~ doc.tier_counts.emerging ~ " with 2 · "
+                ~ doc.tier_counts.single_source ~ " with 1") }}
+    {{ stat("Sources cited", doc.citation_count,
+            sub="each one dated, with a URL, in the appendix") }}
+  </div>
 
   <p class="doc-cover-rests">
     Rests on
-    {% if doc.snapshot_run_id %}<a href="/runs/{{ doc.snapshot_run_id }}/snapshot">the snapshot of {{ doc.snapshot_at|date_long }}</a>{% else %}a snapshot this instance can no longer read{% endif %}{% if doc.insight_run_id %}, analysed in <a href="/runs/{{ doc.insight_run_id }}/insight">the insight pass</a>{% endif %}.
+    {% if doc.snapshot_run_id %}<a href="/runs/{{ doc.snapshot_run_id }}/snapshot">the sweep of {{ doc.snapshot_at|date_long }}</a>{% else %}a sweep this instance can no longer read{% endif %}{% if doc.insight_run_id %}, analysed in <a href="/runs/{{ doc.insight_run_id }}/insight">the insight pass</a>{% endif %}.
   </p>
 
   {# The tool's own telemetry — run id, sweep size, what it cost — belongs at
@@ -67,7 +90,7 @@
      subject. It is provenance, and a client's report is not the place to
      advertise a supplier's unit economics. #}
   <p class="doc-provenance">
-    Prepared by Vi Signal Mine · issued <time datetime="{{ run.started_at }}">{{ run.started_at|date_long }}</time>
+    Prepared by Vi Signal Mine · issued {{ stamp(run.started_at, true) }}
     · run <span class="doc-runid">{{ run.run_id }}</span>
     {% if topic is not none %}· {{ topic.spend_band|sweep_size }} sweep{% endif %}
     · {{ run.cost_usd|usd(4) }} of model and search time
@@ -76,123 +99,183 @@
   <div class="doc-actions">
     {% if pulse_href %}<a class="btn btn-primary" href="{{ pulse_href }}" download>Download this report</a>{% endif %}
     <a class="btn btn-ghost" href="#appendix">Read the evidence</a>
-    <a class="btn btn-ghost" href="/deliverables">What you get <span aria-hidden="true">↗</span></a>
+    <a class="btn btn-ghost" href="/deliverables">What you get</a>
   </div>
-  {# No button here prints the page: this app ships no JavaScript, so the
-     print path is the browser's own. The stylesheet is what makes it a
-     document rather than a printed web page — see the @media print block in
-     app.css. #}
+  {# No button here prints the page: this app ships no JavaScript, so the print
+     path is the browser's own. The stylesheet is what makes it a document
+     rather than a printed web page — see the @media print block in app.css. #}
   <p class="doc-print-note">Print or save as PDF from your browser — the app chrome drops away and this sets as a document.</p>
 </header>
 
 {% if not has_pulse %}
-<p class="empty-state">The pulse report was not written on this run, so there is no document to typeset here. The run's other artifacts are listed at the foot of this page.</p>
+{{ empty("The pulse report was not written on this run, so there is no document to typeset here.",
+         cause="Everything else the run produced is intact and listed at the foot of this page.",
+         href="#files", action="Go to the files") }}
 {% endif %}
 
 {% if lead_html %}
 <div class="doc-prose doc-lead">{{ lead_html|safe }}</div>
 {% endif %}
 
+{# The four sections this page draws itself, by the heading `report.py` writes.
+   The writer's heading for the 3-or-more-sources block does not currently
+   match the key the route looks it up under, so its prose arrives here as an
+   "extra" section instead of as the claim on each finding. Rendering it again
+   at full section weight would put the same material on a client document
+   twice; deleting it would throw away the only change-against-the-prior-sweep
+   sentence on the page. So it is *carried* into the section it belongs to, at
+   layer-3 weight, and dropped from the loop further down. Once that key is
+   corrected the block stops arriving here at all and both branches go quiet. #}
+{% set drawn_here = ["Themes observed", "Corroborated findings",
+                     "Backed by 3 or more sources", "Backed by 2 sources",
+                     "Patient vs. HCP divergence", "Worth considering",
+                     "Provenance appendix", "Methodology"] %}
+{% set carried_corroborated = extra_sections|selectattr("heading", "equalto", "Backed by 3 or more sources")|list %}
+{% set carried_emerging = extra_sections|selectattr("heading", "equalto", "Backed by 2 sources")|list %}
+
+{# ------------------------------------------------------------ findings -- #}
+{# The answer, first and largest. A statement, then what backs it — never the
+   other way round, and never a chart the reader is left to derive a finding
+   from. The reference marks are the whole commercial claim made structural:
+   each one lands on a dated row with a URL. #}
 <section class="doc-section" id="findings">
   <h2 class="doc-h">Backed by 3 or more sources</h2>
-  <p class="doc-section-note">A claim reaches this section on three or more independent sources. Every reference number resolves to a dated row with a URL in the <a href="#appendix">provenance appendix</a>.</p>
+  <p class="doc-section-note">Three or more independent sources back each statement here, so each can be said as it stands. Every reference number resolves to a dated row in the <a href="#appendix">provenance appendix</a>; what counts as one source is set out under <a href="#methodology">methodology</a>.</p>
   {% if corroborated %}
   {% for f in corroborated %}
   <div class="finding" id="{{ f.anchor }}" tabindex="-1">
     <div class="finding-head">
       {{ tier_badge(f.tier) }}
-      <span class="finding-meta">{{ f.sources }} independent source{% if f.sources != 1 %}s{% endif %} · {{ f.volume }} signal{% if f.volume != 1 %}s{% endif %}</span>
+      <span class="finding-meta">{{ sources(f.sources) }} independent source{% if f.sources != 1 %}s{% endif %} · {{ f.volume }} mention{% if f.volume != 1 %}s{% endif %}</span>
     </div>
     <p class="finding-claim">{{ f.claim_html|safe }}{{ ref_marks(f.refs) }}</p>
   </div>
   {% endfor %}
-  {% else %}
+  {% elif corroborated_note %}
   <div class="doc-prose">{{ corroborated_note|safe }}</div>
+  {% else %}
+  {{ empty("No theme in this sweep reached three independent sources.",
+           cause="That is a statement about how widely each theme was carried, not a collection failure — every theme found is listed below with the support it did draw.",
+           href="#themes", action="See every theme") }}
+  {% endif %}
+  {% if carried_corroborated %}
+  <div class="layer-depth doc-prose">{{ carried_corroborated[0].html|safe }}</div>
   {% endif %}
 </section>
 
 <section class="doc-section" id="emerging">
   <h2 class="doc-h">Backed by 2 sources</h2>
-  <p class="doc-section-note">Shown separately, and never as a finding: two sources is worth watching, not worth stating.</p>
+  <p class="doc-section-note">Held apart from the statements above, and never quoted flat: two sources is worth attributing to who said it.</p>
   {% if emerging %}
   {% for f in emerging %}
   <div class="finding finding-emerging" id="{{ f.anchor }}" tabindex="-1">
     <div class="finding-head">
       {{ tier_badge(f.tier) }}
-      <span class="finding-meta">{{ f.sources }} independent source{% if f.sources != 1 %}s{% endif %} · {{ f.volume }} signal{% if f.volume != 1 %}s{% endif %}</span>
+      <span class="finding-meta">{{ sources(f.sources) }} independent source{% if f.sources != 1 %}s{% endif %} · {{ f.volume }} mention{% if f.volume != 1 %}s{% endif %}</span>
     </div>
     <p class="finding-claim">{{ f.claim_html|safe }}{{ ref_marks(f.refs) }}</p>
   </div>
   {% endfor %}
-  {% else %}
+  {% elif emerging_note %}
   <div class="doc-prose">{{ emerging_note|safe }}</div>
+  {% else %}
+  {{ empty("No theme in this sweep sat on exactly two sources.",
+           cause="Every theme found is either backed by three or more, or by one.") }}
+  {% endif %}
+  {% if carried_emerging %}
+  <div class="layer-depth doc-prose">{{ carried_emerging[0].html|safe }}</div>
   {% endif %}
 </section>
 
+{# ------------------------------------------------------------- figure 1 -- #}
+{# The product's one real visual argument, and the reason it is drawn as a
+   dumbbell rather than a plot of boxes: the connector's *length* is the gap,
+   the two audiences are told apart by shape as well as fill, the theme names
+   are HTML so they wrap instead of being clipped, and every value is printed
+   as text beside its own row. A theme only one audience raised is carried in
+   its own group beneath, never averaged into the comparison. #}
 {% if figure is not none %}
-<figure class="doc-figure" id="figure-1">
-  <div class="doc-figure-plot">{{ figure.svg|safe }}</div>
-  <figcaption>
-    <span class="doc-figure-num">Figure {{ figure.number }}</span>
-    Patient-versus-clinician divergence by theme. Box area is signal volume; the
-    whisker spans the signed gap between the two net-stance readings; the centre
-    line is no gap. {{ figure.estimable }} of {{ figure.rows|length }} themes are
-    estimable. NE marks a theme only one side discussed — not comparable, and not
-    a gap of zero.
-  </figcaption>
-  <div class="table-scroll doc-figure-data" tabindex="0" role="region" aria-label="Figure 1 as a table">
-  <table class="doc-table">
-    <caption>Figure {{ figure.number }} as a table — every mark in the plot, with the reason a theme is not estimable.</caption>
-    <thead><tr>
-      <th scope="col">Theme</th>
-      <th scope="col" class="num">Signals</th>
-      <th scope="col" class="num">Clinician net</th>
-      <th scope="col" class="num">Patient net</th>
-      <th scope="col">Divergence</th>
-      <th scope="col" class="num">Sources</th>
-    </tr></thead>
-    <tbody>
-      {% for r in figure.rows %}
-      <tr>
-        <th scope="row">{{ r.name }}</th>
-        <td class="num">{{ r.volume }}</td>
-        {# Each net cell states its own reason when absent, matching the wording
-           the client artifact uses in the same cell. A bare dash here made the
-           page less honest than the document it previews. #}
-        <td class="{{ 'num' if r.hcp_net is not none else 'doc-reason' }}">{{ r.hcp_net|net('hcp') }}</td>
-        <td class="{{ 'num' if r.patient_net is not none else 'doc-reason' }}">{{ r.patient_net|net('patient') }}</td>
-        {# The one non-negotiable rule of this codebase, in the one column
-           most likely to break it: a divergence of `None` prints the stated
-           reason, never 0 and never an empty cell. #}
-        <td>{% if r.divergence is not none %}<span class="doc-num">{{ r.divergence|net }}</span>{% else %}<span class="doc-ne">NE</span> <span class="doc-reason">{{ r.reason }}</span>{% endif %}</td>
-        <td>{{ tier_badge(r.tier) if r.tier else "not scored" }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  </div>
-</figure>
+<section class="doc-section" id="divergence">
+  <h2 class="doc-h">Where clinicians and patients read a theme differently</h2>
+  <figure class="doc-figure" id="figure-1">
+    {# The document's figure line: a number a reader can cite and the subject
+       it plots. The *value* is stated by the caption sitting directly on the
+       drawing below, which is where a reader looks for it — repeating it here
+       would put the same sentence on the page twice, three lines apart. #}
+    <figcaption>
+      <span class="doc-figure-num">Figure {{ figure.number }}</span>
+      Clinician and patient tone, theme by theme.
+    </figcaption>
+    {# The hairline box is the enclosure axis: it is what makes a numbered
+       figure read as a figure rather than as more page. The drawing and the
+       one-audience group both sit inside it, because they are one figure —
+       separating them into two boxes would invite the reader to average the
+       second into the first, which is the one thing this figure must not
+       allow. #}
+    <div class="doc-figure-plot">{{ dumbbell(gap, 3) }}</div>
+    <div class="table-scroll doc-figure-data" tabindex="0" role="region" aria-label="Figure {{ figure.number }} as a table">
+    <table class="doc-table">
+      <caption>Figure {{ figure.number }} as a table: the two tone readings behind every mark, on the same scale as the axis above.</caption>
+      <thead><tr>
+        <th scope="col">Theme</th>
+        <th scope="col">Clinicians</th>
+        <th scope="col">Patients</th>
+        <th scope="col">Gap</th>
+      </tr></thead>
+      <tbody>
+        {% for r in figure.rows %}
+        <tr>
+          <th scope="row">{{ r.name }}</th>
+          {# Each stance cell states its own reason when there is no reading,
+             in the same words the downloaded document uses in the same cell.
+             A bare dash here made the page less honest than the file. #}
+          <td class="{{ 'num' if r.hcp_net is not none else 'doc-reason' }}">{{ r.hcp_net|net('hcp') }}</td>
+          <td class="{{ 'num' if r.patient_net is not none else 'doc-reason' }}">{{ r.patient_net|net('patient') }}</td>
+          {# The one non-negotiable rule of this codebase, in the column most
+             likely to break it: an absent gap prints the words, never 0 and
+             never an empty cell. The reason why is a sentence, and a sentence
+             belongs beside the row in the figure above, not inside a cell it
+             would force wide enough to wreck the printed layout. #}
+          <td>{% if r.divergence is not none %}<span class="doc-num">{{ r.divergence|net }}</span>{% else %}no comparison{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </figure>
+</section>
 {% endif %}
 
+{# --------------------------------------------------------------- themes -- #}
 <section class="doc-section" id="themes">
   <h2 class="doc-h">Themes observed</h2>
+  <p class="doc-section-note">Every theme is reported whatever its support, because a count is arithmetic; only a claim about a theme needs sources behind it.</p>
   {% if theme_rows %}
+  {% if theme_bars %}
+  {% set lead_bar = theme_bars[0] %}
+  {% set theme_total = theme_bars|sum(attribute="value") %}
+  {{ bar_list(theme_bars,
+              summary=lead_bar.label ~ " draws " ~ lead_bar.value_label ~ " of "
+                      ~ "{:,}".format(theme_total|int) ~ " mentions across "
+                      ~ theme_bars|length ~ (" theme." if theme_bars|length == 1 else " themes."),
+              unit="mentions",
+              data_label="Themes by mentions, largest first",
+              empty_note="No theme was found in this sweep.") }}
+  {% endif %}
   <div class="table-scroll" tabindex="0" role="region" aria-label="Themes observed">
   <table class="doc-table">
-    <caption>Every theme in this snapshot, with how many mentions it drew and how many independent sources back it. A theme is always reported: a count is arithmetic, whereas a claim about it needs support.</caption>
+    <caption>The same themes with the evidence behind each one: how many independent sources carried it, and which appendix rows those are.</caption>
     <thead><tr>
       <th scope="col">Theme</th>
-      <th scope="col" class="num">Volume</th>
-      <th scope="col" class="num">Sources</th>
+      <th scope="col" class="num">Mentions</th>
       <th scope="col" class="num">Independent sources</th>
-      <th scope="col">Sources</th>
+      <th scope="col">References</th>
     </tr></thead>
     <tbody>
       {% for t in theme_rows %}
       <tr id="{{ t.row_anchor }}">
         <th scope="row">{% if t.anchor != t.row_anchor %}<a href="#{{ t.anchor }}">{{ t.name }}</a>{% else %}{{ t.name }}{% endif %}</th>
         <td class="num">{{ t.volume }}</td>
-        <td>{{ tier_badge(t.tier) }}</td>
         <td class="num">{{ t.sources }}</td>
         <td>{% if t.refs %}{{ ref_marks(t.refs) }}{% else %}<span class="doc-reason">no citation resolved for this theme</span>{% endif %}</td>
       </tr>
@@ -201,11 +284,15 @@
   </table>
   </div>
   {% else %}
-  <p class="empty-state">No themes were found in this snapshot.</p>
+  {{ empty("No theme was found in this sweep.",
+           cause="Either nothing was collected, or nothing collected clustered into a theme.") }}
   {% endif %}
 </section>
 
-{% for s in extra_sections %}
+{# ------------------------------------------------- the report's own prose -- #}
+{# Whatever pulse_report.md carries that this page does not already draw. The
+   sections it does draw are excluded by `drawn_here`, set above. #}
+{% for s in extra_sections if s.heading not in drawn_here %}
 <section class="doc-section">
   <h2 class="doc-h">{{ s.heading }}</h2>
   <div class="doc-prose">{{ s.html|safe }}</div>
@@ -217,13 +304,18 @@
   {% if considering_html %}
   <div class="doc-prose">{{ considering_html|safe }}</div>
   {% else %}
-  <p class="empty-state">The worth-considering note was not written on this run.</p>
+  {{ empty("The worth-considering note was not written on this run.",
+           cause="It is one of four documents a report run produces; the other three are below and at the foot of this page.") }}
   {% endif %}
 </section>
 
+{# ------------------------------------------------------------- appendix -- #}
+{# Layer three, and the moat. It is not hidden behind a control — it is moved
+   to a place, at caption density, reached by every reference mark above and
+   linking back to the claim that cited it. #}
 <section class="doc-section" id="appendix">
   <h2 class="doc-h">Provenance appendix</h2>
-  <p class="doc-section-note">One row per cited source, numbered as the references above. Every row links back to the claim that cited it.</p>
+  <p class="doc-section-note">One row per cited source, numbered as the references above, each linking back to the claim that cited it.</p>
   {% if citations %}
   <div class="table-scroll doc-appendix" tabindex="0" role="region" aria-label="Provenance appendix">
   <table class="doc-table doc-table-appendix">
@@ -242,7 +334,7 @@
           <a href="{{ c.url }}">{{ c.venue }}</a>
           <span class="cell-sub">{{ kind_label(c.venue_kind) }} · {{ c.method }} · <span class="doc-runid">{{ c.signal_id }}</span></span>
         </td>
-        <td><time datetime="{{ c.captured_at }}">{{ c.captured_at|date_long }}</time></td>
+        <td>{{ stamp(c.captured_at, true) }}</td>
         <td>
           {% if c.back %}
           {% for b in c.back %}<a href="#{{ b.anchor }}">{{ b.label }}</a>{% if not loop.last %}; {% endif %}{% endfor %}
@@ -256,7 +348,8 @@
   </table>
   </div>
   {% else %}
-  <p class="empty-state">No source was cited in this report's body, so the appendix has no rows. That is a statement about the report, not a missing file.</p>
+  {{ empty("No source was cited in this report's body, so the appendix has no rows.",
+           cause="That is a statement about the report, not a missing file.") }}
   {% endif %}
 </section>
 
@@ -265,13 +358,13 @@
   {% if methodology_html %}
   <div class="doc-prose doc-prose-sm">{{ methodology_html|safe }}</div>
   {% else %}
-  <p class="empty-state">The methodology note was not written on this run.</p>
+  {{ empty("The methodology note was not written on this run.",
+           cause="Without it the definitions and the exclusions behind the figures above are not on this page.") }}
   {% endif %}
 </section>
 
 <section class="doc-section doc-no-print" id="files">
-  <h2 class="doc-h">The files this run produced</h2>
-  <p class="doc-section-note">Each of these is exactly what downloads — the document above is the first of them, typeset. <a href="/deliverables">What you get</a> describes all ten.</p>
+  <h2 class="doc-h">The files behind this document</h2>
   {{ deliverable_downloads(deliv_tiers, 3) }}
 </section>
 </article>

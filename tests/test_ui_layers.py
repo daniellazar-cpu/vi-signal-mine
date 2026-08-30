@@ -45,19 +45,30 @@ def insight(tmp_path, monkeypatch):
 # ------------------------------------------------------- depth is retained --
 
 def test_the_depth_material_is_still_present(insight):
-    """Cutting was the wrong instinct. The guide prose and the reason a theme
-    cannot be compared are the *why* behind the numbers — the most valuable
-    thing on the page — and must survive."""
+    """Cutting was the wrong instinct. The *why* behind the numbers — how a
+    reading was produced, and why a theme cannot be compared — is the most
+    valuable thing on the page and must survive.
+
+    This used to be pinned to two literals from `PLOT_GUIDE` ("How to read
+    this", "Box size"). Both described the boxes and whiskers of the forest
+    plot, which the gap figure replaced: a legend for a chart that no longer
+    exists is not depth, and keeping the strings would have pinned the page to
+    a retired shape. The property is unchanged and is asserted directly — the
+    method survives, and so does the reason a theme has no gap.
+    """
     _, body = insight
-    assert "How to read this" in body
-    assert "Box size" in body, "the plot guide was deleted rather than moved"
+    assert "told apart" in body, "the method behind the two audiences was deleted"
+    assert "Discussed by one audience only" in body, (
+        "the themes that cannot be compared were dropped rather than held apart"
+    )
+    assert "Silence from one audience is not agreement" in body
 
 
 def test_the_depth_material_is_behind_a_control(insight):
     """Present is not the same as in your face. Every layer-3 block must be
     inside a disclosure the reader opens."""
     _, body = insight
-    for phrase in ("Box size",):
+    for phrase in ("A site that is neither is counted on its own",):
         i = body.index(phrase)
         before = body[:i]
         assert before.rfind("<details") > before.rfind("</details>"), (
@@ -68,10 +79,15 @@ def test_the_depth_material_is_behind_a_control(insight):
 def test_the_finding_precedes_the_evidence(insight):
     """Statement first, then the chart. The old page opened with a plot and
     left the reader to derive the finding from it — the "insight statement"
-    pattern every analytics product leads a card with."""
+    pattern every analytics product leads a card with.
+
+    `forest-plot-wrap` was the old plot's container; the figure is now the
+    `fig-gap` dumbbell. Only the marker changed — the ordering this test exists
+    for is asserted exactly as before.
+    """
     _, body = insight
     lead = body.index('class="card-lead"')
-    plot = body.index("forest-plot-wrap")
+    plot = body.index("fig-gap")
     assert lead < plot, "the plot comes before the sentence that reads it"
 
 
@@ -79,7 +95,7 @@ def test_the_headline_numbers_come_before_the_chart_too(insight):
     """Scorecard, then chart, then table — GA4's anatomy, and the order a
     reader scans in."""
     _, body = insight
-    assert body.index('class="scorecard"') < body.index("forest-plot-wrap")
+    assert body.index('class="scorecard"') < body.index("fig-gap")
 
 
 # -------------------------------------------------- terms explain themselves --
@@ -304,10 +320,21 @@ def test_one_table_never_states_the_same_fact_twice(screens):
 
 
 def test_the_plot_axis_is_named_in_plain_words(screens):
+    """Both ends of the axis have to say what being at that end *means*.
+
+    "PATIENT MINUS CLINICIAN NET STANCE" was the original defect: arithmetic
+    where a reading should be. "GAP — PATIENT MINUS CLINICIAN" was the first
+    fix and is still the subtraction, only shorter — it survived because it
+    was the string this test happened to pin. The gap figure names the two
+    ends by what a theme sitting there is telling you, which is what "in plain
+    words" was always after.
+    """
     c, paths = screens
     text = c.get(paths["insight"]).text
     assert "PATIENT MINUS CLINICIAN NET STANCE" not in text
-    assert "GAP — PATIENT MINUS CLINICIAN" in text
+    assert "PATIENT MINUS CLINICIAN" not in text
+    for end in ("Patients more negative", "No gap", "Clinicians more negative"):
+        assert end in text, f"the axis never says {end!r}"
 
 
 def test_the_source_vocabulary_has_one_source_of_truth():

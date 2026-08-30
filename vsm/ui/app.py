@@ -21,6 +21,7 @@ import re
 from html import escape as _esc
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote_plus
 
 from fastapi import FastAPI, Form, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -66,22 +67,32 @@ from vsm.ui.content import (
     SORTS,
     TAGLINE,
     TIERS,
+    TOPIC_NAME_REQUIRED,
     WHAT_IT_IS,
+    define,
     explainer,
 )
 from vsm.ui.render import (
     sweep_size,
     fmt_date_long,
+    bar_rows,
+    coverage_grid,
+    fmt_date_short,
     fmt_dt,
     forest_plot_svg,
+    gap_chart,
+    iso_attr,
     markdown_excerpt_html,
     markdown_inline_html,
     markdown_paragraphs,
     markdown_sections,
     markdown_to_html,
+    meter,
     net_stance_short,
     net_stance_text,
     pct,
+    sentiment_mix,
+    series_points,
     sparkline_svg,
     usd,
 )
@@ -269,11 +280,16 @@ def _size_label(n: int | None) -> str | None:
     """
     if n is None:
         return None
+    # A non-breaking space between the number and its unit. This string lands
+    # inside a narrow flex control and in a ten-item list, where "1.4 MB" broke
+    # across two lines with the unit stranded — the value and its unit reading
+    # as two separate facts on the one screen where somebody is choosing which
+    # file to hand over.
     if n < 1024:
-        return f"{n} B"
+        return f"{n}\u00a0B"
     if n < 1024 * 1024:
-        return f"{n / 1024:.1f} KB"
-    return f"{n / (1024 * 1024):.1f} MB"
+        return f"{n / 1024:.1f}\u00a0KB"
+    return f"{n / (1024 * 1024):.1f}\u00a0MB"
 
 
 def _empty_deliverable_cards() -> list[dict[str, Any]]:
@@ -539,6 +555,13 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
     env.filters["net_short"] = net_stance_short
     env.filters["dt"] = fmt_dt
     env.filters["date_long"] = fmt_date_long
+    # The sweep's own name on screen ("19 Aug"); never used where it can reach
+    # paper, where `date_long` is the only unambiguous form.
+    env.filters["date_short"] = fmt_date_short
+    # The machine-readable original, for `<time datetime="…">`. Paired with
+    # `dt` by the `stamp()` macro so a capture time on any screen can be
+    # resolved to an actual instant, which a bare "14:03" cannot.
+    env.filters["iso"] = iso_attr
     env.globals["tier_label"] = _tier_label
     env.globals["tier_note"] = _tier_note
     env.globals["kind_label"] = _kind_label
@@ -552,6 +575,9 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
     # Available to every template so `define()` can be used anywhere a term
     # first appears, without each route remembering to pass it.
     env.globals["definitions"] = DEFINITIONS
+    # The lookup the `info()` macro actually uses. A term with no entry is a
+    # copy gap, not a reason to 500 a client-facing page — see content.define.
+    env.globals["define"] = define
     env.globals["MODE_LABELS"] = MODE_LABELS
     env.globals["tagline"] = TAGLINE
     env.globals["ephemeral_storage_notice"] = EPHEMERAL_STORAGE_NOTICE
@@ -562,6 +588,25 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
     # request — the same freshness `resolve_db_url` and `open_stores`
     # already guarantee — rather than baked in at app-startup time.
     env.globals["storage_is_durable"] = storage_is_durable
+
+    # ---- figure geometry -------------------------------------------------
+    # Registered as globals rather than passed per route, for the same reason
+    # `definitions` is: a macro that needs to place a dot on an axis should not
+    # depend on every one of ~15 routes having remembered to hand it the
+    # helper. Each of these returns a *uniform* key set on every path (see
+    # vsm/ui/render.py), which is what lets the macros in _macros.html address
+    # any field of any row without a guard under StrictUndefined.
+    #
+    # A route may also call them itself and pass the result in — that is the
+    # normal case for anything the route already has to read from an artifact
+    # (see `theme_bars`, `gap`, `coverage`, `spend` below). Both paths reach
+    # the same function, so the screen and the deliverable cannot disagree.
+    env.globals["bar_rows"] = bar_rows
+    env.globals["series_points"] = series_points
+    env.globals["gap_chart"] = gap_chart
+    env.globals["sentiment_mix"] = sentiment_mix
+    env.globals["coverage_grid"] = coverage_grid
+    env.globals["meter"] = meter
 
     templates = Jinja2Templates(env=env)
 
@@ -709,7 +754,20 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             "last_snapshot_at": snapshots[-1].started_at if snapshots else None,
             "spend_to_date": spend,
             "latest_volume": volumes[-1] if volumes else None,
+            # Superseded by `volume_series` below and kept only so a template
+            # that still asks for it renders. `sparkline_svg` spaces its points
+            # evenly and draws a line through two of them; both are defects the
+            # new series fixes (see render.series_points).
             "sparkline": sparkline_svg(volumes) if len(volumes) >= 2 else "",
+            # The reads this needs have already been paid three lines above, so
+            # the series costs nothing extra here — which is exactly why the
+            # watchlist is the one screen that gets an uncapped one.
+            "volume_series": series_points(
+                [{"date": r.started_at, "value": v,
+                  "href": f"/runs/{r.run_id}/snapshot"}
+                 for r, v in zip(snapshots, volumes)],
+                unit="mentions",
+            ),
         }
 
     @app.middleware("http")
@@ -739,6 +797,91 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         warm = getattr(run_store, "prefetch_artifacts", None)
         if warm is not None and pairs:
             warm(pairs)
+
+    #: How many sweeps back a volume series reaches.
+    #:
+    #: Not a display choice — a read-cost ceiling. Every point costs one
+    #: `signals.json` read, and this app has a documented history of a page
+    #: hitting the 60-second function ceiling by fanning out one read at a
+    #: time. Twelve sweeps is about a quarter of a year at the weekly cadence
+    #: §8 describes, which is more history than any of these screens asks a
+    #: question about, and it bounds the cost of the slowest page at a
+    #: constant however long a topic has been watched.
+    _SERIES_CAP = 12
+
+    def _volume_series(topic_id: str, limit: int = _SERIES_CAP) -> dict[str, Any]:
+        """Mentions collected per sweep, date-spaced, most recent `limit` sweeps.
+
+        Batched through `_prefetch` for the same reason the index is: read one
+        at a time, twelve sweeps is twelve sequential round trips on the blob
+        backend.
+
+        Always returns a full series dict — `series_points` gives an `empty`
+        shape rather than `None` when there is nothing — so a template can
+        address `series.shape` without a guard.
+        """
+        snaps = run_store.snapshots(topic_id)[-limit:]
+        _prefetch([(r.run_id, "signals.json") for r in snaps])
+        points = []
+        for r in snaps:
+            try:
+                rows = run_store.read_artifact(r.run_id, "signals.json")
+            except FileNotFoundError:
+                rows = []
+            points.append({
+                "date": r.started_at, "value": len(rows),
+                "href": f"/runs/{r.run_id}/snapshot",
+            })
+        return series_points(points, unit="mentions")
+
+    def _spend_series(topic_id: str, limit: int = _SERIES_CAP) -> dict[str, Any]:
+        """What each sweep cost, on the same date axis as the volume series.
+
+        Free: cost lives on the run record, so this reads no artifact at all.
+        Answers "are we paying more for less?" without another screen.
+        """
+        snaps = run_store.snapshots(topic_id)[-limit:]
+        return series_points(
+            [{"date": r.started_at, "value": r.cost_usd, "href": f"/runs/{r.run_id}"}
+             for r in snaps],
+            unit="dollars",
+        )
+
+    def _sweep_rail(topic_id: str, current_mine_run_id: str | None) -> list[dict[str, Any]]:
+        """The dated axis that doubles as the navigation control.
+
+        One frame per sweep, in date order, each carrying both date forms: the
+        short one for the tick a reader scans, the long one for anything that
+        can reach paper — "19 Aug" on a printed page a client opens in
+        February is exactly the ambiguity ux-guidelines row 85 forbids.
+        """
+        return [
+            {
+                "run_id": r.run_id,
+                "started_at": r.started_at,
+                "short": fmt_date_short(r.started_at),
+                "long": fmt_date_long(r.started_at),
+                "href": f"/runs/{r.run_id}/snapshot",
+                "is_current": r.run_id == current_mine_run_id,
+            }
+            for r in run_store.snapshots(topic_id)
+        ]
+
+    def _cost_meter(run: Any, cost_detail: Any) -> dict[str, Any]:
+        """Spend against the cap for one run, whether or not cost.json survived.
+
+        Falls back to the run record's own `cost_usd` with no estimate and no
+        cap rather than returning `None`: the meter macro needs a uniform
+        shape, and "we know what it cost but not what it was budgeted" is a
+        different and more honest statement than an absent figure.
+        """
+        d = cost_detail if isinstance(cost_detail, dict) else {}
+        return meter(
+            d.get("spent_usd", d.get("actual_usd", run.cost_usd)),
+            d.get("estimate_usd"),
+            d.get("cap_usd"),
+            stopped=bool(d.get("stopped")) or run.status == "stopped_on_budget",
+        )
 
     def _matches(topic: Any, needle: str) -> bool:
         """Substring match across the fields someone would actually type.
@@ -801,6 +944,38 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         # old index take eleven seconds when it was done a read at a time.
         _prefetch(artifacts_to_warm(runs_by_topic))
         ctx = build_overview(topics, runs_by_topic, run_store.read_artifact)
+        # The aggregator returns rows; the encodings are a presentation
+        # concern and are derived here so `vsm/ui/overview.py` stays a pure
+        # aggregation module with no view vocabulary in it.
+        ctx["moved_bars"] = bar_rows(
+            [{"label": r["theme"], "value": r["volume_now"],
+              "note": r["topic"].name,
+              "href": f"/runs/{r['run_id']}/insight"}
+             for r in ctx["moved"]],
+            unit="mentions",
+        )
+        ctx["moved_bullets"] = [
+            {"name": r["theme"], "topic": r["topic"].name,
+             "now": r["volume_now"], "prior": r["volume_prior"],
+             "delta_pct": r["delta_pct"],
+             "href": f"/runs/{r['run_id']}/insight",
+             "scale": max([x["volume_now"] for x in ctx["moved"]]
+                          + [x["volume_prior"] for x in ctx["moved"]] + [1])}
+            for r in ctx["moved"]
+        ]
+        ctx["gap"] = gap_chart([
+            {"name": r["theme"], "hcp_net": r["hcp_net"],
+             "patient_net": r["patient_net"], "divergence": r["divergence"],
+             "volume": 0}
+            for r in ctx["divergence"]
+        ])
+        ctx["sayable_bars"] = bar_rows(
+            [{"label": r["statement"], "value": r["sources"],
+              "note": r["topic"].name,
+              "href": f"/runs/{r['run_id']}/insight"}
+             for r in ctx["sayable"]],
+            unit="sources",
+        )
         return render(request, "overview.html", active_nav="overview", **ctx)
 
     @app.get("/topics", response_class=HTMLResponse)
@@ -853,13 +1028,55 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         capped = not uncapped and matched > _ROW_CAP
         if capped:
             rows = rows[:_ROW_CAP]
+        # Everything but the sort key, so `sort_th()` can append its own and
+        # every other part of the view survives a re-sort. A sort that silently
+        # drops the reader's search is worse than no sort.
+        sort_base = f"/topics?q={quote_plus(q)}&show={show}&sort="
         return render(
             request, "topics.html", rows=rows, first_run_steps=FIRST_RUN_STEPS,
             active_nav="topics", sorts=SORTS, filters=FILTERS,
             filter_help=FILTER_HELP, filter_lede=FILTER_LEDE,
             q=q, sort=sort, show=show, total=total, shown=len(rows),
             matched=matched, capped=capped, row_cap=_ROW_CAP, uncapped=uncapped,
+            sort_base=sort_base,
+            # Each filter chip's own URL, so the template neither rebuilds the
+            # query string nor reaches for a `title` tooltip to explain itself.
+            filter_chips=[
+                {"key": key, "label": label, "note": FILTER_HELP.get(key, ""),
+                 "on": show == key,
+                 "href": f"/topics?q={quote_plus(q)}&sort={sort}&show={key}"}
+                for key, label in FILTERS
+            ],
         )
+
+    #: Every field's visible label and its control's own `id`, for the error
+    #: summary the `error_summary()` macro renders at the top of the form.
+    #:
+    #: ux-guidelines row 109 (High) requires each summary item to *link to its
+    #: invalid field*, and the ids are not derivable from the field names —
+    #: `therapeutic_area` is `f-area` and `spend_band` is a fieldset, not an
+    #: input. A summary item pointing at an id that does not exist is worse
+    #: than no link at all, so the mapping is stated rather than guessed.
+    _FIELD_LABELS = {
+        "name": FIELD_GUIDE["name"]["label"],
+        "therapeutic_area": FIELD_GUIDE["therapeutic_area"]["label"],
+        "brand": FIELD_GUIDE["brand"]["label"],
+        "molecule": FIELD_GUIDE["molecule"]["label"],
+        "competitors": FIELD_GUIDE["competitors"]["label"],
+        "questions": FIELD_GUIDE["questions"]["label"],
+        "never_say": "Never-say terms",
+        "spend_band": "Sweep size",
+    }
+    _FIELD_ANCHORS = {
+        "name": "f-name",
+        "therapeutic_area": "f-area",
+        "brand": "f-brand",
+        "molecule": "f-molecule",
+        "competitors": "f-competitors",
+        "questions": "f-questions",
+        "never_say": "f-never-say",
+        "spend_band": "f-spend-band",
+    }
 
     _BLANK_TOPIC_VALUES = {
         "name": "", "therapeutic_area": "", "spend_band": "probe", "brand": "",
@@ -872,6 +1089,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             request, "topic_form.html", mode="create", topic=None,
             band_cards=_band_cards(), errors={}, values=dict(_BLANK_TOPIC_VALUES),
             field_guide=FIELD_GUIDE,
+            field_labels=_FIELD_LABELS, field_anchors=_FIELD_ANCHORS,
         )
 
     @app.get("/topics/{topic_id}/edit", response_class=HTMLResponse)
@@ -879,7 +1097,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         try:
             topic = topic_store.get(topic_id)
         except NoSuchTopic:
-            return error_page(request, 404, "Topic not found", f"No topic with id {topic_id!r}.")
+            return error_page(request, 404, "Topic not found", f"No topic with id {topic_id}.")
         values = {
             "name": topic.name,
             "therapeutic_area": topic.therapeutic_area,
@@ -894,6 +1112,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             request, "topic_form.html", mode="edit", topic=topic,
             band_cards=_band_cards(), errors={}, values=values,
             field_guide=FIELD_GUIDE,
+            field_labels=_FIELD_LABELS, field_anchors=_FIELD_ANCHORS,
         )
 
     @app.get("/topics/{topic_id}", response_class=HTMLResponse)
@@ -905,7 +1124,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         try:
             topic = topic_store.get(topic_id)
         except NoSuchTopic:
-            return error_page(request, 404, "Topic not found", f"No topic with id {topic_id!r}.")
+            return error_page(request, 404, "Topic not found", f"No topic with id {topic_id}.")
 
         all_runs = list(reversed(run_store.for_topic(topic_id)))
         snapshots = run_store.snapshots(topic_id)
@@ -938,6 +1157,10 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             request, "topic_detail.html", topic=topic, history=all_runs,
             has_run=bool(all_runs), tiers=_deliverable_tiers_ctx(cards),
             latest_mine=latest_mine, latest_insight=latest_insight, latest_report=latest_report,
+            volume_series=_volume_series(topic_id),
+            spend_series=_spend_series(topic_id),
+            sweep_rail=_sweep_rail(topic_id, latest_mine.run_id if latest_mine else None),
+            spend_to_date=round(sum(r.cost_usd for r in all_runs), 4),
         )
 
     def _validate_topic_form(name: str, spend_band: str) -> dict[str, str]:
@@ -947,10 +1170,15 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         spend band cannot come from the form itself (each band card always
         submits a value); it is checked here anyway for a direct POST."""
         errors: dict[str, str] = {}
+        # Each message is its own sentence, deliberately not the field's help
+        # text. Reusing the help string printed the identical sentence twice in
+        # a row — once in grey under the input, once in a ruled error box — and
+        # never said that anything had gone wrong, leaving the reader to infer
+        # the failure from a colour. An error names the problem, then the fix.
         if not name.strip():
-            errors["name"] = FIELD_GUIDE["name"]["help"]
+            errors["name"] = TOPIC_NAME_REQUIRED
         if spend_band not in BANDS:
-            errors["spend_band"] = "Choose one of the three spend bands."
+            errors["spend_band"] = "Choose a sweep size: Narrow, Standard or Wide."
         return errors
 
     @app.post("/topics", response_class=HTMLResponse)
@@ -984,6 +1212,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
                 request, "topic_form.html", status_code=422, mode="create", topic=None,
                 band_cards=_band_cards(), errors=errors, values=values,
                 field_guide=FIELD_GUIDE,
+                field_labels=_FIELD_LABELS, field_anchors=_FIELD_ANCHORS,
             )
         topic_store.create(
             name=name.strip(), therapeutic_area=therapeutic_area.strip(), spend_band=chosen_band,
@@ -1012,7 +1241,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         try:
             topic = topic_store.get(topic_id)
         except NoSuchTopic:
-            return error_page(request, 404, "Topic not found", f"No topic with id {topic_id!r}.")
+            return error_page(request, 404, "Topic not found", f"No topic with id {topic_id}.")
         chosen_band = spend_band or topic.spend_band
         errors = _validate_topic_form(name, chosen_band)
         values = {
@@ -1025,6 +1254,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
                 request, "topic_form.html", status_code=422, mode="edit", topic=topic,
                 band_cards=_band_cards(), errors=errors, values=values,
                 field_guide=FIELD_GUIDE,
+                field_labels=_FIELD_LABELS, field_anchors=_FIELD_ANCHORS,
             )
         topic_store.update(
             topic_id,
@@ -1040,19 +1270,33 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         try:
             topic = topic_store.get(topic_id)
         except NoSuchTopic:
-            return error_page(request, 404, "Topic not found", f"No topic with id {topic_id!r}.")
+            return error_page(request, 404, "Topic not found", f"No topic with id {topic_id}.")
         chosen = band or topic.spend_band
         if chosen not in BANDS:
             return error_page(
                 request, 400, "Unknown spend band",
-                f"{chosen!r} is not one of probe, standard, deep.",
+                f"There is no sweep size called {chosen}. Choose Narrow, Standard or Wide.",
             )
         settings = get_settings()
         estimate = estimate_run_usd(BANDS[chosen], cluster_count=1)
+        # The three sweep sizes drawn to one scale, so the choice is a
+        # comparison of lengths rather than of words (UX-PLAN §6). Sorted by
+        # cost rather than by value, because the reading order that matters
+        # here is cheapest-first — `bar_rows(sort=False)` preserves it.
+        size_bars = bar_rows(
+            [{"label": sweep_size(c["band"].name),
+              "value": c["estimate"].total_usd,
+              "emphasis": c["band"].name == chosen,
+              "note": usd(c["estimate"].total_usd, 2) + " estimated",
+              "href": f"/topics/{topic_id}/confirm?band={c['band'].name}"}
+             for c in _band_cards()],
+            sort=False, unit="dollars",
+        )
         return render(
             request, "confirm.html", topic=topic, band=BANDS[chosen], estimate=estimate,
             cap_usd=settings.run_cost_cap_usd, changes_band=(chosen != topic.spend_band),
             tiers=_deliverable_tiers_ctx(_empty_deliverable_cards()),
+            size_bars=size_bars, chosen_band=chosen,
         )
 
     @app.get("/topics/{topic_id}/delete", response_class=HTMLResponse)
@@ -1067,7 +1311,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         try:
             topic = topic_store.get(topic_id)
         except NoSuchTopic:
-            return error_page(request, 404, "Topic not found", f"No topic with id {topic_id!r}.")
+            return error_page(request, 404, "Topic not found", f"No topic with id {topic_id}.")
         runs = run_store.for_topic(topic_id)
         return render(
             request, "topic_delete.html", topic=topic,
@@ -1089,7 +1333,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         try:
             topic_store.get(topic_id)
         except NoSuchTopic:
-            return error_page(request, 404, "Topic not found", f"No topic with id {topic_id!r}.")
+            return error_page(request, 404, "Topic not found", f"No topic with id {topic_id}.")
         # Runs first. If this fails halfway the topic is still there, so the
         # delete can be retried; the other order would orphan the runs behind a
         # topic that no longer exists and nothing would ever list them again.
@@ -1106,12 +1350,12 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         try:
             topic = topic_store.get(topic_id)
         except NoSuchTopic:
-            return error_page(request, 404, "Topic not found", f"No topic with id {topic_id!r}.")
+            return error_page(request, 404, "Topic not found", f"No topic with id {topic_id}.")
         chosen = band or topic.spend_band
         if chosen not in BANDS:
             return error_page(
                 request, 400, "Unknown spend band",
-                f"{chosen!r} is not one of probe, standard, deep.",
+                f"There is no sweep size called {chosen}. Choose Narrow, Standard or Wide.",
             )
         if chosen != topic.spend_band:
             topic = topic_store.update(topic_id, spend_band=chosen)
@@ -1133,7 +1377,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         try:
             run = run_store.get(run_id)
         except NoSuchRun:
-            return error_page(request, 404, "Run not found", f"No run with id {run_id!r}.")
+            return error_page(request, 404, "Run not found", f"No run with id {run_id}.")
         try:
             topic = topic_store.get(run.topic_id)
         except NoSuchTopic:
@@ -1159,12 +1403,26 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             )
         )
         current_step = {"mine": "snapshot", "insight": "insight", "report": "report"}[run.mode]
+        # One stage bar per file, drawn to a common scale, so "which stages
+        # finished" is a shape rather than a column of the word "pending".
+        stage_bars = bar_rows(
+            [{"label": st["label"], "value": 1 if st["done"] else 0,
+              "note": "written" if st["done"] else "not written",
+              "emphasis": st["done"]}
+             for st in stages],
+            sort=False, unit="files",
+        )
         return render(
             request, "run.html", run=run, topic=topic, stages=stages,
             cost_detail=cost_detail, next_snapshot_run_id=next_snapshot_run_id,
             next_insight_run_id=next_insight_run_id,
             flow=fr["flow"], current_step=current_step, deliv_tiers=deliv_tiers,
             synthetic=_mine_run_is_synthetic(run_store, fr["flow"]["mine_run_id"]),
+            # Always a full meter dict, even where cost.json is gone — see
+            # `_cost_meter` on why an absent figure is the wrong fallback.
+            spend=_cost_meter(run, cost_detail),
+            stage_bars=stage_bars,
+            stages_done=sum(1 for st in stages if st["done"]),
         )
 
     @app.get("/runs/{run_id}/events")
@@ -1172,21 +1430,39 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         try:
             run = run_store.get(run_id)
         except NoSuchRun:
-            return JSONResponse({"error": f"no run {run_id!r}"}, status_code=404)
+            return JSONResponse({"error": f"no run {run_id}"}, status_code=404)
         return JSONResponse(
             {"run_id": run.run_id, "mode": run.mode, "status": run.status,
              "cost_usd": run.cost_usd, "note": run.note}
         )
 
+    #: The signals table's row ceiling. A Wide sweep collects thousands of
+    #: rows and each becomes a seven-cell table row with an anchor, all in one
+    #: response — the exposure the topics index already caps at 50. The heading
+    #: has always promised pagination semantics ("Signals (N of M)") while N
+    #: was the whole filtered set; this makes that heading true.
+    _SIGNAL_ROW_CAP = 200
+
+    #: How the collected rows may be ordered. Server-side, like the topics
+    #: index, so the view is a URL that can be shared, bookmarked or printed.
+    _SIGNAL_SORTS: dict[str, Any] = {
+        "captured": lambda r: (str(r.get("captured_at") or ""), str(r.get("venue") or "")),
+        "venue": lambda r: (str(r.get("venue") or "").lower(), str(r.get("captured_at") or "")),
+        "kind": lambda r: (_kind_label(r.get("venue_kind")), str(r.get("venue") or "").lower()),
+        "theme": lambda r: (str(r.get("theme") or "~"), str(r.get("venue") or "").lower()),
+    }
+
     @app.get("/runs/{run_id}/snapshot", response_class=HTMLResponse)
     def run_snapshot(
         request: Request, run_id: str,
         venue: str = "", kind: str = "", tier: str = "", date: str = "",
+        sort: str = "captured",
+        show_all: str = Query("", alias="all"),
     ) -> HTMLResponse:
         try:
             run = run_store.get(run_id)
         except NoSuchRun:
-            return error_page(request, 404, "Run not found", f"No run with id {run_id!r}.")
+            return error_page(request, 404, "Run not found", f"No run with id {run_id}.")
         try:
             topic = topic_store.get(run.topic_id)
         except NoSuchTopic:
@@ -1231,6 +1507,57 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             {"label": label, "count": c, "pct": round(100 * c / max_count)}
             for label, c in sorted(mix_counts.items(), key=lambda kv: -kv[1])
         ]
+        # The same counts as `mix`, in the shape `bar_list()` takes. `mix` is
+        # kept so the existing markup keeps rendering; new work should use
+        # this, which sorts descending and carries its own labels and percents.
+        mix_bars = bar_rows(
+            [{"label": label, "value": c} for label, c in mix_counts.items()],
+            unit="mentions",
+        )
+
+        # Unknown sort falls back rather than 400ing: this is a shareable URL
+        # and a stale bookmark should show the rows, not an error page.
+        if sort not in _SIGNAL_SORTS:
+            sort = "captured"
+        filtered = sorted(filtered, key=_SIGNAL_SORTS[sort],
+                          reverse=(sort == "captured"))
+        matched_rows = len(filtered)
+        uncapped = show_all.strip() == "1"
+        capped = not uncapped and matched_rows > _SIGNAL_ROW_CAP
+        if capped:
+            filtered = filtered[:_SIGNAL_ROW_CAP]
+
+        # Every filter that is on, each with the URL that switches just that
+        # one off. A removable chip has to be able to say what it removes
+        # (ux-guidelines row 117), and the template should not be rebuilding
+        # a query string to find out.
+        active = {"venue": venue, "kind": kind, "tier": tier, "date": date}
+        filter_labels = {"venue": "Site", "kind": "Type of site",
+                         "tier": "Access basis", "date": "Captured"}
+
+        def _filter_href(without: str) -> str:
+            parts = [f"{k}={quote_plus(v)}" for k, v in active.items() if v and k != without]
+            if sort != "captured":
+                parts.append(f"sort={sort}")
+            return f"/runs/{run.run_id}/snapshot" + ("?" + "&".join(parts) if parts else "")
+
+        active_filters = [
+            {"key": k, "label": filter_labels[k],
+             "value": _kind_label(v) if k == "kind" else v,
+             "clear_href": _filter_href(k)}
+            for k, v in active.items() if v
+        ]
+        sort_base = (
+            f"/runs/{run.run_id}/snapshot?"
+            + "".join(f"{k}={quote_plus(v)}&" for k, v in active.items() if v)
+            + ("all=1&" if uncapped else "")
+            + "sort="
+        )
+
+        try:
+            cost_detail = run_store.read_artifact(run.run_id, "cost.json")
+        except FileNotFoundError:
+            cost_detail = None
 
         fr = _flow_runs(run_store, run)
         deliv_tiers = _deliverable_tiers_ctx(
@@ -1247,6 +1574,25 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             any_filter_active=bool(venue or kind or tier or date),
             flow=fr["flow"], deliv_tiers=deliv_tiers,
             synthetic=any_synthetic(raw_rows),
+            # ---- the encodings this screen draws from --------------------
+            mix_bars=mix_bars,
+            # A full grid dict even when coverage.json is gone: `has_data` is
+            # False and the strip renders its named empty state, rather than a
+            # blank frame that could mean any of five different things.
+            coverage_view=coverage_grid(coverage),
+            spend=_cost_meter(run, cost_detail),
+            volume_series=_volume_series(run.topic_id),
+            spend_series=_spend_series(run.topic_id),
+            sweep_rail=_sweep_rail(run.topic_id, run.run_id),
+            # ---- list state, all of it in the URL ------------------------
+            sort=sort, sort_base=sort_base, active_filters=active_filters,
+            matched_rows=matched_rows, capped=capped, uncapped=uncapped,
+            row_cap=_SIGNAL_ROW_CAP,
+            all_href=(
+                f"/runs/{run.run_id}/snapshot?"
+                + "".join(f"{k}={quote_plus(v)}&" for k, v in active.items() if v)
+                + f"sort={sort}&all=1"
+            ),
         )
 
     @app.post("/runs/{run_id}/insight")
@@ -1257,7 +1603,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         try:
             mine_run = run_store.get(run_id)
         except NoSuchRun:
-            return error_page(request, 404, "Run not found", f"No run with id {run_id!r}.")
+            return error_page(request, 404, "Run not found", f"No run with id {run_id}.")
         try:
             topic = topic_store.get(mine_run.topic_id)
         except NoSuchTopic:
@@ -1269,22 +1615,38 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         except FileNotFoundError:
             return error_page(
                 request, 400, "No snapshot to analyse",
-                f"Run {run_id!r} has no signals.json on disk — mine a snapshot first.",
+                f"Run {run_id} has no collected rows stored, so there is nothing to analyse. Run a sweep first.",
             )
         except VsmError as exc:
             return error_page(request, 400, "Insight could not run", str(exc))
         return RedirectResponse(url=f"/runs/{insight_run.run_id}/insight", status_code=303)
 
+    #: The insight screen's secondary passes, as addressable views.
+    #:
+    #: They were five CSS-driven radio tabs, which meant no one could send a
+    #: colleague the Anomalies view, bookmark it, or reach it with the back
+    #: button — while `topics.html` and `snapshot.html` both put their state in
+    #: the query string two screens away. Every panel still renders in the
+    #: response body (so a reader with CSS off, and the printed page, get all
+    #: five); `view` only says which one the screen opens on.
+    _INSIGHT_VIEWS: tuple[tuple[str, str], ...] = (
+        ("momentum", "What moved"),
+        ("anomalies", "What changed on its own"),
+        ("themes", "Themes"),
+        ("stance", "Sentiment by speaker"),
+        ("entities", "Names"),
+    )
+
     @app.get("/runs/{run_id}/insight", response_class=HTMLResponse)
-    def insight_view(request: Request, run_id: str) -> HTMLResponse:
+    def insight_view(request: Request, run_id: str, view: str = "momentum") -> HTMLResponse:
         try:
             run = run_store.get(run_id)
         except NoSuchRun:
-            return error_page(request, 404, "Run not found", f"No run with id {run_id!r}.")
+            return error_page(request, 404, "Run not found", f"No run with id {run_id}.")
         if run.mode != "insight":
             return error_page(
                 request, 400, "Not an insight run",
-                f"Run {run_id!r} is a {run.mode!r} run, not an insight run.",
+                f"Run {run_id} is a {MODE_LABELS.get(run.mode, run.mode).lower()} run, so it has no analysis to show.",
             )
         try:
             topic = topic_store.get(run.topic_id)
@@ -1356,6 +1718,76 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             for e in entities.get("entities", [])
         ]
 
+        # ---- the encodings ----------------------------------------------
+        # Built here rather than in the template for one reason: these are the
+        # same rows the client report's Figure 1 draws from, so the figure an
+        # analyst reads and the figure a client receives are built once, by one
+        # function, and cannot drift.
+        gap = gap_chart(forest_rows)
+        theme_bars = bar_rows(
+            [{"label": t["name"], "value": t["volume"]} for t in themes],
+            unit="mentions",
+        )
+        entity_bars = bar_rows(
+            [{"label": e["canonical"], "value": e["signal_count"],
+              "note": e["role"]}
+             for e in entity_rows],
+            unit="mentions",
+        )
+        # A bullet per theme: the bar is now, the tick is where it stood last
+        # sweep. `prior is None` renders as "first sweep" in words rather than
+        # as a tick at zero — UX-PLAN §7.1's whole point.
+        momentum_scale = max(
+            [int(m.get("volume_now") or 0) for m in momentum_rows]
+            + [int(m.get("volume_prior") or 0) for m in momentum_rows] + [1]
+        )
+        momentum_bullets = [
+            {"name": m["theme_name"], "now": m["volume_now"],
+             "prior": m.get("volume_prior"), "delta": m.get("delta"),
+             "delta_pct": m.get("delta_pct"), "reason": m.get("reason") or "",
+             "scale": momentum_scale}
+            for m in momentum_rows
+        ]
+        # An anomaly is an event, not a series: a before and an after. A
+        # `theme_appeared` has no before at all, and its prior slot must say so
+        # in words rather than draw a bar of height zero.
+        anomaly_pairs = [
+            {"name": a["theme_name"], "kind": a["kind"],
+             "kind_label": _anomaly_label(a["kind"]),
+             "observed": a["observed"], "baseline": a.get("baseline"),
+             "detail": a.get("detail") or "", "note": a.get("note") or "",
+             "absent_note": ("not present then" if a.get("baseline") is None
+                             else "")}
+            for a in anomaly_rows
+        ]
+        # Sentiment per theme, summed across speaker classes for the mix bar,
+        # and kept split by class beneath it — a single number over both
+        # audiences would be a patient figure wearing a clinical label.
+        sentiment_rows = []
+        for sr in stance_rows:
+            totals: dict[str, int] = {}
+            for _cls, counts in sr["by_class"]:
+                for stance_key, n in counts.items():
+                    totals[stance_key] = totals.get(stance_key, 0) + int(n)
+            sentiment_rows.append({
+                "name": sr["name"],
+                "basis": sr["basis"],
+                "mix": sentiment_mix(totals),
+                "by_class": [
+                    {"cls": cls, "label": _class_label(cls),
+                     "mix": sentiment_mix(counts)}
+                    for cls, counts in sr["by_class"]
+                ],
+            })
+
+        if view not in dict(_INSIGHT_VIEWS):
+            view = "momentum"
+        views = [
+            {"key": key, "label": label, "on": view == key,
+             "href": f"/runs/{run.run_id}/insight?view={key}#views"}
+            for key, label in _INSIGHT_VIEWS
+        ]
+
         fr = _flow_runs(run_store, run)
         deliv_tiers = _deliverable_tiers_ctx(
             _deliverable_cards(
@@ -1373,6 +1805,13 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             unmapped_count=len(entities.get("unmapped_mentions", [])),
             flow=fr["flow"], deliv_tiers=deliv_tiers,
             synthetic=_mine_run_is_synthetic(run_store, mine_run_id),
+            gap=gap, theme_bars=theme_bars, entity_bars=entity_bars,
+            momentum_bullets=momentum_bullets, anomaly_pairs=anomaly_pairs,
+            sentiment_rows=sentiment_rows,
+            volume_series=_volume_series(run.topic_id),
+            spend_series=_spend_series(run.topic_id),
+            sweep_rail=_sweep_rail(run.topic_id, mine_run_id),
+            view=view, views=views,
         )
 
     @app.post("/runs/{run_id}/report")
@@ -1383,7 +1822,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         try:
             insight_run = run_store.get(run_id)
         except NoSuchRun:
-            return error_page(request, 404, "Run not found", f"No run with id {run_id!r}.")
+            return error_page(request, 404, "Run not found", f"No run with id {run_id}.")
         try:
             topic = topic_store.get(insight_run.topic_id)
         except NoSuchTopic:
@@ -1430,11 +1869,11 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         try:
             run = run_store.get(run_id)
         except NoSuchRun:
-            return error_page(request, 404, "Run not found", f"No run with id {run_id!r}.")
+            return error_page(request, 404, "Run not found", f"No run with id {run_id}.")
         if run.mode != "report":
             return error_page(
                 request, 400, "Not a report run",
-                f"Run {run_id!r} is a {run.mode!r} run, not a report run.",
+                f"Run {run_id} is a {MODE_LABELS.get(run.mode, run.mode).lower()} run, so it has no report to show.",
             )
         try:
             topic = topic_store.get(run.topic_id)
@@ -1667,10 +2106,19 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         pulse_href = (
             f"/runs/{run.run_id}/artifact/pulse_report.md" if pulse_text else None
         )
+        # The same two encodings the insight screen draws, from the same rows,
+        # so the document a client receives and the screen an analyst reads
+        # cannot disagree about a figure they both show.
+        gap = gap_chart(figure_rows)
+        theme_bars = bar_rows(
+            [{"label": t["name"], "value": t["volume"]} for t in theme_rows],
+            unit="mentions",
+        )
         return render(
             request, "report.html", run=run, topic=topic, pulse_href=pulse_href,
             insight_run_id=insight_run_id, mine_run_id=mine_run_id,
             doc=doc, figure=figure, theme_rows=theme_rows,
+            gap=gap, theme_bars=theme_bars,
             corroborated=corroborated, corroborated_note=corroborated_note,
             emerging=emerging, emerging_note=emerging_note,
             lead_html="".join(lead_html_parts), extra_sections=extra_sections,
@@ -1687,7 +2135,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         try:
             run = run_store.get(run_id)
         except NoSuchRun:
-            return error_page(request, 404, "Run not found", f"No run with id {run_id!r}.")
+            return error_page(request, 404, "Run not found", f"No run with id {run_id}.")
         # Read through the store, not the filesystem. `FileResponse` needs a
         # real local file, which only one of the three backends has; on Vercel
         # Blob every download 500ed. Each backend applies its own traversal
@@ -1701,7 +2149,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         except (FileNotFoundError, ValueError):
             return error_page(
                 request, 404, "Artifact not found",
-                f"No artifact named {name!r} on run {run_id!r}.",
+                f"Run {run_id} produced no file named {name}.",
             )
         suffix = Path(name).suffix
         media = (

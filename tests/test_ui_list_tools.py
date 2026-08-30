@@ -144,10 +144,31 @@ def test_filtering_to_nothing_is_not_the_first_run_screen(app):
 
 
 def test_the_current_sort_and_filter_are_marked_for_assistive_tech(app):
+    """Both controls report their own state, each in the form its own widget
+    has: the filter is a chip carrying `aria-current`, the sort is a column
+    header carrying `aria-sort`.
+
+    This used to count two `chip-on` chips, back when the sort was a second row
+    of chips whose six labels repeated the column headings a few centimetres
+    below them. The sorts are now the headers themselves — which is where this
+    category puts them, and what `sort_th()` and the route's `sort_base` exist
+    for — so the property being checked is unchanged and the assertion is
+    strictly stronger: exactly one column may claim to be the sorted one, it
+    must be the column the URL actually asked for, and every other sortable
+    header must say `none` rather than saying nothing.
+    """
     c, _, _ = app
     body = c.get("/topics?sort=name&show=empty").text
+
     on = re.findall(r'<a class="chip chip-on"[^>]*aria-current="true"', body)
-    assert len(on) == 2, "the active sort and filter should both be marked"
+    assert len(on) == 1, "the active filter is not marked"
+
+    headers = re.findall(r'<th scope="col"[^>]*aria-sort="([a-z]+)"[^>]*>(.*?)</th>', body, re.S)
+    assert len(headers) >= 5, f"too few sortable headers to be the sort control: {headers}"
+    active = [h for h in headers if h[0] != "none"]
+    assert len(active) == 1, f"exactly one column may report itself as sorted, got {active}"
+    assert "sort=name" in active[0][1], active[0][1]
+    assert "sort-link-on" in active[0][1], active[0][1]
 
 
 def test_the_links_preserve_the_other_two_settings(app):

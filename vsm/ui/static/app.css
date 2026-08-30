@@ -37,6 +37,22 @@ body {
   border-radius: 2px;
 }
 
+/* Every anchor target on this app clears the sticky chrome above it.
+   The core reading motion here is claim -> appendix and back: every
+   superscript reference mark and every "Read the evidence" jump landed its
+   target row flush against the viewport's top edge with zero breathing room,
+   so the reader could not tell the row they landed on from the row above it.
+   `scroll-margin` appeared nowhere in either stylesheet, on an app built
+   almost entirely out of in-page anchors.
+
+   The same number as `scroll-padding-top` on the scroll root, so a focus
+   arriving by Tab is not parked underneath a sticky <th> either — WCAG 2.2
+   AA Focus Not Obscured, which `.data-table thead th { position: sticky }`
+   and `.doc-table caption { position: sticky }` both expose. */
+:root { scroll-padding-top: 5rem; }
+[id] { scroll-margin-top: 5rem; }
+.table-scroll, .data-table tbody, .doc-table tbody { scroll-padding-top: 3.25rem; }
+
 /* Text for assistive technology only. Not `display: none` — that removes it
    from the accessibility tree too, which defeats the point. Several honest
    statements on this app live here: a flow stage's "not run yet", a tier
@@ -71,6 +87,16 @@ a:visited { color: var(--fg1); }
 ::-webkit-scrollbar-track { background: var(--bg-subtle); }
 ::-webkit-scrollbar-thumb { background: var(--vi-gray-300); border: 3px solid var(--bg-subtle); border-radius: 8px; }
 * { scrollbar-color: var(--vi-gray-300) var(--bg-subtle); scrollbar-width: thin; }
+
+/* `text-wrap: balance` on every heading, and `pretty` on the claims and
+   ledes beneath them. Topic names here are user-supplied and unbounded, so an
+   h1 like `Delete "Semaglutide — cardiovascular outcomes in T2D"?` wrapped to
+   a last line holding one orphaned word, directly under the largest type on
+   the page. Neither property existed anywhere in either stylesheet. */
+h1, h2, h3, .page-title, .doc-title, .doc-h, .card-title, .panel-head h2,
+.deliv-tier-label, .gap-single-head { text-wrap: balance; }
+.card-lead, .deliv-headline, .finding-claim, .fig-cap, .empty-fact,
+.metric-sub, .lede-text { text-wrap: pretty; }
 
 h1 {
   margin: 0 0 var(--space-xs);
@@ -151,9 +177,15 @@ p { margin: 0 0 var(--space-xs); max-width: 72ch; }
 
 .app-shell { min-height: 100vh; }
 
+/* `max(40px, env(...))` on every full-bleed row. On a notched phone held in
+   landscape the "Vi | Signal Mine" mark and the first nav link sat under the
+   cutout, and the leftmost table column — always the row's identifying <th> —
+   was clipped. `env()` resolves to 0 where there is no inset, so this is a
+   no-op on a desktop. */
 .app-top {
   display: flex; align-items: center; justify-content: space-between;
-  height: 64px; padding: 0 40px;
+  height: 64px;
+  padding: 0 max(40px, env(safe-area-inset-right)) 0 max(40px, env(safe-area-inset-left));
   border-bottom: var(--border-hairline) solid var(--rule);
 }
 .app-mark {
@@ -203,7 +235,9 @@ p { margin: 0 0 var(--space-xs); max-width: 72ch; }
 .flow-step.flow-step-disabled { color: var(--fg2); pointer-events: none; text-decoration: underline dotted var(--rule-strong); text-underline-offset: 3px; }
 .flow-sep { color: var(--vi-gray-300); }
 
-.app-main { padding: 0 40px 96px; }
+.app-main {
+  padding: 0 max(40px, env(safe-area-inset-right)) max(96px, env(safe-area-inset-bottom)) max(40px, env(safe-area-inset-left));
+}
 
 /* Per-page content width. The canvas gives each screen its own reading
    width: wide tables get room, forms and confirm stay narrow enough to
@@ -213,7 +247,8 @@ p { margin: 0 0 var(--space-xs); max-width: 72ch; }
 .page-narrow { max-width: 720px; }
 
 .app-foot {
-  padding: var(--space-sm) 40px;
+  padding: var(--space-sm) max(40px, env(safe-area-inset-right))
+           max(var(--space-sm), env(safe-area-inset-bottom)) max(40px, env(safe-area-inset-left));
   border-top: var(--border-hairline) solid var(--rule);
 }
 .app-foot span { color: var(--fg2); font-size: var(--t-caption-size); }
@@ -423,7 +458,11 @@ legend {
    shadow, at the right edge the right one — so the hint appears only in the
    direction there is actually more to read, with no script. */
 .table-scroll {
-  overflow-x: auto; margin-top: 8px;
+  /* `overscroll-behavior-x: contain` because a wide table with no overscroll
+     boundary hands a trackpad swipe that reaches its end straight to the
+     browser's back-navigation gesture — silently discarding the reader's
+     filter state, or their place in the provenance appendix. */
+  overflow-x: auto; overscroll-behavior-x: contain; margin-top: 8px;
   background:
     linear-gradient(to right, var(--bg) 30%, transparent) left center / 32px 100% no-repeat,
     linear-gradient(to left, var(--bg) 30%, transparent) right center / 32px 100% no-repeat,
@@ -547,12 +586,47 @@ legend {
 
 /* --------------------------------------------------------- bar / mix --- */
 
-.bar-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: var(--space-md); }
-.bar-row { display: grid; grid-template-columns: 12rem 1fr 3rem; align-items: center; gap: 12px; }
-.bar-label { font-size: var(--t-small-size); }
-.bar-track { height: 14px; background: var(--bg-surface); }
-.bar-fill { height: 100%; background: var(--vi-violet); }
-.bar-count { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--vi-font-mono); font-size: var(--t-caption-size); }
+/* A ranked horizontal bar list. Three things changed here and each was a
+   defect rather than a preference.
+
+   * `grid-template-columns: 12rem 1fr 3rem` clipped any theme name longer
+     than 12rem. ux-guidelines row 112 (Accessibility, Web, **Critical**) —
+     "Text must remain available at narrow widths, zoom and user spacing
+     overrides… Don't clip text in fixed-width or fixed-height boxes" — is the
+     highest-severity web row in that dataset, and this rule violated it. The
+     label track is now `minmax(0, 15rem)` with `align-items: start` and a
+     content-driven height, so a long name wraps.
+   * `.bar-fill` was `var(--vi-violet)`, so the Change screen could render up
+     to fifteen violet bars beside a violet primary button and the accent
+     stopped signalling anything. quick-reference §4 `primary-action` allows
+     one primary CTA per screen; data marks are ink. Violet survives on
+     exactly one row, `.bar-row-lead`, for a row the page is deliberately
+     pointing at.
+   * `--bg-surface` measures 1.15:1 on white, so the empty half of the track
+     was invisible and the bar had no readable extent. The track now carries a
+     `--rule-control` hairline (3.03:1), which is the threshold
+     quick-reference §10 `contrast-data` sets for a meaning-bearing boundary. */
+.bar-list { list-style: none; margin: 0 0 var(--space-md); padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.bar-row {
+  display: grid;
+  grid-template-columns: minmax(0, 15rem) minmax(4rem, 1fr) auto;
+  align-items: start; gap: 4px 12px;
+  padding: 3px 0;
+}
+.bar-label { font-size: var(--t-small-size); line-height: 1.35; min-width: 0; overflow-wrap: break-word; }
+.bar-label a { color: var(--fg1); text-decoration-color: var(--rule-strong); }
+.bar-note { display: block; font-size: var(--t-caption-size); color: var(--fg2); }
+.bar-track {
+  height: 12px; margin-top: 4px; background: var(--bg-subtle);
+  box-shadow: inset 0 0 0 var(--border-hairline) var(--rule-control);
+}
+.bar-fill { display: block; height: 100%; background: var(--fg1); min-width: var(--border-hairline); }
+.bar-row-lead .bar-fill { background: var(--signal); }
+.bar-row-lead .bar-label { font-weight: var(--w-medium); }
+.bar-count {
+  text-align: right; font-variant-numeric: tabular-nums;
+  font-size: var(--t-small-size); font-weight: var(--w-medium); white-space: nowrap;
+}
 
 /* ------------------------------------------------------------ filters -- */
 
@@ -597,7 +671,7 @@ legend {
 .plot-num { fill: var(--vi-black); font-size: 13px; font-variant-numeric: tabular-nums; }
 .plot-tier { fill: var(--vi-black); font-size: 12px; font-weight: 500; }
 .plot-tier-single_source { fill: var(--fg2); }
-.plot-ne-label { fill: var(--vi-ink); font-size: 10px; font-weight: 700; letter-spacing: 0.06em; }
+.plot-ne-label { fill: var(--vi-ink); font-size: 10px; font-weight: 500; letter-spacing: 0.06em; }
 
 .forest-plot-baseline-action {
   display: flex; justify-content: flex-end;
@@ -732,7 +806,12 @@ details[open] summary { margin-bottom: 8px; }
   font-size: var(--t-small-size);
   line-height: var(--t-small-lh);
 }
-.doc-reason { display: inline-block; max-width: 48ch; }
+/* Not `inline-block` with a hard 48ch ceiling: that clipped nothing but it
+   did force the cell it sits in wide enough to wreck the printed layout, and
+   a fixed measure around text inside a figure is what ux-guidelines row 112
+   (Critical) forbids. `inline` plus a `max-width` in the *flow* lets the
+   reason wrap inside whatever cell it lands in. */
+.doc-reason { display: inline; max-width: 48ch; overflow-wrap: break-word; }
 .doc-cover-facts {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0;
   margin: 0 0 var(--space-md);
@@ -1217,7 +1296,11 @@ a.tier-badge-corroborated:hover { background: var(--vi-violet-hover); border-col
 .info {
   width: 15px; height: 15px; flex: none; padding: 0; cursor: help;
   border: 1px solid var(--fg2); border-radius: 50%; background: none;
-  color: var(--fg2); font-size: 10px; font-weight: 600; line-height: 1;
+  /* 500, not 600: vsm/ui/static/fonts/ ships Book (400) and Medium (500)
+     only, so 600 asked the browser to synthesise a faux-bold and
+     misrepresented the pinned typeface. Hierarchy here comes from the
+     enclosing circle and the size, not from a weight that does not exist. */
+  color: var(--fg2); font-size: 10px; font-weight: var(--w-medium); line-height: 1;
   font-family: var(--vi-font-family); font-style: italic;
   display: inline-flex; align-items: center; justify-content: center;
   vertical-align: middle;
@@ -1245,10 +1328,15 @@ a.tier-badge-corroborated:hover { background: var(--vi-violet-hover); border-col
 .delta-up { color: var(--fg1); font-weight: 500; }
 .delta-down { color: var(--fg2); }
 .delta-none { color: var(--fg2); }
-.delta-up::before { content: "\25B2"; font-size: 0.8em; }
-.delta-down::before { content: "\25BC"; font-size: 0.8em; }
-.delta-none::before { content: "\2013"; }
-.delta-base { color: var(--fg2); font-weight: 400; }
+/* The `content: "\25B2"` / `"\25BC"` / `"\2013"` pseudo-elements are gone.
+   Neue Montreal almost certainly carries none of those three characters, so
+   each fell back per-glyph to Helvetica Neue or Arial — a direction mark set
+   in a different typeface from its own number, shifting between machines and
+   in print. No icon font can be loaded in this app (no CDN, no external
+   assets), so the only stable glyph is one the app draws: see the `mark()`
+   macro in _macros.html and `.mark` below. */
+.delta-base { color: var(--fg2); font-weight: var(--w-book); }
+.mark { flex: none; fill: currentColor; vertical-align: baseline; }
 
 /* ------------------------------------------------------------ disclosure -- */
 /* "Show details" — the depth is kept and moved, never cut. */
@@ -1289,11 +1377,33 @@ a.tier-badge-corroborated:hover { background: var(--vi-violet-hover); border-col
 .pip-on { background: var(--fg1); }
 .pips-label { font-size: 12px; color: var(--fg2); margin-left: 6px; font-variant-numeric: tabular-nums; }
 
-.bullet { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
-.bullet-track { position: relative; height: 16px; background: var(--bg-subtle); }
+/* The bullet: one solid bar for now, one tick where it stood last sweep, and
+   both numbers printed. `minmax(0, …)` on the label track and a wrapping
+   value line, for the same reason as `.bar-row` above. The track's edge is
+   `--rule-control`, not `--rule`: the bar's extent carries meaning and needs
+   3:1, whereas `--rule` at 0.10 alpha is a decorative gridline. */
+.bullet {
+  display: grid;
+  grid-template-columns: minmax(0, 11rem) minmax(4rem, 1fr) auto;
+  gap: 4px 12px; align-items: center; padding: 5px 0;
+}
+.bullet-label { font-size: var(--t-small-size); min-width: 0; overflow-wrap: break-word; }
+.bullet-track {
+  position: relative; height: 14px; background: var(--bg-subtle);
+  box-shadow: inset 0 0 0 var(--border-hairline) var(--rule-control);
+}
 .bullet-fill { position: absolute; inset: 0 auto 0 0; background: var(--fg1); }
-.bullet-tick { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--fg2); }
-.bullet-value { font-variant-numeric: tabular-nums; font-size: 13px; white-space: nowrap; }
+/* The prior-sweep tick overhangs the track top and bottom so it reads as a
+   reference mark on the bar rather than a segment of it. */
+.bullet-tick {
+  position: absolute; top: -4px; bottom: -4px; width: 2px;
+  background: var(--fg1); transform: translateX(-1px);
+}
+.bullet-value {
+  font-variant-numeric: tabular-nums; font-size: var(--t-small-size);
+  font-weight: var(--w-medium); white-space: nowrap; text-align: right;
+}
+.bullet-prior { font-weight: var(--w-book); color: var(--fg2); font-size: var(--t-caption-size); }
 
 @media (max-width: 699px) {
   .scorecard { grid-template-columns: repeat(2, 1fr); }
@@ -1492,7 +1602,11 @@ a.tier-badge-corroborated:hover { background: var(--vi-violet-hover); border-col
   .list-tools-row { display: block; }
   .list-tools-label { display: block; margin-bottom: 6px; }
   .chip-row {
-    flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px;
+    /* Same boundary as `.table-scroll`: without it a swipe that reaches the
+       end of the chip row hands the gesture to the browser's back
+       navigation, which discards the reader's filter state. */
+    flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain;
+    padding-bottom: 2px;
     scrollbar-width: none;
     background:
       linear-gradient(to right, var(--bg) 30%, transparent) left center / 24px 100% no-repeat,
@@ -1556,6 +1670,478 @@ a.tier-badge-corroborated:hover { background: var(--vi-violet-hover); border-col
 .link-danger { color: #A31515; font-size: 13px; margin-left: 10px; text-decoration: underline; text-underline-offset: 2px; }
 .link-danger:hover { color: #6E0D0D; }
 
+/* ================================================== the three layers ==== */
+/*
+   The owner's sentence that this block answers: "don't puke on me the whole
+   bible at once in the same colour, font and size."
+
+   Nothing is deleted to fix that. The material is ranked, and a screen must
+   separate its layers on **at least three** of six axes at once —
+
+     size       the scale below, .fig-xl down to .t-meta
+     weight     Medium (500) for the claim, Book (400) for support
+     colour     --fg1 for layer 1, --fg2 for layer 2
+     position   content column versus the figure's own caption
+     enclosure  a hairline or ground tint marking a layer-3 container
+     density    generous leading on layer 1, tight on layer 3
+
+   The weight axis is thinner here than UX-PLAN §12 assumes, and that is a
+   hard constraint rather than a choice: vsm/ui/static/fonts/ contains
+   NeueMontreal-Book.ttf and NeueMontreal-Medium.ttf and nothing else, so 500
+   is the heaviest emphasis that exists. Anything above it is a browser-
+   synthesised faux-bold that misrepresents the pinned typeface. The other
+   five axes therefore have to work harder, which is why enclosure and density
+   are named as axes at all.
+
+   Sizes are absolute px rather than ratios because the body size is a token
+   the design system pins, and a ratio chain over a pinned base is two sources
+   of truth for the same number.
+*/
+
+/* The one number that answers the screen. One per screen, no exceptions:
+   a second .fig-xl is two screens fighting. */
+.fig-xl {
+  display: block;
+  font-size: 46px; line-height: 1.0; letter-spacing: -0.025em;
+  font-weight: var(--w-book); color: var(--fg1);
+  font-variant-numeric: tabular-nums;
+}
+.metric-value-xl { font-size: 46px; letter-spacing: -0.025em; }
+/* Supporting figures. Matches .metric-value so a scorecard cell and a
+   standalone figure cannot end up at two different sizes. */
+.fig-num {
+  display: block;
+  font-size: 30px; line-height: 1.05; letter-spacing: -0.02em;
+  font-weight: var(--w-book); color: var(--fg1);
+  font-variant-numeric: tabular-nums;
+}
+/* Layer 2: everything that qualifies a figure — the comparison, the count,
+   the direction, the confidence. Always visible, never at figure size. */
+.t-support { font-size: var(--t-small-size); line-height: 1.45; color: var(--fg1); }
+.t-meta { font-size: var(--t-caption-size); line-height: var(--t-caption-lh); color: var(--fg2); }
+/* Layer 3's container: enclosure and a ground tint, so a reader can see at a
+   glance that they have moved from the answer to the method. */
+.layer-depth {
+  background: var(--bg-subtle);
+  border-left: 2px solid var(--rule-control);
+  padding: var(--space-sm);
+  font-size: var(--t-small-size); line-height: 1.5; color: var(--fg2);
+  max-width: 72ch;
+}
+.layer-depth > :first-child { margin-top: 0; }
+.layer-depth > :last-child { margin-bottom: 0; }
+.layer-depth strong { color: var(--fg1); font-weight: var(--w-medium); }
+
+@media (max-width: 699px) {
+  .fig-xl, .metric-value-xl { font-size: 34px; }
+  .fig-num { font-size: 26px; }
+}
+
+/* ==================================================== figures =========== */
+/*
+   Every graphic on this app is a <figure> with a <figcaption> that states its
+   key value. The caption is not a legend and never explains how to read the
+   shape: quick-reference §10 `screen-reader-summary` wants "the chart's key
+   insight", UX-PLAN §5 bans instructions for reading a chart, and the two are
+   compatible only if the caption is a value.
+
+   `break-inside: avoid` on the figure, because a bar list split across two
+   printed pages loses its ranking and a split coverage strip loses its shape.
+*/
+.fig { margin: 0 0 var(--space-md); break-inside: avoid; }
+.fig-cap {
+  margin-top: 8px;
+  font-size: var(--t-caption-size); line-height: var(--t-caption-lh);
+  color: var(--fg2); max-width: 72ch;
+}
+.fig-cap-extra { color: var(--fg2); }
+/* A figure with nothing in it renders a named empty state, never a blank
+   axis frame: five different truths produce an empty region on this product
+   and a shared blank frame would collapse all five. */
+.fig-empty {
+  margin: 0; padding: var(--space-sm);
+  border: var(--border-hairline) dashed var(--rule-control);
+  background: var(--bg-subtle);
+  font-size: var(--t-small-size); line-height: var(--t-small-lh); color: var(--fg1);
+  max-width: 68ch;
+}
+/* Shared by every pattern fill in this file. Kept as classes rather than
+   inline SVG attributes so a pattern's ink follows the palette token and can
+   never drift into a second black. */
+.pat-ground { fill: var(--bg); }
+.pat-ink { stroke: var(--fg1); }
+.pat-ink-fill { fill: var(--fg1); }
+
+/* -------------------------------------------------------- sparkline ---- */
+/*
+   Points are spaced by the dates the sweeps actually happened on, so a missed
+   week reads as a gap; even spacing would misstate cadence. And nothing draws
+   a line through fewer than four sweeps — charts.csv row 1 lists "fewer than
+   4 data points" under When NOT to Use and sends that case to a stat card.
+   The `shape` the geometry returns is what decides; see series_points().
+
+   Marks are ink, not violet: a column of two hundred violet sparklines on the
+   watchlist would spend the one accent two hundred times.
+*/
+.sparkline { display: block; width: 100%; max-width: 150px; height: auto; }
+.spark-base { stroke: var(--rule-control); stroke-width: 1; }
+.spark-line { stroke: var(--fg1); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+.spark-dot { fill: var(--bg); stroke: var(--fg1); stroke-width: 1.2; }
+.spark-dot-last { fill: var(--fg1); }
+.fig-spark { margin-bottom: 0; }
+.fig-spark .fig-cap { margin-top: 4px; max-width: 26ch; }
+.spark-empty { font-size: var(--t-caption-size); color: var(--fg2); }
+
+/* ------------------------------------------------- the clinician gap --- */
+/*
+   A dumbbell on one shared −1…+1 axis: the connector's length *is* the gap.
+   charts.csv row 14 excludes a radar chart from this case twice over, and the
+   recipient is a commercial lead reading a printed page.
+
+   HTML and CSS rather than SVG, deliberately. A theme name is unbounded free
+   text and SVG text neither wraps nor reflows, so an SVG row would clip it —
+   the Critical rule this file already cites at `.bar-row`.
+
+   The two audiences are distinguished by *shape*, not only by fill: clinician
+   is a filled disc, patient is a ring. Colour is never the only channel, and
+   at 9px a difference of shade is not a channel at all.
+*/
+.gap-axis-head {
+  display: grid; grid-template-columns: minmax(0, 13rem) minmax(6rem, 1fr) auto;
+  gap: 12px; align-items: baseline;
+  padding-bottom: 6px; margin-bottom: 4px;
+  border-bottom: var(--border-hairline) solid var(--rule);
+}
+.gap-axis-spacer { display: block; }
+/* The three labels share the middle column so they align with the ends of
+   the track they name, not with the page. */
+.gap-axis-scale { display: flex; justify-content: space-between; gap: 8px; }
+.gap-axis-end, .gap-axis-mid {
+  font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+  font-weight: var(--w-medium); color: var(--fg2);
+}
+.gap-list { list-style: none; margin: 0; padding: 0; }
+.gap-row {
+  display: grid; grid-template-columns: minmax(0, 13rem) minmax(6rem, 1fr) auto;
+  gap: 4px 12px; align-items: center;
+  padding: 10px 0; border-bottom: var(--border-hairline) solid var(--rule);
+}
+.gap-row:last-child { border-bottom: 0; }
+.gap-name { min-width: 0; font-size: var(--t-small-size); line-height: 1.35; overflow-wrap: break-word; }
+.gap-sub { display: block; font-size: var(--t-caption-size); color: var(--fg2); }
+/* The axis: a hairline baseline and a stronger centre line at zero gap.
+   `--rule-control` for the centre, because "no gap" is a meaning-bearing
+   reference and needs 3:1; the baseline is decorative and stays at --rule. */
+.gap-track {
+  position: relative; height: 18px;
+  border-top: var(--border-hairline) solid var(--rule);
+  border-bottom: var(--border-hairline) solid var(--rule);
+}
+.gap-track::before {
+  content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px;
+  width: var(--border-hairline); background: var(--rule-control);
+}
+.gap-connector {
+  position: absolute; top: 50%; height: 2px; margin-top: -1px;
+  background: var(--fg1); min-width: 1px;
+}
+.gap-dot {
+  position: absolute; top: 50%; width: 9px; height: 9px;
+  margin: -4.5px 0 0 -4.5px; border-radius: 50%;
+  border: 1.5px solid var(--fg1); box-sizing: border-box;
+}
+.gap-dot-hcp { background: var(--fg1); }
+.gap-dot-patient { background: var(--bg); }
+/* One audience only: one dot, no connector, and an empty slot where the
+   missing audience would have been — so the row cannot be read as a gap of
+   zero. UX-PLAN §7.2 calls this the system's highest-risk null. */
+.gap-dot-lone { background: var(--fg1); }
+/* The missing audience's slot spans the **whole** track, not a point on it.
+   A dashed marker parked at the centre is the exact misreading UX-PLAN §7.2
+   exists to prevent: the centre of this axis is "no gap", so an empty ring
+   there says the silent audience agreed. A band across the full domain says
+   the only true thing — that audience's position is unknown, and could be
+   anywhere on the axis. */
+.gap-slot {
+  position: absolute; inset: 2px 0;
+  border: var(--border-hairline) dashed var(--rule-control);
+  box-sizing: border-box;
+}
+.gap-values { text-align: right; min-width: 0; }
+.gap-value {
+  display: block; font-variant-numeric: tabular-nums;
+  font-size: var(--t-body-size); font-weight: var(--w-medium); white-space: nowrap;
+}
+.gap-value-none { font-size: var(--t-small-size); font-weight: var(--w-book); color: var(--fg2); white-space: normal; }
+.gap-value-sub { display: block; font-size: var(--t-caption-size); color: var(--fg2); }
+.gap-single { margin: var(--space-md) 0 var(--space-lg); }
+.gap-single-head {
+  margin: 0 0 4px; font-size: var(--t-body-size); font-weight: var(--w-medium);
+  padding-bottom: 6px; border-bottom: var(--border-hairline) solid var(--rule-control);
+}
+.gap-row-single .gap-value-sub { color: var(--fg1); }
+.gap-single-note { margin: 8px 0 0; font-size: var(--t-caption-size); color: var(--fg2); max-width: 68ch; }
+
+/* --------------------------------------------------- sentiment mix ----- */
+/*
+   A 100% stacked bar, five segments in one fixed order, `n` printed adjacent
+   — a 100% bar without a denominator is a lie. charts.csv row 3 rules out a
+   pie or donut here on two counts at once and row 19 rules out a waffle in a
+   row this tight, naming the escape itself: "for > 5 categories switch to
+   stacked 100% bar".
+
+   Each segment carries a pattern or an outline, never a shade of one hue:
+   the a11y notes on charts.csv rows 3, 5, 19 and 25 all end "do not rely on
+   color alone", and before this pass `grep '<pattern' templates/` returned
+   nothing at all. "Couldn't tell" is unfilled and always last, so it can
+   never be misread as an opinion.
+*/
+/* Its own aspect ratio, capped at natural width — see the macro's note on
+   why `preserveAspectRatio="none"` is not usable on a patterned bar. */
+.mix-bar { display: block; width: 100%; max-width: 300px; height: auto; }
+.mix-seg-positive { fill: var(--fg1); }
+.mix-seg-unclear { fill: var(--bg); }
+/* Segment dividers at 3:1, because the boundary between two segments is what
+   carries the proportion. A hairline at --rule would vanish. */
+.mix-seg { stroke: var(--rule-control); stroke-width: 0.75; }
+.mix-frame { stroke: var(--rule-control); stroke-width: 1; }
+.mix-legend {
+  list-style: none; margin: 8px 0 0; padding: 0;
+  display: flex; flex-wrap: wrap; gap: 4px var(--space-sm);
+}
+.mix-legend-item { display: flex; align-items: baseline; gap: 6px; font-size: var(--t-caption-size); }
+.mix-legend-zero { color: var(--fg2); }
+.mix-legend-label { color: var(--fg2); }
+.mix-legend-value { font-variant-numeric: tabular-nums; font-weight: var(--w-medium); color: var(--fg1); }
+.mix-legend-pct { font-weight: var(--w-book); color: var(--fg2); }
+.mix-counts { margin: 0; display: flex; flex-wrap: wrap; gap: 6px var(--space-sm); }
+.mix-count { display: inline-flex; align-items: baseline; gap: 6px; font-size: var(--t-small-size); }
+.mix-note { margin: 6px 0 0; font-size: var(--t-caption-size); color: var(--fg2); max-width: 68ch; }
+/* The legend swatch repeats each segment's own treatment in CSS, so the key
+   and the bar cannot drift apart. Gradients rather than SVG patterns here
+   only because a 10px swatch is not worth a second <svg> per row. */
+.mix-swatch {
+  width: 10px; height: 10px; flex: none; align-self: center;
+  box-shadow: inset 0 0 0 var(--border-hairline) var(--rule-control);
+  print-color-adjust: exact; -webkit-print-color-adjust: exact;
+}
+.mix-swatch-positive { background: var(--fg1); }
+.mix-swatch-mixed {
+  background: repeating-linear-gradient(45deg, var(--fg1) 0 2px, var(--bg) 2px 4px);
+}
+.mix-swatch-neutral {
+  background: radial-gradient(circle at 50% 50%, var(--fg1) 0 1px, var(--bg) 1px) 0 0 / 4px 4px;
+}
+.mix-swatch-negative {
+  background: repeating-linear-gradient(90deg, var(--fg1) 0 1.6px, var(--bg) 1.6px 4px);
+}
+.mix-swatch-unclear { background: var(--bg); }
+
+/* ------------------------------------------------- coverage strip ------ */
+/*
+   One cell per site, four *nominal* states — solid, hairline outline,
+   hatched, dashed outline. Not a sequential colour ramp: "blocked us" is not
+   more of anything than "returned nothing", so charts.csv row 5's cool-to-hot
+   guidance would imply an order that does not exist. Its required fallback,
+   a grid data table plus an intensity summary, is rendered by the macro.
+
+   Three of the four states are also named in text below the strip, in three
+   separate lists with three separate counts. A site that returned nothing, a
+   site that refused us and a site nobody asked are three different facts
+   (UX-PLAN §7.5), and a shared silence hides two of them.
+*/
+.cov-strip { display: block; width: 100%; max-width: 420px; height: auto; }
+.cov-cell-collected { fill: var(--fg1); stroke: var(--fg1); stroke-width: 0.75; }
+.cov-cell-empty { fill: var(--bg); stroke: var(--fg1); stroke-width: 1.25; }
+.cov-cell-blocked { stroke: var(--fg1); stroke-width: 1.25; }
+.cov-cell-not_tried { fill: var(--bg); stroke: var(--rule-control); stroke-width: 1.25; stroke-dasharray: 3 2; }
+.cov-legend {
+  list-style: none; margin: 10px 0 0; padding: 0;
+  display: flex; flex-wrap: wrap; gap: 6px var(--space-md);
+}
+.cov-legend-item { display: flex; align-items: center; gap: 7px; font-size: var(--t-caption-size); }
+.cov-legend-zero { color: var(--fg2); }
+.cov-legend-label { color: var(--fg2); }
+.cov-legend-value { font-variant-numeric: tabular-nums; font-weight: var(--w-medium); color: var(--fg1); }
+.cov-swatch {
+  width: 12px; height: 12px; flex: none; box-sizing: border-box;
+  print-color-adjust: exact; -webkit-print-color-adjust: exact;
+}
+.cov-swatch-collected { background: var(--fg1); }
+.cov-swatch-empty { background: var(--bg); border: 1.25px solid var(--fg1); }
+.cov-swatch-blocked {
+  border: 1.25px solid var(--fg1);
+  background: repeating-linear-gradient(45deg, var(--fg1) 0 1.5px, var(--bg) 1.5px 4px);
+}
+.cov-swatch-not_tried { background: var(--bg); border: 1.25px dashed var(--rule-control); }
+.cov-named {
+  margin: 8px 0 0; font-size: var(--t-caption-size); line-height: var(--t-caption-lh);
+  color: var(--fg1); max-width: 78ch;
+  /* A registrable domain is exactly the content that forces horizontal
+     overflow on a narrow column, and `word-break: break-all` on prose is the
+     wrong cure (ux-guidelines row 111). `overflow-wrap: anywhere` breaks only
+     where it has to. */
+  overflow-wrap: anywhere;
+}
+.cov-named-label { font-weight: var(--w-medium); }
+
+/* -------------------------------------------------------- spend meter -- */
+/*
+   Fill is spent, tick is the estimate, the hard rule is the cap, and all
+   three numbers are printed beside the bar — charts.csv row 8 requires the
+   number and the target as text, and in a monochrome palette text is the only
+   precise channel there is.
+
+   "Stopped at the cap" is a *shape*: the fill terminates in a stop bar. That
+   is the cloud-console convention and it is what keeps a successful partial
+   (rows were kept) from reading as a failure — UX-PLAN §7.3.
+*/
+.meter { display: flex; flex-direction: column; gap: 10px; }
+.meter-track {
+  position: relative; display: block; height: 22px;
+  background: var(--bg-subtle);
+  box-shadow: inset 0 0 0 var(--border-hairline) var(--rule-control);
+}
+.meter-fill { position: absolute; inset: 0 auto 0 0; background: var(--fg1); min-width: var(--border-hairline); }
+.meter-fill-over {
+  background: repeating-linear-gradient(45deg, var(--fg1) 0 3px, var(--vi-gray-800) 3px 6px);
+  print-color-adjust: exact; -webkit-print-color-adjust: exact;
+}
+/* The estimate: a hairline tick, drawn over the fill so it stays visible
+   whether the run came in under or over it. */
+.meter-tick {
+  position: absolute; top: -4px; bottom: -4px; width: 2px;
+  background: var(--fg2); transform: translateX(-1px);
+}
+/* The cap: a hard rule, heavier than the tick, because it is the one figure
+   that stops a run rather than predicting it. */
+.meter-cap {
+  position: absolute; top: -6px; bottom: -6px; width: 3px;
+  background: var(--fg1); transform: translateX(-1.5px);
+}
+/* The stop bar. A T-shape at the fill's end, so "it stopped here" is legible
+   as a terminator rather than as another threshold. */
+.meter-stop {
+  position: absolute; top: -3px; bottom: -3px; width: 5px;
+  background: var(--fg1); transform: translateX(-5px);
+}
+.meter-values {
+  display: flex; flex-wrap: wrap; gap: 4px var(--space-lg); margin: 0;
+}
+.meter-values > div { display: flex; flex-direction: column; gap: 2px; }
+.meter-values dt { margin: 0; }
+.meter-values dd {
+  margin: 0; font-size: var(--t-body-size); font-weight: var(--w-medium);
+  color: var(--fg1); font-variant-numeric: tabular-nums;
+}
+.meter-values dd.meter-spent { font-size: 24px; font-weight: var(--w-book); letter-spacing: -0.015em; }
+
+/* ----------------------------------------------------- before / after -- */
+/*
+   An anomaly is an event, not a series: a before and an after, side by side.
+   When there was no before — `theme_appeared` has no baseline — the prior
+   slot is an **outlined empty frame carrying the reason in words**, never a
+   zero-height bar. A zero-height bar and "this theme did not exist yet" look
+   identical and mean different things (UX-PLAN §4).
+*/
+.pair { display: inline-flex; align-items: flex-end; gap: var(--space-sm); }
+.pair-side { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.pair-bar-wrap {
+  display: flex; align-items: flex-end; justify-content: center;
+  width: 26px; height: 40px;
+  border-bottom: var(--border-hairline) solid var(--rule-control);
+}
+.pair-bar { display: block; width: 100%; background: var(--vi-gray-800); min-height: 2px; }
+.pair-bar-now { background: var(--fg1); }
+.pair-bar-absent {
+  height: 100%; background: none;
+  border: var(--border-hairline) dashed var(--rule-control);
+}
+.pair-value { font-size: var(--t-small-size); font-weight: var(--w-medium); font-variant-numeric: tabular-nums; }
+.pair-none { font-weight: var(--w-book); font-size: var(--t-caption-size); color: var(--fg2); }
+.pair-label { font-size: var(--t-caption-size); color: var(--fg2); white-space: nowrap; }
+.pair-arrow { padding-bottom: 22px; color: var(--fg2); }
+
+/* =============================================== layering and chrome === */
+
+/* The print copy of a layer-3 disclosure. A closed <details> does not render
+   its content slot at all, so no CSS can force it open at print time and this
+   app has no JavaScript to do it either — which is why the codebase's own
+   print rule for `details` has always been documented as best-effort. The
+   `read_more()` macro renders its body twice: once in the disclosure for
+   screen, once here. `aria-hidden` so a screen reader hears it once, and
+   `display: none` until the print block at the foot of this file turns it
+   on. */
+.print-only { display: none; }
+.print-only-head { font-weight: var(--w-medium); color: var(--fg1); margin: 0 0 6px; }
+
+/* The empty state's two parts, at two weights, so "what is true" reads before
+   "why". A single grey paragraph made the fact and the cause equal. */
+.empty-fact { color: var(--fg1); font-size: var(--t-small-size); }
+.empty-cause { color: var(--fg2); font-size: var(--t-caption-size); }
+.empty-state .empty-fact, .empty-state .empty-cause { max-width: 62ch; }
+
+/* A chip's explanation as visible caption text, never a `title` attribute:
+   a native tooltip is unreachable by keyboard, invisible on touch and absent
+   in print — the rule this codebase already states as the reason tier badges
+   link to /how. `.chip-remove` names what following the link takes away, so
+   the remove affordance is permanently visible rather than hover-only
+   (ux-guidelines row 117, Critical). */
+.chip-note { display: block; font-size: 11px; color: var(--fg2); margin-top: 2px; max-width: 34ch; white-space: normal; }
+.chip-on .chip-note { color: var(--fg2); }
+.chip-remove { margin-left: 6px; color: var(--fg2); font-size: 11px; }
+.chip-on .chip-remove { color: var(--fg1); }
+
+/* A sortable header reports its state in `aria-sort`, set server-side from
+   the query string — a static attribute, so it costs no JavaScript. Before
+   this pass `aria-sort` appeared nowhere in the app. */
+.sort-link { color: inherit; text-decoration: none; display: inline-flex; align-items: center; gap: 5px; min-height: 24px; }
+.sort-link:hover { color: var(--signal); }
+.sort-link:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+.sort-link-on { color: var(--fg1); }
+.sort-mark { display: inline-flex; }
+
+/* The error summary a failed submit needs: at the top of the form, focusable,
+   role="alert", every item linked to its invalid control, with the inline
+   per-field errors kept as well (ux-guidelines rows 109, 55, 44). With no
+   JavaScript the server round-trip *is* the validation event, so this is not
+   a nicety — it is the only validation moment there is. */
+.form-errors { margin-bottom: var(--space-md); }
+.form-errors:focus { outline: none; }
+.form-errors:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+.form-errors-head { margin: 0 0 8px; font-weight: var(--w-medium); color: var(--fg1); }
+.form-errors-list { margin: 0; padding-left: 1.2em; font-size: var(--t-small-size); }
+.form-errors-list li { margin-bottom: 4px; }
+
+/* =============================================== touch and pointer ===== */
+/*
+   Neither property below existed anywhere in either stylesheet. Every tap on
+   a control paid iOS Safari's ~300ms double-tap-zoom wait, which on screens
+   made almost entirely of small controls — the topics toolbar, the five-tab
+   insight bar, a forty-cell coverage strip — reads as the app being slow. And
+   the default grey tap flash fights a design system whose whole thesis is one
+   violet accent on a white canvas.
+
+   Sized to WCAG 2.2 AA's 24 CSS px, not the iOS 44pt or Android 48dp number:
+   ux-guidelines row 104 warns specifically against importing the native
+   figure as if it defined web conformance. The comfort padding for coarse
+   pointers stays in its own @media block further down.
+*/
+.btn, .chip, .info, .counter, .flow-step, .tabbar label, .band-card,
+.dated-frame, .sort-link, .deliv-download, .link-danger, .link-back,
+.disclosure > summary {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: var(--vi-violet-12);
+}
+/* 24px is the floor, applied where a control could otherwise be smaller:
+   a sweep-axis tick at 12px text and 4px padding measured 26px tall but only
+   because of its text — an empty one would not have. */
+.dated-frame, .sort-link { display: inline-flex; align-items: center; min-height: 24px; }
+/* `.chip` stays `inline-block`: it can carry a block `.chip-note` beneath its
+   label, which `inline-flex` in a row direction would drag onto the same
+   line. `inline-block` honours `min-height` just as well. */
+.chip { min-height: 24px; }
+
 @media print {
   @page { margin: 18mm 16mm; }
 
@@ -1578,7 +2164,8 @@ a.tier-badge-corroborated:hover { background: var(--vi-violet-hover); border-col
   .synthetic-banner-mark { display: none; }
 
   a { color: #000; text-decoration: none; }
-  .ref-marks a { color: #000; font-weight: 700; }
+  /* 500 is the heaviest weight Neue Montreal ships; 700 was synthesised. */
+  .ref-marks a { color: #000; font-weight: 500; }
   /* A reference is only checkable on paper if the URL is on the paper. Only
      the appendix's source links are expanded — expanding every in-page
      anchor would litter the document with `#finding-3`. */
@@ -1619,10 +2206,55 @@ a.tier-badge-corroborated:hover { background: var(--vi-violet-hover); border-col
      The exposure is bounded on purpose: the only two <details> left are
      supplementary explanations on the insight and "how this works" pages
      ("Why some rows say NE", "More detail"). The client-facing report contains
-     none, so the deliverable prints whole regardless. */
+     none, so the deliverable prints whole regardless.
+
+     And the `read_more()` macro no longer relies on any of this: it renders
+     its body a second time into a `.print-only` block, which is the one
+     mechanism that works in every engine with no script. Where that macro is
+     used, the disclosure itself is hidden here so the content prints once. */
   details { display: block; }
   details > summary { display: none; }
   details:not([open]) > :not(summary) { display: block !important; }
+
+  /* The second copy — see `.print-only` and the read_more() macro. Where a
+     disclosure has one, the on-screen <details> is dropped so the reader gets
+     the content once rather than twice. */
+  .print-only { display: block !important; }
+  .disclosure:has(+ .print-only) { display: none !important; }
+  .print-only-head {
+    font-size: 11pt; font-weight: 500;
+    margin-top: 10pt; padding-bottom: 2pt;
+    border-bottom: 0.5pt solid #999;
+  }
+
+  /* Every figure prints whole or moves to the next page. A bar list split
+     across a page break loses its ranking; a split coverage strip loses its
+     shape; a split dumbbell row separates a theme from its own gap. */
+  .fig, .bar-row, .gap-row, .meter, .pair, .scorecard, .card,
+  .mix-legend, .cov-legend, .empty-state { break-inside: avoid; }
+  .fig-cap { color: #333; }
+
+  /* Pattern fills and solid marks are the *only* channel distinguishing four
+     coverage states and five sentiment segments, so they are not decoration
+     and browsers must not drop them from the printed page. This is exactly
+     the case `print-color-adjust: exact` exists for. */
+  .mix-bar, .mix-swatch, .cov-strip, .cov-swatch, .bar-fill, .bullet-fill,
+  .meter-fill, .gap-dot, .gap-connector, .pair-bar, .spark-dot, .spark-line {
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+
+  /* Sticky positioning has no meaning on paper and a sticky <th> printed as
+     an overlay is a defect, not a convenience. */
+  .doc-table caption { position: static !important; max-width: none !important; }
+
+  /* The layer-3 ground tint becomes a rule: a grey panel that prints as a
+     grey panel wastes toner and reads as a redaction. */
+  .layer-depth { background: none !important; border-left: 0.5pt solid #999; padding-left: 8pt; }
+
+  /* A figure without its numbers is a picture. Every value is already text in
+     the DOM (see the encodings block above), and this keeps it that way. */
+  .bar-count, .bullet-value, .gap-value, .gap-value-sub, .mix-legend-value,
+  .cov-legend-value, .meter-values, .pair-value { color: #000 !important; }
 }
 
 /* ==================================================== forced colors ===== */

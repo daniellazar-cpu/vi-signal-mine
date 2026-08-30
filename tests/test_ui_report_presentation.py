@@ -203,14 +203,28 @@ def test_a_confidence_tier_is_a_badge_not_a_title_tooltip(seeded):
     assert "<td title=" not in body
 
 
-def test_the_forest_plot_is_a_numbered_captioned_figure_on_the_report(seeded):
+def test_the_divergence_figure_is_numbered_captioned_and_drawn_on_the_report(seeded):
     """The product's one real visual argument did not appear on the report at
     all — it lived on the internal insight screen, in a bare div, with no
-    number a reader could cite."""
+    number a reader could cite.
+
+    The property is that the argument is *drawn* on the client document and
+    carries a number a reader can cite. It used to assert `<svg`, which was
+    the mechanism rather than the property: the forest plot set its theme
+    names in SVG `<text>` (which neither wraps nor reflows, so a long name is
+    clipped — ux-guidelines row 112, Critical), painted its marks in the
+    reserved accent, and burned the internal token `NE` and the banned word
+    `signals` into the image, where no template can reach them. The report now
+    draws the same comparison as a dumbbell in HTML and CSS. So the assertion
+    below accepts either drawing and rejects prose or a bare table, which is
+    what the test was actually guarding against.
+    """
     body = seeded["client"].get(seeded["report_path"]).text
     figure = re.search(r'<figure class="doc-figure" id="figure-1">(.*?)</figure>', body, re.S)
     assert figure, "no Figure 1 on the report"
-    assert "<svg" in figure.group(1)
+    assert re.search(r'<svg|class="gap-dot|class="gap-connector', figure.group(1)), (
+        "Figure 1 carries no drawn marks — it is prose or a table, not a figure"
+    )
     assert "<figcaption>" in figure.group(1)
     assert "Figure 1" in figure.group(1)
 

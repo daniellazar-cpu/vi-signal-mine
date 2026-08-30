@@ -1,47 +1,90 @@
 {% extends "_base.html" %}
+{% from "_macros.html" import page_header, card, read_more, sources %}
 {% block title %}How this works — Vi Signal Mine{% endblock %}
 {% block content %}
-<div class="page">
-<p class="eyebrow">About two minutes of reading</p>
-<section class="page-head">
-  <h1>How this works</h1>
-</section>
-<p class="page-caption">{{ explainer('how') }}</p>
+{#
+  The documentation screen. Reference material, so a definition list is the
+  correct shape here rather than a chart — but it is still ranked, not poured
+  out at one size.
 
-<p class="body-text">{{ what_it_is }}</p>
+    layer 1  the h1 and the one clause saying what the tool is
+    layer 2  the three passes, each card leading with what the pass does and
+             carrying what it produces and what it costs at meta weight
+    layer 3  each pass's method, and the glossary — behind a control, present
+             in print through read_more()'s second copy
+
+  The page-header meta line carries the reading estimate that used to be an
+  eyebrow *and* the screen explainer, which said the same thing twice in the
+  first fifteen words.
+
+  `#tiers` is load-bearing: every tier badge in the app links to /how#tiers,
+  so the source ladder keeps that id.
+#}
+<div class="page">
+
+{{ page_header("How this works", meta=[explainer('how')]) }}
+
+{#- Split rather than one five-sentence block. The first clause is the answer
+    to "what is this" and is set as the lede; the rest is support, a step down
+    in size and measure. The guard means a one-sentence rewrite of WHAT_IT_IS
+    still renders correctly. -#}
+{% set what = what_it_is.split('. ') %}
+<p class="lede-text">{{ what[0] }}{{ '.' if what|length > 1 else '' }}</p>
+{% if what|length > 1 %}
+<p class="body-text">{{ what[1:]|join('. ') }}</p>
+{% endif %}
 
 <h2>The three passes</h2>
 <div class="mode-cards">
   {% for m in modes %}
   <article class="mode-card">
-    <p class="mode-card-eyebrow">{{ "%02d"|format(loop.index) }} — {{ m.name }}</p>
+    {#- A heading, not a styled paragraph: each card is a titled section, and
+        as a <p> the three passes — the page's actual subject — were invisible
+        to heading navigation and to the document outline. -#}
+    <h3 class="mode-card-eyebrow">{{ "%02d"|format(loop.index) }} — {{ m.name }}</h3>
     <p class="mode-one-liner">{{ m.one_liner }}</p>
     <dl class="mode-meta">
       <div><dt>Produces</dt><dd>{{ m.produces }}</dd></div>
       <div><dt>Cost</dt><dd>{{ m.cost }}</dd></div>
     </dl>
-    <details>
-      <summary>More detail<span class="visually-hidden"> about {{ m.name }}</span></summary>
-      <p>{{ m.detail }}</p>
-    </details>
+    {#- read_more() rather than a bare <details>: a closed disclosure renders
+        no content slot, so the method would vanish from a printed page. The
+        macro emits a second, print-only copy. -#}
+    {% call read_more(m.name ~ " in detail") %}
+    <p>{{ m.detail }}</p>
+    {% endcall %}
   </article>
   {% endfor %}
 </div>
 
-<h2 id="tiers">How many sources back a finding</h2>
+{% call card("How many sources back a finding", 2, tip="sources", id="tiers") %}
+{#- Label, then mark, then count — the same reading order as a bar row, and
+    the pips are the same mark a reader meets beside every finding, so the
+    ladder they land on from a badge is drawn in the encoding they arrived
+    from. `loop.revindex` gives 3, 2, 1 down the list without hard-coding a
+    count beside copy that already states it. -#}
 <dl class="key-list">
   {% for name, desc in tiers %}
-  <div><dt>{{ name|capitalize }}</dt><dd>{{ desc }}</dd></div>
+  <div>
+    <dt>{{ name }} {{ sources(loop.revindex) }}</dt>
+    <dd>{{ desc }}</dd>
+  </div>
   {% endfor %}
 </dl>
+{% endcall %}
 
 <h2>Glossary</h2>
+{#- Every term stays on the page and in print. What changes is that ~230 words
+    of definitions no longer arrive before the reader has asked for one — the
+    (i) beside a label is the route most people take instead. -#}
+{% call read_more("Show all " ~ glossary|length ~ " definitions") %}
 <dl class="key-list">
   {% for term, desc in glossary %}
   <div><dt>{{ term }}</dt><dd>{{ desc }}</dd></div>
   {% endfor %}
 </dl>
+{% endcall %}
 
-<p class="body-text field-note">Want to see the shape of the output before any of this runs? <a href="/deliverables">See what you get <span aria-hidden="true">→</span></a></p>
+<p class="body-text"><a class="link-back" href="/deliverables">See what you get</a></p>
 </div>
 {% endblock %}

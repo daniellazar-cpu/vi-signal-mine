@@ -1,44 +1,310 @@
 {% extends "_base.html" %}
-{% from "_macros.html" import deliverable_tiers, page_header, info %}
+{% from "_macros.html" import page_header, card, stat, empty, delta, sparkline,
+                              read_more, deliverable_tiers, stamp,
+                              table_scroll_open %}
+{#
+  ONE TOPIC: what state is it in, and what happens next.
+
+  Three layers, separated on size, colour, enclosure, position and density
+  (the weight axis is only Book/Medium here, so it cannot carry the load):
+
+    1  the state in one clause, the scorecard, and the single violet action
+    2  the change against a *named* baseline, the stage strip, the two
+       sparklines, the run table
+    3  what the topic is set to watch, and runs older than the cap — behind
+       `read_more`, which also emits a print copy because a closed <details>
+       renders no content slot and there is no script here to open it.
+
+  The deliverables preview stays on this screen deliberately: it answers
+  "what will I get" while that question is still open. A finished run gets
+  the download list instead, on the run's own screens.
+#}
 {% block title %}{{ topic.name }} — Vi Signal Mine{% endblock %}
+{% block description %}Sweep history and deliverables for {{ topic.name }}.{% endblock %}
+
+{#- Vocabulary. `stopped_on_budget` is a *complete* outcome, not a failure:
+    it kept its rows. Saying "stopped at the cap" rather than the raw token
+    keeps it out of the failed family (UX-PLAN §7.3). -#}
+{% set STATE_WORD = {
+     "pending": "queued", "running": "running", "complete": "complete",
+     "failed": "failed", "stopped_on_budget": "stopped at the cap"} %}
+{#- Each run's own view, named by what is in it rather than by the mode. -#}
+{% set VIEW_PATH = {"mine": "snapshot", "insight": "insight", "report": "report"} %}
+{% set VIEW_NAME = {"mine": "Mentions", "insight": "Findings", "report": "Report"} %}
+{% set ROW_CAP = 12 %}
+
+{#- `sweep_rail` is the uncapped list of finished collections; the series is
+    capped at twelve reads, so the count of sweeps must come from the rail or
+    a long-watched topic silently reports twelve. -#}
+{% set total_sweeps = sweep_rail|length %}
+{% set latest = volume_series.latest %}
+{% set prior = volume_series.points[-2] if volume_series.count > 1 else none %}
+{% set running = history|selectattr("status", "equalto", "running")|list
+                 + history|selectattr("status", "equalto", "pending")|list %}
+{% set in_flight = running[0] if running else none %}
+{% set mines = history|selectattr("mode", "equalto", "mine")|list %}
+{% set newest_mine = mines[0] if mines else none %}
+{% set last_run = history[0] if history else none %}
+
+{#- Five states, five different next moves. "started" means runs exist but no
+    collection has finished — which is not the same fact as "never run". -#}
+{% set stage = "report" if latest_report
+               else "insight" if latest_insight
+               else "mine" if latest_mine
+               else "started" if has_run
+               else "none" %}
+{% set next_step = (
+     ("/runs/" ~ in_flight.run_id, "Open the run in progress") if in_flight
+     else ("/topics/" ~ topic.topic_id ~ "/confirm", "Run the first sweep") if stage == "none"
+     else ("/topics/" ~ topic.topic_id ~ "/confirm", "Try a sweep again") if stage == "started"
+     else ("/runs/" ~ latest_mine.run_id, "Analyse this sweep") if stage == "mine"
+     else ("/runs/" ~ latest_insight.run_id, "Write the report") if stage == "insight"
+     else ("/topics/" ~ topic.topic_id ~ "/confirm", "Run a new sweep")) %}
+{% set next_is_sweep = next_step[0].endswith("/confirm") %}
+
+{% set state_line = (
+     "A run is in progress." if in_flight
+     else ("The last collection stopped at its cap and kept what it collected."
+             if newest_mine and newest_mine.status == "stopped_on_budget"
+           else "The last collection failed."
+             if newest_mine and newest_mine.status == "failed"
+           else "No collection has finished yet.") if stage == "started"
+     else "Collected. Not analysed yet." if stage == "mine"
+     else "Analysed. No report written from this sweep." if stage == "insight"
+     else "Collected, analysed and reported.") %}
+
+{#- Three different reasons the figures are missing, named separately.
+    "Stopped at the cap" is the one that must not read as a failure: it kept
+    its rows, they are simply not counted as a finished sweep, and a shared
+    "no data yet" would collapse that into the failed case (UX-PLAN §7.3). -#}
+{% set no_figures = (
+     ("No figures yet.", "They appear the moment the run in progress finishes.") if in_flight
+     else ("No sweep figures here.",
+           "The rows that run kept are on the run itself — only a collection that reached the end of its list counts as a sweep on this page.")
+            if newest_mine and newest_mine.status == "stopped_on_budget"
+     else ("No figures yet.", "They appear here as soon as a collection finishes.")) %}
+
+{#- One row of the run log. A local macro so the capped table and the
+    layer-3 table below it cannot drift apart. It carries no id, which is
+    what makes it safe inside `read_more` — that macro emits its body twice
+    and two elements would otherwise share one id. -#}
+{% macro run_row(run) %}
+<tr>
+  <th scope="row">{{ stamp(run.started_at) }}</th>
+  <td>{{ MODE_LABELS.get(run.mode, run.mode) }}</td>
+  <td><span class="status-badge status-{{ run.status }}">{{ STATE_WORD.get(run.status, run.status|replace("_", " ")) }}</span></td>
+  <td class="num">{{ run.cost_usd|usd(4) }}</td>
+  <td>
+    <a href="/runs/{{ run.run_id }}/{{ VIEW_PATH.get(run.mode, '') }}">{{ VIEW_NAME.get(run.mode, "Open") }}</a>
+    <span class="cell-sub"><a href="/runs/{{ run.run_id }}">How it ran</a></span>
+  </td>
+</tr>
+{% endmacro %}
+
+{% macro run_table(rows, caption) %}
+{{ table_scroll_open(caption) }}
+<table class="data-table">
+  <caption class="visually-hidden">{{ caption }}</caption>
+  <thead>
+    <tr>
+      <th scope="col">Started</th>
+      <th scope="col">Step</th>
+      <th scope="col">State</th>
+      <th scope="col" class="num">Cost</th>
+      <th scope="col">Open</th>
+    </tr>
+  </thead>
+  <tbody>{% for run in rows %}{{ run_row(run) }}{% endfor %}</tbody>
+</table>
+</div>
+{% endmacro %}
+
 {% block content %}
 <div class="page page-wide">
+
 {% call page_header(topic.name,
      [topic.therapeutic_area if topic.therapeutic_area else "no area set",
       topic.spend_band|sweep_size ~ " sweep",
-      (history|length ~ " run" ~ ("" if history|length == 1 else "s")) if history else "never run"]) %}
+      "created " ~ topic.created_at|date_long]) %}
   {% if storage_is_durable() %}
   <a class="link-back" href="/topics/{{ topic.topic_id }}/edit">Edit</a>
   {% endif %}
-  <a class="btn btn-primary" href="/topics/{{ topic.topic_id }}/confirm">{% if has_run %}New sweep{% else %}Run first sweep{% endif %}</a>
+  {% if not next_is_sweep %}
+  <a class="btn btn-ghost" href="/topics/{{ topic.topic_id }}/confirm">New sweep</a>
+  {% endif %}
+  <a class="btn btn-primary" href="{{ next_step[0] }}">{{ next_step[1] }}</a>
 {% endcall %}
 
-<h2>Runs</h2>
-{% if history %}
-<ul class="run-history">
-  {% for run in history %}
-  <li>
-    <span class="run-mode">{{ MODE_LABELS.get(run.mode, run.mode) }}</span>
-    <span class="status-badge status-{{ run.status }}">{{ run.status|replace("_", " ") }}</span>
-    <span class="run-date">{{ run.started_at|dt }}</span>
-    <span class="cell-sub">{{ run.cost_usd|usd(4) }}</span>
-    <span class="run-links">
-      <a href="/runs/{{ run.run_id }}">run</a>
-      {% if run.mode == "mine" %}<a href="/runs/{{ run.run_id }}/snapshot">snapshot</a>{% endif %}
-      {% if run.mode == "insight" %}<a href="/runs/{{ run.run_id }}/insight">insight</a>{% endif %}
-      {% if run.mode == "report" %}<a href="/runs/{{ run.run_id }}/report">report</a>{% endif %}
-    </span>
-  </li>
-  {% endfor %}
-</ul>
+{# ---------------------------------------------------- 1. the answer --- #}
+
+<h2>Where this topic stands</h2>
+
+{% if has_run %}<p class="lede-text">{{ state_line }}</p>{% endif %}
+
+{% if latest_mine %}
+<div class="scorecard">
+  {{ stat("Mentions in the latest sweep", latest.value_label,
+          sub="collected " ~ latest.date_long, tip="mention", size="xl") }}
+  {{ stat("Sweeps", total_sweeps,
+          sub=("since " ~ sweep_rail[0].long) if total_sweeps > 1 else "") }}
+  {{ stat("Spent to date", spend_to_date|usd(4),
+          sub=history|length ~ (" run" if history|length == 1 else " runs")) }}
+</div>
+
+{#- The change, at support weight and never at figure size: a delta is not
+    more important than the level it modifies. `delta(none, …)` says "first
+    sweep" in words — never a dash, never 0%, never +100%. A prior sweep that
+    collected nothing has no percentage at all, and saying so is not the same
+    statement as having no baseline. -#}
+{% if prior is none %}
+<p class="t-support">Mentions collected {{ delta(none, "") }}</p>
+{% elif prior.value %}
+<p class="t-support">Mentions collected {{ delta(((latest.value - prior.value) * 100.0 / prior.value)|round(1), prior.date_long) }}</p>
 {% else %}
-<p class="empty-state">This topic has never been run — nothing has been collected yet.</p>
+<p class="t-support">The sweep of {{ prior.date_long }} collected nothing, so there is no percentage against it.</p>
 {% endif %}
 
-<h2>What you get</h2>
-{% if not has_run %}
-<p class="page-meta"><span>Nothing here is real yet — this is the shape that fills in once a sweep completes.</span></p>
+{#- The three-step strip, against the latest sweep and only that one: an
+    older report says nothing about whether this sweep has been written up. -#}
+<h3>The sweep of {{ stamp(latest_mine.started_at, long=true) }}</h3>
+<ol class="stage-list">
+  <li class="stage-item stage-done">
+    <span class="stage-num">01</span>
+    <span class="stage-mark" aria-hidden="true"></span>
+    <span class="stage-label">Collected</span>
+    <a class="link-back" href="/runs/{{ latest_mine.run_id }}/snapshot">The mentions</a>
+  </li>
+  <li class="stage-item {% if latest_insight %}stage-done{% endif %}">
+    <span class="stage-num">02</span>
+    <span class="stage-mark" aria-hidden="true"></span>
+    <span class="stage-label">Analysed</span>
+    {% if latest_insight %}
+    <a class="link-back" href="/runs/{{ latest_insight.run_id }}/insight">The findings</a>
+    {% else %}
+    <a class="link-back" href="/runs/{{ latest_mine.run_id }}">Analyse this sweep</a>
+    {% endif %}
+  </li>
+  <li class="stage-item {% if latest_report %}stage-done{% endif %}">
+    <span class="stage-num">03</span>
+    <span class="stage-mark" aria-hidden="true"></span>
+    <span class="stage-label">Written up</span>
+    {% if latest_report %}
+    <a class="link-back" href="/runs/{{ latest_report.run_id }}/report">The report</a>
+    {% elif latest_insight %}
+    <a class="link-back" href="/runs/{{ latest_insight.run_id }}">Write the report</a>
+    {% else %}
+    <span class="cell-sub">after the analysis</span>
+    {% endif %}
+  </li>
+</ol>
+
+{% elif has_run %}
+{{ empty(no_figures[0], no_figures[1],
+         "/runs/" ~ (newest_mine.run_id if newest_mine else last_run.run_id),
+         "Open that run") }}
+{% else %}
+{{ empty("Nothing collected yet.",
+         "This topic was defined on " ~ topic.created_at|date_long ~ " and has never been swept.",
+         "/topics/" ~ topic.topic_id ~ "/confirm",
+         "Run the first sweep") }}
 {% endif %}
+
+{#- Layer 3: what the sweep is actually pointed at. It is the topic's own
+    definition, it is meaty, and it belongs one control away rather than in
+    the edit form only. No id, no control, no anchor target inside — the
+    disclosure renders its body twice so the printed page keeps it. -#}
+{% call read_more("What this topic is set to watch") %}
+<dl class="key-list">
+  <div>
+    <dt>Defined</dt>
+    <dd>{{ stamp(topic.created_at, long=true) }}</dd>
+  </div>
+  {% if topic.brand %}<div><dt>Brand</dt><dd>{{ topic.brand }}</dd></div>{% endif %}
+  {% if topic.molecule %}<div><dt>Generic name</dt><dd>{{ topic.molecule }}</dd></div>{% endif %}
+  {% if topic.competitors %}
+  <div><dt>Competitors watched alongside it</dt><dd>{{ topic.competitors|join(", ") }}</dd></div>
+  {% endif %}
+  {% if topic.questions %}
+  <div>
+    <dt>Questions it should answer</dt>
+    <dd><ul class="note-list">{% for q in topic.questions %}<li>{{ q }}</li>{% endfor %}</ul></dd>
+  </div>
+  {% endif %}
+  {% if topic.never_say %}
+  <div><dt>Terms the report may never contain</dt><dd>{{ topic.never_say|join(", ") }}</dd></div>
+  {% endif %}
+</dl>
+{% if not (topic.brand or topic.molecule or topic.competitors or topic.questions or topic.never_say) %}
+<p>Only a name and an area are set. Everything else that narrows or widens a sweep is optional, and none of it was filled in.</p>
+{% endif %}
+{% endcall %}
+
+{# ---------------------------------------------------- 2. the history -- #}
+
+{% call card("History", 2, tip="sweep") %}
+
+{% if history %}
+
+{% if sweep_rail %}
+{#- The sweep axis: one frame per finished collection, in date order, each an
+    anchor to that sweep's rows. Short label on screen, the unambiguous date
+    on the control itself, because "19 Aug" alone is not a date a reader can
+    resolve months later. -#}
+<nav class="dated-strip" aria-label="Every sweep, oldest first">
+  {%- for s in sweep_rail %}
+  {#- The ordinal is in the label because two sweeps can land on one day, and
+      the short date alone then names both of them identically. -#}
+  <a class="dated-frame{% if s.is_current %} dated-frame-current{% endif %}" href="{{ s.href }}"
+     aria-label="Sweep {{ loop.index }} of {{ total_sweeps }}, {{ s.long }}"
+     {%- if s.is_current %} aria-current="true"{% endif %}>{{ s.short }}</a>
+  {%- endfor %}
+</nav>
+{% endif %}
+
+{#- One sweep is not a series. charts.csv row 1 sends anything under four
+    points to a stat card, and the scorecard above *is* that card, so a
+    figure is only drawn once there are two dates to space apart. Both
+    captions state a range the scorecard does not already carry. -#}
+{% if volume_series.count > 1 %}
+{{ sparkline(volume_series,
+     label="Between " ~ volume_series.lo_label ~ " and " ~ volume_series.hi_label
+           ~ " mentions a sweep"
+           ~ (", over the last " ~ volume_series.count ~ " sweeps." if volume_series.count < total_sweeps else "."),
+     title="Mentions collected per sweep, spaced by the dates the sweeps happened on") }}
+{% endif %}
+
+{#- A line through a column of zeroes is a chart of nothing, so the spend
+    figure is drawn only once a sweep has actually cost something; the
+    scorecard's own total covers the rest. -#}
+{% if spend_series.count > 1 and spend_series.hi > 0 %}
+{% set spend_caption = ("Collection has cost " ~ spend_series.lo|usd(4) ~ " to " ~ spend_series.hi|usd(4) ~ " a sweep.")
+                        if spend_series.hi > spend_series.lo
+                        else ("Every sweep has cost " ~ spend_series.hi|usd(4) ~ ".") %}
+{{ sparkline(spend_series, label=spend_caption,
+             title="What each sweep cost, on the same dates") }}
+{% endif %}
+
+{{ run_table(history[:ROW_CAP], "Runs for this topic, newest first") }}
+
+{% if history|length > ROW_CAP %}
+{% call read_more("Earlier runs (" ~ (history|length - ROW_CAP) ~ ")") %}
+{{ run_table(history[ROW_CAP:], "Runs older than the " ~ ROW_CAP ~ " above, newest first") }}
+{% endcall %}
+{% endif %}
+
+{% else %}
+{{ empty("No run recorded.",
+         "Every collection, analysis and report lands here with its date, its state and what it cost.") }}
+{% endif %}
+
+{% endcall %}
+
+{# ------------------------------------------- 3. what this produces ---- #}
+
+{#- No heading of its own: the two tier labels are the section heads, which
+    keeps the outline sequential and stops an orphan heading printing above
+    a block the print stylesheet hides. -#}
 {{ deliverable_tiers(tiers) }}
+
 </div>
 {% endblock %}
