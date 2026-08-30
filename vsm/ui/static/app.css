@@ -1413,6 +1413,55 @@ a.tier-badge-corroborated:hover { background: var(--vi-violet-hover); border-col
   .page-actions { justify-self: start; }
 }
 
+/* ============================================= header CTA + report hub = */
+/*
+   The persistent create-action in the top bar. It is not the big page-level
+   primary — it is chrome, the way GitHub's "New" and Linear's "+" are — so it
+   is compact and lives beside the nav rather than competing with a screen's own
+   primary button. Violet, because it is the one create-action; the design
+   system reserves violet for exactly this kind of single, decisive action.
+*/
+.app-top-right { display: flex; align-items: center; gap: 28px; }
+.app-top-cta {
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  padding: 8px 14px; border-radius: var(--radius-sm);
+  background: var(--vi-violet); color: var(--on-signal);
+  font-size: var(--t-small-size); font-weight: var(--w-medium); text-decoration: none;
+  transition: background var(--dur-base) var(--ease-standard);
+}
+.app-top-cta:hover { background: var(--vi-violet-hover); color: var(--on-signal); }
+.app-top-cta:active { background: var(--vi-violet-pressed); }
+.app-top-cta:focus-visible { outline: 2px solid var(--vi-violet); outline-offset: 2px; }
+.app-top-cta-plus { font-size: 15px; line-height: 1; font-weight: 400; }
+
+.rn-section { padding: var(--space-md) 0; border-top: var(--border-hairline) solid var(--rule); }
+.rn-section:first-of-type { border-top: 0; }
+.rn-h { font-size: 15px; font-weight: var(--w-medium); margin: 0 0 var(--space-sm); }
+.rn-list { list-style: none; margin: 0; padding: 0; }
+.rn-row {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-md);
+  padding: 12px 0; border-bottom: var(--border-hairline) solid var(--rule); flex-wrap: wrap;
+}
+.rn-row:last-child { border-bottom: 0; }
+.rn-row-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.rn-topic { color: var(--fg1); font-weight: var(--w-medium); text-decoration: none; }
+.rn-topic:hover { text-decoration: underline; text-underline-offset: 2px; }
+.rn-row-actions { display: flex; align-items: center; gap: 10px; flex: none; }
+.rn-steps { list-style: none; margin: 0 0 var(--space-md); padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.rn-steps li { display: flex; gap: 12px; align-items: baseline; }
+.rn-step-n {
+  flex: none; width: 22px; height: 22px; border-radius: 50%;
+  border: var(--border-hairline) solid var(--fg1); color: var(--fg1);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; font-variant-numeric: tabular-nums;
+}
+.rn-step-t { font-weight: var(--w-medium); color: var(--fg1); }
+
+@media (max-width: 699px) {
+  .app-top-right { gap: 14px; width: 100%; justify-content: space-between; }
+  .app-top-cta { padding: 8px 12px; }
+}
+
 /* ============================================= dashboard ============== */
 /*
    The overview. Density is the design here: four counters and four ranked

@@ -46,14 +46,26 @@ not extended.
       <span class="app-mark-div" aria-hidden="true"></span>
       <span class="app-mark-name">Signal Mine</span>
     </a>
-    <nav class="app-top-nav">
-      {# Two working screens first, documentation last. The old order put two
-         explanatory pages ahead of the only one that does anything. #}
-      <a href="/"{% if active_nav is defined and active_nav == "overview" %} class="current" aria-current="page"{% endif %}>Overview</a>
-      <a href="/topics"{% if active_nav is defined and active_nav == "topics" %} class="current" aria-current="page"{% endif %}>Topics</a>
-      <a href="/deliverables"{% if active_nav is defined and active_nav == "deliverables" %} class="current" aria-current="page"{% endif %}>Deliverables</a>
-      <a href="/how"{% if active_nav is defined and active_nav == "how" %} class="current" aria-current="page"{% endif %}>How it works</a>
-    </nav>
+    {# The nav and the one persistent create-action, grouped on the right.
+       "New report" lives in the chrome so it is reachable from every screen —
+       the way GitHub, Linear and Notion keep a create-action always present —
+       rather than being buried three steps inside a topic. It is gated on
+       durable storage: on a read-only instance there is nothing to create. #}
+    <div class="app-top-right">
+      <nav class="app-top-nav">
+        {# Two working screens first, documentation last. The old order put two
+           explanatory pages ahead of the only one that does anything. #}
+        <a href="/"{% if active_nav is defined and active_nav == "overview" %} class="current" aria-current="page"{% endif %}>Overview</a>
+        <a href="/topics"{% if active_nav is defined and active_nav == "topics" %} class="current" aria-current="page"{% endif %}>Topics</a>
+        <a href="/deliverables"{% if active_nav is defined and active_nav == "deliverables" %} class="current" aria-current="page"{% endif %}>Deliverables</a>
+        <a href="/how"{% if active_nav is defined and active_nav == "how" %} class="current" aria-current="page"{% endif %}>How it works</a>
+      </nav>
+      {% if storage_is_durable() %}
+      <a class="app-top-cta" href="/reports/new">
+        <span class="app-top-cta-plus" aria-hidden="true">+</span> New report
+      </a>
+      {% endif %}
+    </div>
   </header>
   {% if not storage_is_durable() %}
   <div class="read-only-banner">

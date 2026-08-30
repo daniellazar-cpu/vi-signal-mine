@@ -1,0 +1,60 @@
+{% extends "_base.html" %}
+{% from "_macros.html" import page_header, empty %}
+{% block title %}New report — Vi Signal Mine{% endblock %}
+{% block content %}
+{#
+  The hub the persistent "New report" action leads to. A report begins one of
+  two ways and this page routes both, so the always-present button is never a
+  dead end: generate from an analysis that already exists, or start a fresh
+  topic and run it through.
+#}
+<div class="page">
+
+{{ page_header("New report") }}
+
+{# The fast path. Every topic whose latest analysis is done, one click from its
+   report. This is what someone with work already in flight is looking for. #}
+<section class="rn-section">
+  <h2 class="rn-h">From an analysis you have already run</h2>
+  {% if ready %}
+  <ul class="rn-list">
+    {% for r in ready %}
+    <li class="rn-row">
+      <div class="rn-row-main">
+        <a class="rn-topic" href="/topics/{{ r.topic.topic_id }}">{{ r.topic.name }}</a>
+        <span class="t-meta">
+          {% if r.has_report %}a report exists — regenerating replaces it with the current analysis{% else %}analysed, no report yet{% endif %}
+        </span>
+      </div>
+      <div class="rn-row-actions">
+        {% if r.has_report %}
+        <a class="btn btn-ghost btn-sm" href="/runs/{{ r.report_run_id }}/report">View</a>
+        {% endif %}
+        <form method="post" action="/runs/{{ r.insight_run_id }}/report">
+          <button class="btn btn-primary btn-sm" type="submit">{{ "Regenerate report" if r.has_report else "Generate report" }}</button>
+        </form>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  {{ empty("No analysis is ready to report on yet.",
+           "A report is the last step: a topic is swept, the sweep is analysed, then the report is written from it. Start below.") }}
+  {% endif %}
+</section>
+
+{# The full path. A brand-new topic, which the guided flow carries through sweep
+   and analysis to a report. #}
+<section class="rn-section">
+  <h2 class="rn-h">From scratch</h2>
+  <p class="t-support">A report is the end of a four-step flow. Define what to watch and the flow carries it through.</p>
+  <ol class="rn-steps">
+    {% for title, body in steps %}
+    <li><span class="rn-step-n">{{ loop.index }}</span><span class="rn-step-copy"><span class="rn-step-t">{{ title }}</span> <span class="t-meta">{{ body }}</span></span></li>
+    {% endfor %}
+  </ol>
+  <a class="btn btn-primary" href="/topics/new">Define a new topic</a>
+</section>
+
+</div>
+{% endblock %}

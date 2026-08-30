@@ -1083,6 +1083,56 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         "molecule": "", "competitors": "", "questions": "", "never_say": "",
     }
 
+    @app.get("/reports/new", response_class=HTMLResponse)
+    def report_new(request: Request) -> HTMLResponse:
+        """The one hub the persistent "New report" action leads to.
+
+        A report can begin two ways, and a single always-present button has to
+        route both: from an analysis that already exists (one click to generate),
+        or from a fresh topic (the full guided flow). This page holds both so
+        "New report" is never a dead end whatever state the store is in.
+
+        The fast path lists every topic whose latest analysis is complete, with
+        whether a report already exists for it — so the label reads "Generate"
+        or "Regenerate" honestly rather than implying the first when it is the
+        second.
+        """
+        topics = topic_store.list()
+        runs_by_topic = run_store.for_topics([t.topic_id for t in topics])
+        ready = []
+        for topic in topics:
+            runs = runs_by_topic.get(topic.topic_id, ())
+            snaps = [r for r in runs if r.mode == "mine" and r.status == "complete"]
+            if not snaps:
+                continue
+            latest_mine = snaps[-1]
+            insights = [
+                r for r in runs
+                if r.mode == "insight" and r.status == "complete"
+                and r.parent_run_id == latest_mine.run_id
+            ]
+            if not insights:
+                continue
+            latest_insight = insights[-1]
+            reports = [
+                r for r in runs
+                if r.mode == "report" and r.status == "complete"
+                and r.parent_run_id == latest_insight.run_id
+            ]
+            ready.append({
+                "topic": topic,
+                "insight_run_id": latest_insight.run_id,
+                "has_report": bool(reports),
+                "report_run_id": reports[-1].run_id if reports else None,
+            })
+        # Ones with no report yet come first: those are the reports waiting to be
+        # made, which is what someone clicking "New report" most likely wants.
+        ready.sort(key=lambda r: (r["has_report"], r["topic"].name.lower()))
+        return render(
+            request, "reports_new.html", ready=ready,
+            active_nav="", steps=FIRST_RUN_STEPS,
+        )
+
     @app.get("/topics/new", response_class=HTMLResponse)
     def topic_new(request: Request) -> HTMLResponse:
         return render(
