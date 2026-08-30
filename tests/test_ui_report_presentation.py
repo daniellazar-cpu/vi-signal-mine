@@ -654,3 +654,27 @@ def test_the_preview_still_exists_where_the_question_is_open(seeded):
     for path in ("/deliverables", f"/topics/{seeded['topic'].topic_id}"):
         body = seeded["client"].get(path).text
         assert 'class="deliv-card' in body, f"{path} lost the preview"
+
+
+def test_every_deliverable_file_is_an_artifact_the_pipeline_writes(seeded):
+    """A deliverable's `file` is an internal identifier that must match what the
+    pipeline actually writes — the display `name` is free to differ. A rename
+    that touched `file` instead of only `name` pointed the "Trend" download at
+    trend.json while the pipeline writes momentum.json: a guaranteed 404 on a
+    file a client was told they could have.
+    """
+    from vsm.ui.content import DELIVERABLES
+
+    run_for_group = {
+        "data": seeded["snapshot"],
+        "analysis": seeded["insight"],
+        "report": seeded["report"],
+    }
+    missing = []
+    for d in DELIVERABLES:
+        run = run_for_group[d["group"]]
+        try:
+            seeded["run_store"].read_artifact(run.run_id, d["file"])
+        except FileNotFoundError:
+            missing.append((d["name"], d["file"]))
+    assert not missing, f"deliverables pointing at files the pipeline never writes: {missing}"

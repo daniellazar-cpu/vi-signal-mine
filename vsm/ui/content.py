@@ -434,8 +434,8 @@ DELIVERABLES = (
         "sample": "",
     },
     {
-        "key": "trend",
-        "file": "trend.json",
+        "key": "momentum",
+        "file": "momentum.json",
         "name": "Trend",
         "group": "analysis",
         "headline": "What moved since the last sweep.",

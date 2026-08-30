@@ -385,7 +385,8 @@ def test_no_screen_leaks_an_internal_word(tmp_path, monkeypatch):
     leaks = {}
     for name, path in paths.items():
         text = re.sub(r"\s+", " ", re.sub(r"<[^>]*>", " ", c.get(path).text))
-        text = text.replace("Vi Signal Mine", "").replace("signals.json", "")
+        for fname in ("Vi Signal Mine", "signals.json", "momentum.json"):
+            text = text.replace(fname, "")
         hit = [w for w in banned if w in text]
         if hit:
             leaks[name] = hit
