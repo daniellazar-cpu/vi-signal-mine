@@ -40,19 +40,25 @@ else
 fi
 replace VSM_ACCESS_KEY "$GATE"
 
-say "2/4  Anthropic key"
+say "2/4  Anthropic key  (optional — press enter to skip)"
 printf '  From console.anthropic.com, or the data-science team.\n'
+printf '  Skipping is fine: Bright Data collection still runs live, using one\n'
+printf '  deterministic cluster instead of an LLM-expanded set. Analysis and\n'
+printf '  report stay unavailable until this is set.\n'
 printf '  Starts with sk-ant-  (input is hidden)\n'
 read -r -s -p "  ANTHROPIC_API_KEY: " ANTHROPIC_KEY; echo
 if [ -z "$ANTHROPIC_KEY" ]; then
-  echo "  ✗ empty — aborting so the app is not left half-configured" >&2; exit 1
+  printf '  – skipped; collection-only mode\n'
+else
+  case "$ANTHROPIC_KEY" in
+    sk-ant-*) ;;
+    *"Secret:"*|*"data_science"*)
+      echo "  ✗ that is a Secrets Manager pointer, not a key — aborting" >&2; exit 1 ;;
+    *) printf '  ! That does not start with sk-ant-. Continue anyway? [y/N] '
+       read -r a; [ "$a" = "y" ] || { echo "  aborted"; exit 1; } ;;
+  esac
+  replace ANTHROPIC_API_KEY "$ANTHROPIC_KEY"
 fi
-case "$ANTHROPIC_KEY" in
-  sk-ant-*) ;;
-  *) printf '  ! That does not start with sk-ant-. Continue anyway? [y/N] '
-     read -r a; [ "$a" = "y" ] || { echo "  aborted"; exit 1; } ;;
-esac
-replace ANTHROPIC_API_KEY "$ANTHROPIC_KEY"
 
 say "3/4  Bright Data key"
 printf '  Bright Data control panel → Account settings → API keys\n'
