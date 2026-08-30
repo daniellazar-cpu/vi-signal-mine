@@ -46,6 +46,7 @@ from vsm.modes.mine import run_mine
 from vsm.modes.report import run_report
 from vsm.platform import assert_serveable, storage_is_durable
 from vsm.topics.model import BANDS
+from vsm.mining.healthcheck import check_brightdata
 from vsm.ui.overview import artifacts_to_warm, build_overview
 from vsm.ui.content import (
     DEFINITIONS,
@@ -1082,6 +1083,50 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         "name": "", "therapeutic_area": "", "spend_band": "probe", "brand": "",
         "molecule": "", "competitors": "", "questions": "", "never_say": "",
     }
+
+    @app.get("/healthz/brightdata", response_class=HTMLResponse)
+    def brightdata_health(request: Request) -> HTMLResponse:
+        """Config status and — when live-capable — a button to run one real
+        probe per Bright Data product.
+
+        The GET spends nothing: it only reports whether the instance is offline,
+        whether a key is present, and which zones are configured. The actual
+        billed call is the POST below, so a crawler or a link prefetch cannot
+        spend money by loading this page.
+        """
+        s = get_settings(refresh=True)
+        return render(
+            request, "healthz.html",
+            offline=s.offline,
+            has_key=bool(s.brightdata_api_key),
+            serp_zone=s.brightdata_serp_zone,
+            unlocker_zone=s.brightdata_unlocker_zone,
+            results=None, active_nav="",
+        )
+
+    @app.post("/healthz/brightdata", response_class=HTMLResponse)
+    def brightdata_health_run(request: Request) -> HTMLResponse:
+        """Run one SERP and one Unlocker probe. A few cents, a few seconds.
+
+        Refuses when offline — there is nothing to reach and no key to spend, so
+        a probe would only produce a confusing failure. The result is rendered
+        back into the same page; the key never appears in it.
+        """
+        s = get_settings(refresh=True)
+        if s.offline:
+            return render(
+                request, "healthz.html", offline=True,
+                has_key=bool(s.brightdata_api_key),
+                serp_zone=s.brightdata_serp_zone, unlocker_zone=s.brightdata_unlocker_zone,
+                results=None, active_nav="",
+            )
+        results = check_brightdata(s)
+        return render(
+            request, "healthz.html", offline=False,
+            has_key=bool(s.brightdata_api_key),
+            serp_zone=s.brightdata_serp_zone, unlocker_zone=s.brightdata_unlocker_zone,
+            results=results, active_nav="",
+        )
 
     @app.get("/reports/new", response_class=HTMLResponse)
     def report_new(request: Request) -> HTMLResponse:

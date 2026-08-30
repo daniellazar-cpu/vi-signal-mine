@@ -1,0 +1,84 @@
+{% extends "_base.html" %}
+{% from "_macros.html" import page_header, empty %}
+{% block title %}Bright Data connection — Vi Signal Mine{% endblock %}
+{% block content %}
+{#
+  The pre-flight check. It exists so a mis-wired key or a wrong zone surfaces in
+  one cheap call before a full sweep spends real money and minutes. The GET
+  spends nothing; only the POST below makes billed calls.
+#}
+<div class="page">
+
+{{ page_header("Bright Data connection") }}
+
+<div class="scorecard">
+  <div class="metric">
+    <span class="metric-label">Mode</span>
+    <span class="metric-value metric-value-sm">{{ "Offline" if offline else "Live" }}</span>
+    <span class="metric-sub">{{ "no outbound calls possible" if offline else "outbound calls enabled" }}</span>
+  </div>
+  <div class="metric">
+    <span class="metric-label">API key</span>
+    <span class="metric-value metric-value-sm">{{ "Set" if has_key else "Not set" }}</span>
+  </div>
+  <div class="metric">
+    <span class="metric-label">SERP zone</span>
+    <span class="metric-value metric-value-sm mono">{{ serp_zone }}</span>
+  </div>
+  <div class="metric">
+    <span class="metric-label">Unlocker zone</span>
+    <span class="metric-value metric-value-sm mono">{{ unlocker_zone }}</span>
+  </div>
+</div>
+
+{% if offline %}
+{{ empty("This instance is offline, so no live check is possible.",
+         "Set VSM_OFFLINE=0 (and the keys) and redeploy to enable live calls. Offline is a safe resting state, not a fault.") }}
+{% elif not has_key %}
+{{ empty("No Bright Data key is set, so there is nothing to test.",
+         "Add BRIGHTDATA_API_KEY and redeploy.") }}
+{% else %}
+
+{% if results is none %}
+<p class="t-support">Runs one SERP request and one Web Unlocker request against Bright Data's test URL — a few cents, a few seconds. It proves the key, the zones and each product are live before a real sweep depends on them.</p>
+<form method="post" action="/healthz/brightdata">
+  <button class="btn btn-primary" type="submit">Run connection test</button>
+</form>
+{% else %}
+<div class="table-scroll" tabindex="0" role="region" aria-label="Bright Data connection test results">
+<table class="data-table">
+  <caption class="visually-hidden">One probe per Bright Data product, with pass or fail and latency.</caption>
+  <thead><tr>
+    <th scope="col">Product</th>
+    <th scope="col">Zone</th>
+    <th scope="col">Result</th>
+    <th scope="col" class="num">Latency</th>
+    <th scope="col">Detail</th>
+  </tr></thead>
+  <tbody>
+    {% for r in results %}
+    <tr>
+      <th scope="row">{{ r.product }}</th>
+      <td class="mono">{{ r.zone }}</td>
+      <td>{% if r.ok %}<span class="hz-ok">Reachable</span>{% else %}<span class="hz-bad">Failed</span>{% endif %}</td>
+      <td class="num">{{ (r.latency_ms ~ " ms") if r.latency_ms is not none else "—" }}</td>
+      <td class="t-meta">{{ r.detail }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% set all_ok = results | selectattr("ok") | list | length == results | length %}
+{% if all_ok %}
+<p class="t-support"><strong>All products reachable.</strong> The app is wired correctly — a live sweep will spend against the same key and zones.</p>
+{% else %}
+<p class="t-support">One or more products failed. The detail column carries Bright Data's own message — a 401/403 means the key or product is not enabled; a wrong zone name fails here too.</p>
+{% endif %}
+<form method="post" action="/healthz/brightdata">
+  <button class="btn btn-ghost" type="submit">Run again</button>
+</form>
+{% endif %}
+
+{% endif %}
+</div>
+{% endblock %}

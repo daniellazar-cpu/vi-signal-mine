@@ -1462,6 +1462,15 @@ a.tier-badge-corroborated:hover { background: var(--vi-violet-hover); border-col
   .app-top-cta { padding: 8px 12px; }
 }
 
+/* Pass/fail is carried by the glyph and the word, in ink — not by colour.
+   Red stays reserved for delete affordances, and the app's rule is that colour
+   is never the only channel anyway. */
+.hz-ok { color: var(--fg1); font-weight: var(--w-medium); }
+.hz-ok::before { content: "\2713\00a0"; }
+.hz-bad { color: var(--fg1); font-weight: var(--w-medium); }
+.hz-bad::before { content: "\2717\00a0"; }
+.mono { font-family: var(--vi-mono, ui-monospace, monospace); font-size: 12px; }
+
 /* ============================================= dashboard ============== */
 /*
    The overview. Density is the design here: four counters and four ranked
