@@ -1,12 +1,20 @@
-"""One cheap live call per Bright Data product, to prove the wiring before a sweep.
+"""One cheap live call to SERP and Web Unlocker, to prove the wiring before a sweep.
+
+**Two of the three products the miner uses.** Discover
+(:mod:`vsm.mining.discover`) is deliberately not probed: its API is a
+trigger-then-poll job rather than a single request, so the cheapest honest probe
+costs a job plus at least one poll and takes an order of magnitude longer than the
+other two combined. The wording here says SERP and Web Unlocker rather than "every
+product" so nobody reads a green page as proof that a sweep's Discover leg will
+work.
 
 **Why this exists.** The whole live path was tested only against a mocked
 transport until the first real key arrived, and a full sweep is an expensive,
 slow way to discover that a zone name is wrong or a product is not enabled on the
-account. This makes the smallest possible real call to each product — one SERP
-request, one Web Unlocker request against Bright Data's own test URL — and
-reports pass or fail for each, so a mis-wired key surfaces in a few cents and a
-few seconds rather than mid-sweep.
+account. This makes the smallest possible real call to each of the two — one SERP
+request, one Web Unlocker request against Bright Data's own test URL, neither
+retried — and reports pass or fail for each, so a mis-wired key surfaces in a few
+cents and a few seconds rather than mid-sweep.
 
 It validates the **app's own wiring**, not just raw connectivity: it uses the
 same `Settings`, the same zones, and the same `BrightDataClient` the miner uses,
@@ -58,7 +66,8 @@ def _timed(fn: Any) -> tuple[bool, str, int | None]:
     """Run one probe, translating every outcome into (ok, detail, latency_ms).
 
     Bright Data's own error classes carry the message a person needs — a 401/403
-    means the key or product is wrong, a rate-limit means it survived retries —
+    means the key or product is wrong, a rate-limit means the zone is throttled
+    right now (the probe does not retry past it) —
     so they are surfaced verbatim rather than flattened to "failed". A truly
     unexpected exception is caught too: a health check that raises is worse than
     one that reports the raw error, because the former looks like the app is
@@ -80,11 +89,11 @@ def _timed(fn: Any) -> tuple[bool, str, int | None]:
 def check_brightdata(
     settings: Settings | None = None, *, transport: Any = None
 ) -> list[CheckResult]:
-    """One SERP and one Unlocker probe, using the app's real config.
+    """One SERP and one Unlocker probe, using the app's real config. No retries.
 
     ``transport`` is the ``httpx`` transport seam the client already exposes for
     tests — production passes nothing and the client builds its own. Returns a
-    result per product even when the key is missing, so the caller can show the
+    result for each even when the key is missing, so the caller can show the
     same table whether the instance is configured or not.
     """
     s = settings or get_settings(refresh=True)
@@ -98,7 +107,14 @@ def check_brightdata(
             ))
         return results
 
-    client = BrightDataClient(s, transport=transport)
+    # ``max_retries=0``: this is the pre-flight, and the docstring above promises
+    # "the smallest possible real call". The client's default of 2 retries turns one
+    # probe into up to three billed calls plus its backoff sleeps on a 429 or a 5xx —
+    # so a flaky zone cost three times what the page said it would and took several
+    # seconds longer. A pre-flight that hides a rate limit by retrying past it is
+    # also reporting the wrong thing: "your zone is throttled" is exactly what a
+    # person running this needs to see.
+    client = BrightDataClient(s, transport=transport, max_retries=0)
     try:
         # SERP: a trivial query with brd_json=1, so a pass proves parsed JSON
         # comes back — exactly what the miner relies on.
@@ -111,8 +127,16 @@ def check_brightdata(
                 "POST", "/request",
                 json_body={"zone": s.brightdata_serp_zone, "url": url, "format": "raw"},
             )
-            body = resp.text or ""
-            return f"HTTP {resp.status_code}, {len(body)} bytes of parsed SERP JSON"
+            # Parse it, do not measure it. Reporting ``len(body)`` bytes "of parsed
+            # SERP JSON" from the status code and a length alone meant a zone
+            # answering with an HTML block page or a login redirect was reported
+            # **Reachable** — the precise wiring failure this probe exists to catch,
+            # and the one ``serp.py`` guards against downstream. ``json_of`` raises a
+            # BrightDataError carrying the first 200 characters of whatever came
+            # back, which ``_timed`` surfaces verbatim.
+            payload = BrightDataClient.json_of(resp)
+            keys = ", ".join(sorted(payload)[:4]) or "no top-level keys"
+            return f"HTTP {resp.status_code}, parsed SERP JSON ({keys})"
 
         ok, detail, ms = _timed(serp_probe)
         results.append(CheckResult("SERP", s.brightdata_serp_zone, ok, detail, ms))

@@ -40,7 +40,7 @@
 {% else %}
 
 {% if results is none %}
-<p class="t-support">Runs one SERP request and one Web Unlocker request against Bright Data's test URL — a few cents, a few seconds. It proves the key, the zones and each product are live before a real sweep depends on them.</p>
+<p class="t-support">Runs one SERP request and one Web Unlocker request against Bright Data's test URL — a few cents, a few seconds. It proves the key and both zones are live before a real sweep depends on them. Discover is a trigger-and-poll job rather than one request, so it is not probed — a green result here does not vouch for it.</p>
 <form method="post" action="/healthz/brightdata">
   <button class="btn btn-primary" type="submit">Run connection test</button>
 </form>
@@ -70,7 +70,7 @@
 </div>
 {% set all_ok = results | selectattr("ok") | list | length == results | length %}
 {% if all_ok %}
-<p class="t-support"><strong>All products reachable.</strong> The app is wired correctly — a live sweep will spend against the same key and zones.</p>
+<p class="t-support"><strong>SERP and Web Unlocker reachable.</strong> The key and both zones are wired correctly, and a live sweep will spend against the same ones. <strong>Discover was not tested</strong> — its API is a trigger-and-poll job rather than one request, so a green result here does not vouch for a sweep&rsquo;s Discover leg.</p>
 {% else %}
 <p class="t-support">One or more products failed. The detail column carries Bright Data's own message — a 401/403 means the key or product is not enabled; a wrong zone name fails here too.</p>
 {% endif %}

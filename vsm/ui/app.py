@@ -55,6 +55,7 @@ from vsm.ui.content import (
     DELIVERABLE_GROUPS,
     DELIVERABLE_TIERS,
     DELIVERABLES,
+    download_name,
     EPHEMERAL_STORAGE_NOTICE,
     FIELD_GUIDE,
     FILTER_HELP,
@@ -309,6 +310,7 @@ def _empty_deliverable_cards() -> list[dict[str, Any]]:
             "excerpt_is_real": False,
             "format_label": _format_label(d["file"]),
             "size_label": None,
+            "download": download_name(d["file"]),
         }
         for d in DELIVERABLES
     ]
@@ -360,6 +362,11 @@ def _deliverable_cards(
             "excerpt_is_real": excerpt_is_real,
             "format_label": _format_label(d["file"]),
             "size_label": _size_label(size),
+            # What the browser will actually save, so the label beside the link and
+            # the file in the reader's Downloads folder are the same string. The
+            # page used to print the store key next to a differently-named
+            # deliverable, which is the mismatch in miniature.
+            "download": download_name(d["file"]),
         })
     return cards
 
@@ -1479,7 +1486,14 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             topic = None
         art_dir = run_store.artifacts_dir(run.run_id)
         stages = [
-            {"label": label, "file": fname, "done": (art_dir / fname).exists()}
+            # ``file`` stays the store key the href needs; ``download`` is what the
+            # reader will end up with on disk, and what the link therefore says.
+            {
+                "label": label,
+                "file": fname,
+                "download": download_name(fname),
+                "done": (art_dir / fname).exists(),
+            }
             for fname, label in _STAGES.get(run.mode, [])
         ]
         cost_detail = None
@@ -2252,7 +2266,11 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             else "text/markdown; charset=utf-8" if suffix == ".md"
             else "text/plain; charset=utf-8"
         )
-        filename = Path(name).name
+        # The saved name, not the store key: ``Path(name).name`` handed the reader
+        # ``momentum.json`` for a deliverable the whole interface calls "Trend", and
+        # ``duallens.json`` for "Clinician-patient gap". The key below is untouched,
+        # so nothing in the pipeline moves.
+        filename = download_name(Path(name).name)
         return Response(
             _artifact_bytes(content, name),
             media_type=media,

@@ -145,7 +145,7 @@
   <span class="deliv-download-meta">{{ d.format_label }}&nbsp;· {{ d.size_label if d.size_label else "size not recorded" }}</span>
   <span aria-hidden="true">↓</span>
 </a>
-<span class="deliv-file">{{ d.file }}</span>
+<span class="deliv-file">{{ d.download }}</span>
 {% endmacro %}
 
 {% macro deliverable_card(d, show_more_link=True, heading_level=3) %}
@@ -171,7 +171,7 @@
       {# The filename still earns a place before a run — a reader deciding
          whether to spend anything wants to know what lands — but as caption
          metadata beside the status, never as the card's headline. #}
-      <span class="deliv-file">{{ d.format_label }} · {{ d.file }}</span>
+      <span class="deliv-file">{{ d.format_label }} · {{ d.download }}</span>
     {% endif %}
   </div>
 </article>
@@ -184,7 +184,7 @@
     <p class="deliv-row-body">{{ d.headline }} <span class="muted">{{ d.body }}</span></p>
   </div>
   <div class="deliv-row-action">
-    {% if d.available %}{{ download_control(d) }}{% else %}<span class="deliv-status">Not run yet</span><span class="deliv-file">{{ d.file }}</span>{% endif %}
+    {% if d.available %}{{ download_control(d) }}{% else %}<span class="deliv-status">Not run yet</span><span class="deliv-file">{{ d.download }}</span>{% endif %}
   </div>
 </li>
 {% endmacro %}
@@ -299,7 +299,7 @@
     {% if d.available %}
     <li>
       <a href="{{ d.href }}">{{ d.name }}</a>
-      <span class="downloads-file">{{ d.file }}{% if d.size_label %} · {{ d.size_label }}{% endif %}</span>
+      <span class="downloads-file">{{ d.download }}{% if d.size_label %} · {{ d.size_label }}{% endif %}</span>
     </li>
     {% endif %}
     {% endfor %}{% endfor %}

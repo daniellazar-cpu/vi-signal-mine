@@ -124,3 +124,24 @@ def test_vercelignore_keeps_the_templates_and_static_directories() -> None:
         )
     assert (PROJECT_ROOT / "vsm" / "ui" / "templates").is_dir()
     assert (PROJECT_ROOT / "vsm" / "ui" / "static").is_dir()
+
+
+def test_vercel_json_never_pins_the_master_offline_switch() -> None:
+    """`VSM_OFFLINE` must not live in `vercel.json`'s `env` block.
+
+    It was hardcoded there, and commit 74b97f1 removed it so the dashboard could
+    control it. The failure it caused is the most confusing kind available: every
+    key set correctly, the gate up, the site serving, `vercel env add VSM_OFFLINE 0`
+    reporting success — and `vercel.json`'s `env` silently overriding it, so
+    `Settings.offline` stays True, every sweep collapses to the fake miner, and
+    nothing errors. Zero real signals, zero spend, no message.
+
+    Nothing prevented it being pasted back, which is why this exists. Absence is
+    safe on its own: `vsm/config.py` already defaults `VSM_OFFLINE` to "1", so a
+    deployment with nothing configured is still inert and cannot spend.
+    """
+    env = _vercel_config().get("env", {})
+    assert "VSM_OFFLINE" not in env, (
+        "VSM_OFFLINE is pinned in vercel.json — it will override the dashboard "
+        "variable and a live launch will silently do nothing"
+    )

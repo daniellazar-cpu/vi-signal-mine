@@ -1,6 +1,6 @@
 # Pending — to productionize Bright Data and make the site fully functional
 
-Status as of the current deploy (`df8e642`). The engine is complete and
+Status as of `61042bc`. The engine is complete and
 production-grade; the gap is that **the live Bright Data path has never run
 against the real API** — every test to date uses a mocked transport. Everything
 below is ordered by what blocks a first live run.
@@ -9,7 +9,10 @@ below is ordered by what blocks a first live run.
 
 ## A. Yours — keys and environment (nothing ships until these are set)
 
-Set in Vercel, in this order (the order matters):
+The one-command path is `bash scripts/setup-live.sh`, which does all of this in
+the right order. By hand, every command needs `--scope vi-labs-projects` or the CLI
+resolves to your personal account and reports "Deployment not found". In this order,
+because the order matters:
 
 1. `VSM_ACCESS_KEY` — **first.** With live keys behind no gate, the production
    guard deliberately refuses to serve.
@@ -42,11 +45,14 @@ The request/response parsers for SERP, Discover and Web Unlocker are tested only
 against `httpx.MockTransport` with **assumed** Bright Data response shapes. The
 first live run is where those shapes get verified.
 
-**B1. No smoke-test path.** There is no one-call dry run — the smallest live
-action today is a full probe sweep. **Recommend building a `/healthz/brightdata`
-(or a CLI `--check`) that makes one real SERP call and reports pass/fail.** This
-de-risks the first run: a bad zone or key surfaces in one cheap call instead of
-mid-sweep.
+**B1. Done** — and this entry was stale from the day it was written: the
+pre-flight landed in the very next commit. `/healthz/brightdata`
+(the route in `vsm/ui/app.py`, the probes in `vsm/mining/healthcheck.py`) makes one un-retried real call
+each to SERP and Web Unlocker and reports pass/fail per product with the zone, the
+latency and Bright Data's verbatim error. Discover is **not** probed — its API is
+trigger-then-poll, so the cheapest honest probe costs a job plus a poll; a green
+page does not vouch for a sweep's Discover leg. Still unrun against a live key,
+which is B2's problem, not this one's.
 
 **B2. Response-shape validation.** If Bright Data's live JSON differs from the
 mocked fixtures (field names, nesting, empty-result encoding), the parsers in
@@ -79,10 +85,12 @@ async is in scope.
 
 ## D. Launch-state decisions
 
-**D1. The synthetic demo topic on production.** Production currently seeds a
-fabricated "Tirzepatide" example so the UI is never empty. Decide: keep it as an
-onboarding example, or clear it before the first real client-facing run. Real
-runs are non-synthetic and the demo banner correctly disappears for them.
+**D1. The synthetic demo topic on production.** A fabricated "Tirzepatide"
+example is sitting there. It is **leftover data, not an ongoing seed** — the
+seeder is a no-op now that a database is configured (`vsm/demo.py:165`), so
+deleting it is permanent and nothing recreates it. Decide: keep it as an
+onboarding example, or clear it before the first real client-facing run. Real runs
+are non-synthetic and the demo banner correctly disappears for them.
 
 **D2. Spend cap.** `VSM_RUN_COST_CAP_USD` defaults to $5.00 per run. Confirm
 that ceiling is right for a shared production account.
@@ -107,6 +115,10 @@ feature (the social-handle → NPI join), not a launch blocker.
 - BE: mutations work end to end.
 - DB: **Postgres is live and durable** — verified by a write→read-in-a-separate-
   request→delete cycle on production.
-- Deploy: current HEAD live on Vercel; work and deploy branches in sync.
+- Deploy: `origin/deploy` and `origin/build/vi-signal-mine-v1` are both at
+  `61042bc`. (The *local* `deploy` checkout can lag — `git fetch && git branch -f
+  deploy origin/deploy`. Nothing builds from it: `setup-live.sh` uploads the working
+  tree.)
 - "New report" is always available (header action + `/reports/new` hub).
-- 712 tests pass; the whole live path is exercised against a mocked transport.
+- 722 tests pass, 5 skipped; the whole live path is exercised against a mocked
+  transport.

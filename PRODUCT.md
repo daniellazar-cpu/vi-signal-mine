@@ -53,14 +53,22 @@ outlives any single run.
 ## Hard constraints
 
 FastAPI + Jinja2 with `StrictUndefined`. No CDN, no external font, no build step, works
-with JavaScript disabled, renders with zero network. Local-first, no auth. Also deploys to
-Vercel as a gated preview, where only the cheapest spend band may run.
+with JavaScript disabled, renders with zero network. Local-first, and no auth unless
+`VSM_ACCESS_KEY` is set — which puts HTTP Basic in front of both entrypoints, locally
+exactly as on the deployment. Also deploys to Vercel **production**, gated by that key,
+where only the cheapest spend band may run.
 
 ## Brand commitments
 
-None inherited. This is a standalone tool, not a Vi-branded property. **[assumed]** — the
-spec names no visual authority and the parent engine's design is deliberately not carried
-over.
+**The Vi marketing design system**, adopted on the owner's explicit brief: white is the
+canvas, black is structure, Vi Violet `#4F31F5` is a signal used sparingly, 0.5px
+hairlines, Neue Montreal self-hosted. Tokens in `vsm/ui/static/ds/colors_and_type.css`,
+sourced from *Vi — Visual Identity Guidelines* v1.1 (June 2026).
+
+This section used to read "None inherited. **[assumed]** — the spec names no visual
+authority", and `docs/HANDOFF.md` recorded it as knowingly left stale on the grounds that
+repairing it was not that session's task. Corrected here rather than left for a future
+design pass to be misled by.
 
 ## What would make a polished result feel wrong
 

@@ -678,3 +678,74 @@ def test_every_deliverable_file_is_an_artifact_the_pipeline_writes(seeded):
         except FileNotFoundError:
             missing.append((d["name"], d["file"]))
     assert not missing, f"deliverables pointing at files the pipeline never writes: {missing}"
+
+
+# --------------------------------------------------------------------------- #
+# what a reader ends up with on disk should say what it is                    #
+# --------------------------------------------------------------------------- #
+#
+# `docs/PENDING.md` E1 recorded the "Trend" deliverable downloading as
+# `momentum.json` and deferred it as "a larger, riskier change" — on the reading
+# that closing it meant renaming the artifact across the pipeline. It does not.
+# The store key and the saved filename are two different things, and only the
+# `content-disposition` header decides the second one.
+#
+# Two worse instances sat beside it and were never written down: "Mention ledger"
+# arrived as `signals.json` and "Clinician-patient gap" as `duallens.json` —
+# internal module names landing in a client's Downloads folder.
+
+
+def test_the_saved_filename_matches_the_name_the_interface_uses(seeded):
+    from vsm.ui.content import DELIVERABLES, download_name
+
+    run_for_group = {
+        "data": seeded["snapshot"],
+        "analysis": seeded["insight"],
+        "report": seeded["report"],
+    }
+    checked = 0
+    for entry in DELIVERABLES:
+        run = run_for_group.get(entry["group"])
+        if run is None:
+            continue
+        response = seeded["client"].get(f"/runs/{run.run_id}/artifact/{entry['file']}")
+        if response.status_code != 200:
+            continue
+        checked += 1
+        expected = download_name(entry["file"])
+        assert f'filename="{expected}"' in response.headers["content-disposition"], (
+            f"{entry['name']} downloads as something other than {expected}"
+        )
+    assert checked >= 3, "the fixture produced too few artifacts to prove anything"
+
+
+def test_the_three_worst_offenders_are_specifically_fixed(seeded):
+    """Named individually so a future refactor of ``download_name`` cannot quietly
+    regress the cases that motivated it."""
+    from vsm.ui.content import download_name
+
+    assert download_name("momentum.json") == "trend.json"
+    assert download_name("signals.json") == "mention-ledger.json"
+    assert download_name("duallens.json") == "clinician-patient-gap.json"
+    # The en dash in "Clinician–patient gap" must not collapse the two words.
+    assert "clinicianpatient" not in download_name("duallens.json")
+
+
+def test_renaming_the_download_did_not_move_the_store_key(seeded):
+    """The guard the earlier failed attempt earned.
+
+    A rename that touched ``file`` instead of the saved name pointed the "Trend"
+    link at ``trend.json`` while the pipeline writes ``momentum.json`` — a
+    guaranteed 404. This asserts the link and the key are still the artifact the
+    pipeline produced, and that only the header changed.
+    """
+    from vsm.ui.content import DELIVERABLES
+
+    momentum = next(d for d in DELIVERABLES if d["key"] == "momentum")
+    assert momentum["file"] == "momentum.json", "the store key moved — resume will 404"
+
+    run = seeded["insight"]
+    ok = seeded["client"].get(f"/runs/{run.run_id}/artifact/momentum.json")
+    assert ok.status_code == 200
+    # And the renamed-to filename must NOT be a valid key.
+    assert seeded["client"].get(f"/runs/{run.run_id}/artifact/trend.json").status_code == 404

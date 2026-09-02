@@ -12,10 +12,16 @@ assuming this is a general-purpose deployment of the tool. Only a ``probe``
 MINE, a (resumable) INSIGHT and a REPORT fit inside a serverless function's
 timeout — ``standard``/``deep`` sweeps do not, and ``vsm/platform.py``'s
 ``assert_band_allowed`` refuses them in code rather than leaving it to
-whoever fills in the form. That guard, and ``assert_serveable`` (spec D15,
-which refuses every route on a production Vercel deployment), both run
-inside ``vsm/ui/app.py`` and ``vsm/modes/mine.py`` respectively — nothing
-needs repeating here.
+whoever fills in the form. That guard, and ``assert_serveable`` (spec D15),
+both run inside ``vsm/ui/app.py`` and ``vsm/modes/mine.py`` respectively —
+nothing needs repeating here.
+
+``assert_serveable`` no longer "refuses every route on a production Vercel
+deployment", which is what this comment used to claim. The first version of the
+guard did, and ``vsm/platform.py``'s own docstring records that as "a fair reading
+of the decision and wrong in practice". It now refuses exactly one combination —
+live keys with no gate — so production serves as soon as ``VSM_ACCESS_KEY`` is
+set.
 """
 
 from __future__ import annotations

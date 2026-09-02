@@ -2,9 +2,9 @@
 
 The live path was mock-tested until the first real key arrived, and a full sweep
 is an expensive, slow way to discover a wrong zone or a disabled product. This
-endpoint makes one cheap real call per product and reports pass/fail — so the
-whole point of the tests below is that it behaves correctly *without* a real key
-or network, using the client's injected-transport seam.
+endpoint makes one cheap real call each to SERP and Web Unlocker and reports
+pass/fail — so the whole point of the tests below is that it behaves correctly
+*without* a real key or network, using the client's injected-transport seam.
 """
 
 from __future__ import annotations
@@ -93,3 +93,70 @@ def test_the_post_refuses_to_probe_while_offline(client):
     assert r.status_code == 200
     # No results table rendered because no probe ran.
     assert "Reachable" not in r.text and "Failed" not in r.text
+
+
+# --------------------------------------------------------------------------- #
+# it has to be ONE call, and it has to actually parse the answer              #
+# --------------------------------------------------------------------------- #
+
+
+def test_a_serp_zone_answering_html_is_reported_failed_not_reachable(tmp_path):
+    """The precise wiring failure this probe exists to catch.
+
+    The SERP probe built its detail string from the status code and
+    ``len(body)`` — "HTTP 200, 4213 bytes of parsed SERP JSON" — without ever
+    parsing anything. A zone that is enabled but mis-scoped answers 200 with an
+    HTML block page or a login redirect, and that was reported **Reachable**: the
+    page said the wiring was good and the first real sweep would then fail on
+    exactly the case ``serp.py`` guards against downstream.
+    """
+    def handler(request):
+        body = request.read().decode()
+        if "google.com/search" in body:
+            return httpx.Response(200, text="<html><body>Sign in to continue</body></html>")
+        return httpx.Response(200, text="OK - welcome.txt")
+
+    results = check_brightdata(_live_settings(tmp_path), transport=httpx.MockTransport(handler))
+    serp = next(r for r in results if r["product"] == "SERP")
+    unlocker = next(r for r in results if r["product"] == "Web Unlocker")
+
+    assert serp["ok"] is False, "an HTML body was reported as parsed SERP JSON"
+    assert "expected JSON" in serp["detail"]
+    # And the failure is scoped to the product that failed.
+    assert unlocker["ok"] is True
+
+
+def test_the_preflight_makes_exactly_one_call_per_product_even_when_throttled(tmp_path):
+    """"One cheap call" has to be true of the failure path too.
+
+    ``BrightDataClient`` defaults to ``max_retries=2``, so a 429 turned each probe
+    into three billed calls plus its backoff sleeps — three times the cost the page
+    quotes, and several seconds of real waiting. Retrying past a rate limit also
+    reports the wrong thing: "this zone is throttled right now" is what the person
+    running a pre-flight needs to see.
+    """
+    calls: list[str] = []
+
+    def handler(request):
+        calls.append(request.url.path)
+        return httpx.Response(429, text="Too Many Requests")
+
+    results = check_brightdata(_live_settings(tmp_path), transport=httpx.MockTransport(handler))
+
+    assert all(not r["ok"] for r in results)
+    assert len(calls) == 2, f"expected one call per product, made {len(calls)}"
+
+
+def test_a_json_array_is_not_accepted_as_a_serp_payload(tmp_path):
+    """``json_of`` rejects a non-object too. A bare array parses as JSON and is
+    still not the shape the miner reads, so it must not pass."""
+    def handler(request):
+        body = request.read().decode()
+        if "google.com/search" in body:
+            return httpx.Response(200, text="[]")
+        return httpx.Response(200, text="OK")
+
+    results = check_brightdata(_live_settings(tmp_path), transport=httpx.MockTransport(handler))
+    serp = next(r for r in results if r["product"] == "SERP")
+    assert serp["ok"] is False
+    assert "JSON object" in serp["detail"]

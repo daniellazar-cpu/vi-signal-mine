@@ -28,7 +28,7 @@
     <span class="stage-num">{{ "%02d"|format(loop.index) }}</span>
     <span class="stage-mark" aria-hidden="true"></span>
     <span class="stage-label">{{ stage.label }}</span>
-    {% if stage.done %}<a class="stage-download" href="/runs/{{ run.run_id }}/artifact/{{ stage.file }}">{{ stage.file }} ↓</a>{% else %}<span class="cell-sub">pending</span>{% endif %}
+    {% if stage.done %}<a class="stage-download" href="/runs/{{ run.run_id }}/artifact/{{ stage.file }}">{{ stage.download }} ↓</a>{% else %}<span class="cell-sub">pending</span>{% endif %}
   </li>
   {% endfor %}
 </ol>

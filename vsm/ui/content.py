@@ -16,9 +16,13 @@ Rules that keep this from turning into a wall of text:
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 __all__ = [
     "TAGLINE",
     "DELIVERABLES",
+    "download_name",
     "DELIVERABLE_GROUPS",
     "DELIVERABLE_TIERS",
     "WHAT_IT_IS",
@@ -454,6 +458,47 @@ DELIVERABLES = (
         "sample": "",
     },
 )
+
+
+def download_name(artifact_file: str) -> str:
+    """The filename a browser should save an artifact under.
+
+    The store key and the saved name are two different things, and conflating them
+    is why the "Trend" deliverable downloaded as ``momentum.json``. Worse cases sit
+    beside it: "Mention ledger" arrived as ``signals.json`` and "Clinician-patient
+    gap" as ``duallens.json`` — internal module names, landing in a client's
+    Downloads folder with nothing to say what they are.
+
+    Derived from the display name rather than curated per entry, so a new
+    deliverable cannot be added with a mismatched download by omission. The suffix
+    is carried over from the store key, because that is what says how to open it.
+
+    ``docs/PENDING.md`` E1 deferred this as "a larger, riskier change" on the
+    reading that the artifact would have to be renamed across the pipeline. It does
+    not: nothing here touches the store key, so ``insight.py`` keeps writing and
+    reading ``momentum.json`` and resume is unaffected. An earlier attempt renamed
+    ``file`` instead of the saved name and pointed the link at an artifact that was
+    never written — a guaranteed 404, recorded in
+    ``tests/test_ui_report_presentation.py``. This changes neither the link nor the
+    key, only the ``content-disposition``.
+    """
+    stem = Path(artifact_file).stem
+    suffix = Path(artifact_file).suffix
+    for entry in DELIVERABLES:
+        if entry.get("file") != artifact_file:
+            continue
+        label = str(entry.get("name") or "").strip()
+        if not label:
+            break
+        # En dashes, spaces and slashes all become hyphens; anything else that is
+        # not a letter or digit is dropped. "Clinician-patient gap" must not become
+        # "clinicianpatient-gap".
+        slug = re.sub(r"[^a-z0-9]+", "-", label.casefold()).strip("-")
+        if slug:
+            return f"{slug}{suffix}"
+        break
+    return f"{stem}{suffix}"
+
 
 #: The two tiers the deliverables are shown in. The four client-ready
 #: artifacts are the offer and get the top of the page; the six behind them

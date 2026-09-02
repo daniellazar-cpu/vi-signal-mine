@@ -109,13 +109,18 @@ def test_deliverables_page_renders_every_group_and_an_artifact_filename(client):
     worth running — every DELIVERABLE_GROUPS label must actually render, and
     at least one real filename must be on the page, not just a route that
     returns 200."""
-    from vsm.ui.content import DELIVERABLE_GROUPS, DELIVERABLES
+    from vsm.ui.content import DELIVERABLE_GROUPS, DELIVERABLES, download_name
 
     c, _, _ = client
     body = c.get("/deliverables").text
     for _key, label, _desc in DELIVERABLE_GROUPS:
         assert label in body, f"group label missing from /deliverables: {label}"
-    assert DELIVERABLES[0]["file"] in body
+    # Rewritten, not loosened: the page now prints the name the browser will save
+    # the file under rather than the store key, because printing `momentum.json`
+    # beside a deliverable the whole interface calls "Trend" is the mismatch this
+    # page is meant to explain away. The property under test is unchanged — a real
+    # filename reaches the page, not just a 200.
+    assert download_name(DELIVERABLES[0]["file"]) in body
 
 
 def test_a_never_run_topic_lists_the_deliverables_pending(client):

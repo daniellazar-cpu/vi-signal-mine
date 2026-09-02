@@ -1,7 +1,9 @@
-# Handoff — 2026-08-27
+# Handoff — 2026-08-27, test counts and SHAs refreshed 2026-09-02
 
-Stopped cleanly here. Everything is committed, pushed and deployed. This file is
-what a person (or an agent) needs to pick it up cold.
+This file is what a person (or an agent) needs to pick the project up cold. The
+2 September pass corrected the figures below rather than rewriting the narrative:
+the counts and the commit SHA had drifted twenty commits out of date, and a handoff
+that misstates the tree is the one document where that costs a whole session.
 
 ## Where it is
 
@@ -9,8 +11,8 @@ what a person (or an agent) needs to pick it up cold.
 |---|---|
 | Repo | `daniellazar-cpu/vi-signal-mine`, private. Branches `build/vi-signal-mine-v1` (work) and `deploy` |
 | Live | https://vi-signal-mine-pink.vercel.app — production, serving, **read-write** |
-| Tests | **646 passed, 2 skipped** hermetically; **38 passed** of the storage contract suite against the live Neon. The skip is the Blob storage-contract suite, which needs a live Blob token |
-| Working tree | clean at `2000095` |
+| Tests | **722 passed, 5 skipped** hermetically. The storage-contract suite collects 42 cases once a database URL is configured (23 without); it last ran green against the live Neon. The skips need live Blob / database credentials |
+| Working tree | `61042bc`, matching `origin/build/vi-signal-mine-v1` and `origin/deploy` |
 
 ## What works right now
 
@@ -152,11 +154,12 @@ earlier pass never worked as its comment claimed. The exposure is bounded and
 tested: the client-facing report contains no `<details>`, so the deliverable
 prints whole whatever an engine does.
 
-**`PRODUCT.md` is stale on one point.** It says "Brand commitments: None
-inherited **[assumed]**", which stopped being true when the Vi marketing design
-system was adopted on the owner's explicit brief. Left alone deliberately —
-repairing it was not the task — but any future design pass reading it will be
-misled.
+**`PRODUCT.md` was stale on one point, and is now fixed.** It said "Brand
+commitments: None inherited **[assumed]**", which stopped being true when the Vi
+marketing design system was adopted on the owner's explicit brief. Left alone at the
+time because repairing it was not that task; corrected on 2 September, along with
+its "no auth" and "gated preview" lines, both of which had also stopped being
+true.
 
 ## Speed
 
