@@ -1,13 +1,41 @@
 import pytest
 
 from vsm.errors import BudgetExceeded
-from vsm.guards.cost import SERP_USD, UNLOCKER_USD, CostCap, estimate_run_usd
+from vsm.guards.cost import CostCap, estimate_run_usd
+from vsm.mining.budget import (
+    DISCOVER_COST_PER_RESULT_USD,
+    SERP_COST_PER_REQUEST_USD,
+    UNLOCKER_COST_PER_SUCCESS_USD,
+)
 from vsm.topics.model import band_for
 
 
-def test_unlocker_is_twenty_times_a_serp_call():
-    """The whole argument for querying the gold list first."""
-    assert UNLOCKER_USD == pytest.approx(SERP_USD * 20)
+def test_the_estimate_is_priced_from_the_one_set_of_bright_data_prices():
+    """The interstitial and the ledger must quote the same run.
+
+    They once did not: ``guards/cost.py`` carried its own $0.03 Unlocker literal
+    against ``mining/budget.py``'s $0.003 — a 10x disagreement about what a run
+    costs, shown to an operator who was being asked to approve the spend. The
+    prices below are the PRD §13.1 verified figures ($1.50/1,000 SERP,
+    ~$3/1,000 successful Unlocker, $1.80 per ~600 parsed Discover results); the
+    arithmetic asserts the estimator reads them rather than re-declaring them.
+    """
+    assert SERP_COST_PER_REQUEST_USD == 0.0015
+    assert UNLOCKER_COST_PER_SUCCESS_USD == 0.003
+    assert DISCOVER_COST_PER_RESULT_USD == 0.003
+    assert UNLOCKER_COST_PER_SUCCESS_USD == pytest.approx(SERP_COST_PER_REQUEST_USD * 2)
+
+    band, clusters = band_for("deep"), 3
+    est = estimate_run_usd(band, cluster_count=clusters)
+    assert est.serp_usd == pytest.approx(
+        band.queries_per_cluster * clusters * SERP_COST_PER_REQUEST_USD
+    )
+    assert est.discover_usd == pytest.approx(
+        band.discover_results_per_cluster * clusters * DISCOVER_COST_PER_RESULT_USD
+    )
+    assert est.unlocker_usd == pytest.approx(
+        band.page_fetches_per_cluster * clusters * UNLOCKER_COST_PER_SUCCESS_USD
+    )
 
 
 def test_probe_costs_less_than_standard_costs_less_than_deep():

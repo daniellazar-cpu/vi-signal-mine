@@ -257,9 +257,11 @@ Because open-web queries are last, a sweep that stops early has executed a
 *prefix* of the plan. That keeps the offline rehearsal honest even when the live
 run spends less than the plan allowed.
 
-**Cost shape:** SERP $0.0015/request; a successful Unlocker page fetch $0.03 —
-twenty times more. That ratio is the whole argument for gold-first. A real
-Stage-2 sweep in the parent cost $0.0315.
+**Cost shape:** SERP $0.0015/request; a successful Unlocker page fetch $0.003
+(PRD §13.1) — 2x, not the 20x first assumed. Gold-first therefore stands on what
+it screens rather than on price, and the widest mining line is
+`discover_results_per_cluster`, at the same $0.003 per result. A real Stage-2
+sweep in the parent was recorded at $0.0315 (see PENDING B3).
 
 → `signals.json` · `provenance.json` · `coverage.json` · `cost.json` · `plan.json`
 

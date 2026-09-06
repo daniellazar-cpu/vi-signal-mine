@@ -24,9 +24,10 @@ Three separate axes, kept separate on purpose:
   duplicates.
 
 Only a gold-list host is ever page-fetched through the Web Unlocker. A SERP call
-is $0.0015; an Unlocker fetch is $0.03 — twenty times more. Everything else may
-contribute public search-result metadata and nothing else. That ratio is the whole
-cost argument, and it is enforced in :mod:`vsm.mining.miner`.
+is $0.0015; an Unlocker fetch is $0.003 — 2x, not the 20x this list was first
+argued from. Everything else may contribute public search-result metadata and
+nothing else. At 2x the saving is modest, so the list earns its place on what it
+screens rather than on price; the rule is enforced in :mod:`vsm.mining.miner`.
 
 **Every domain below was verified on 2026-08-02** by a plain ``httpx`` GET of
 ``https://<domain>/robots.txt`` (no Bright Data key, no proxy, our own honest

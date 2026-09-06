@@ -59,9 +59,28 @@ mocked fixtures (field names, nesting, empty-result encoding), the parsers in
 `vsm/mining/{serp,discover,unlocker}.py` need adjusting. Cannot be known until a
 real call is made.
 
-**B3. Cost reconciliation.** `budget.py` prices SERP at $0.0015, Unlocker/Discover
-at $0.003. After the first run, reconcile the estimate against the real Bright
-Data invoice and adjust if the published prices have moved.
+**B3. Cost reconciliation — internal half done, invoice half still open.**
+
+**Done, 2026-09-06.** The two modules that priced a run disagreed. `guards/cost.py`
+carried its own `UNLOCKER_USD = 0.03` and `DISCOVER_USD = 0.0015` against
+`mining/budget.py`'s $0.003 for both — so the estimate quoted in the pre-spend
+interstitial ran 10x high on Unlocker and half on Discover, against a $5.00
+`VSM_RUN_COST_CAP_USD`. `mining/budget.py` now owns every Bright Data price and
+`guards/cost.py` reads them; `tests/test_cost.py` fails if the PRD figures drift or
+the estimator re-declares one. The $0.03 was never a typo — it was an owner quote of
+$30/1,000, recorded as disputed in `mining/miner.py`. PRD §13.1's verified $3/1,000
+governs until an invoice says otherwise. Corrected ratio: **2x, not 20x**, which
+also means page fetches are not the widest mining line — Discover results are, at
+the same $0.003 each.
+
+**Still open.** After the first live run, reconcile the estimate against the real
+Bright Data invoice. Two things specifically: whether Unlocker bills at $3/1,000
+(settling the owner's $30/1,000 quote), and whether Discover bills per returned
+result at all — its $0.003 is derived from the PRD's "~600 page parses → ~$1.80"
+line, not from a published unit price, which is why every Discover call record
+carries `estimated=True`. The parent engine's recorded $0.0315 sweep is exactly one
+Unlocker fetch plus one SERP call *at the old wrong price*, so treat it as computed,
+not invoiced.
 
 ---
 

@@ -78,8 +78,9 @@ _TIER_NOTE = {key.replace(" ", "_"): note for key, note in TIERS}
 def usd(value: float | None, decimals: int = 4) -> str:
     """Money, at the precision this tool actually operates in.
 
-    Four decimals because a probe sweep costs about $0.03 and the cents matter;
-    rounding to `$0.03` would hide the difference between a run and ten of them.
+    Four decimals because a probe sweep's mining spend is about $0.02 and the
+    fractions of a cent matter; rounding to `$0.02` would hide the difference
+    between a run and ten of them.
 
     An exact zero drops to `$0.00`. `$0.0000` is truthful and reads as broken,
     and a figure a reader distrusts is worse than a coarser one they believe.

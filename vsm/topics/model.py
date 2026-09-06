@@ -25,8 +25,9 @@ class SpendBand:
     queries_per_cluster: int
     serp_results_per_query: int
     discover_results_per_cluster: int
-    #: Web Unlocker page fetches. A fetch is $0.03 against a SERP call's
-    #: $0.0015 — twenty times more — so this is the knob that decides the bill.
+    #: Web Unlocker page fetches. A fetch is $0.003 against a SERP call's $0.0015
+    #: — 2x, not the 20x once assumed — so this is not the widest line in a sweep.
+    #: ``discover_results_per_cluster`` is, at the same $0.003 per result.
     page_fetches_per_cluster: int
 
 

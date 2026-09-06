@@ -140,8 +140,12 @@ Sources: [Vendr — Brandwatch](https://www.vendr.com/marketplace/brandwatch) ·
 [enterprise buyer's guide](https://www.pulsarplatform.com/guides/best-social-listening-tools-2026-guide-for-enterprise-buyers)
 
 **Against that: a real Stage-2 sweep in the parent engine cost $0.0315, and a
-full campaign runs ~$0.03 mining plus ~$1 of model.** A SERP request is $0.0015;
-an Unlocker page fetch is $0.03.
+full campaign runs a few cents of mining plus ~$1 of model.** A SERP request is
+$0.0015; a successful Unlocker page fetch is $0.003 — 2x, not the 20x this
+document first claimed (PRD §13.1). The $0.0315 sweep figure is left as recorded,
+but note it is exactly one fetch plus one SERP call *at the old wrong price*, so
+it reads as computed rather than invoiced; PENDING B3 settles it against a real
+invoice.
 
 Two things follow.
 

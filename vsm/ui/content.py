@@ -631,8 +631,8 @@ DEFINITIONS: dict[str, tuple[str, str]] = {
     ),
     "sweep size": (
         "How wide and how expensive the collection run is.",
-        "It sets the number of queries and page fetches. Page fetches cost "
-        "about twenty times a search call, so they set the bill.",
+        "It sets the number of queries, discovery results and page fetches. A "
+        "discovery result and a page fetch each cost about twice a search call.",
     ),
     "returned nothing": (
         "The site was queried and gave back no rows.",
@@ -661,8 +661,8 @@ DEFINITIONS: dict[str, tuple[str, str]] = {
     ),
     "estimate": (
         "What the run is expected to cost, priced before it starts.",
-        "Priced from the sweep size: the number of queries and page fetches. "
-        "A page fetch costs about twenty times a search call.",
+        "Priced from the sweep size: the number of queries, discovery results "
+        "and page fetches. A page fetch costs about twice a search call.",
     ),
     "theme": (
         "A group of mentions about the same thing, named by what they share.",

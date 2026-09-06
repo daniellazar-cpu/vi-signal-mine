@@ -3,7 +3,7 @@
 Tier C (:mod:`vsm.mining.tiers`) is *may not*: a compliance blocklist, refused
 three times over, never softened. This module is *not worth it*: a budget rule.
 Both drop a host, and conflating them would be a mistake — a tier-C refusal is a
-finding a human must see, a denylist drop is a saved $0.03.
+finding a human must see, a denylist drop is a saved $0.003.
 
 Four rules, in the order they fire:
 
@@ -89,7 +89,7 @@ CONTENT_FARMS: frozenset[str] = frozenset(
 
 #: Pay-to-publish / rapid-review publishers and the paper-mill adjacent. Judgement
 #: call, stated as one: these are not accusations of fraud, they are a decision not
-#: to spend a $0.03 fetch on a venue whose editorial screening we cannot vouch for.
+#: to spend a $0.003 fetch on a venue whose editorial screening we cannot vouch for.
 #: A specific paper from one of these may still be cited by a human who read it.
 PAY_TO_PUBLISH: frozenset[str] = frozenset(
     {

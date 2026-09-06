@@ -687,7 +687,7 @@ def test_the_three_bands_exist_and_escalate():
 
 
 def test_probe_buys_no_page_fetches():
-    """An Unlocker fetch is 20x a SERP call. A probe is for finding out whether
+    """An Unlocker fetch is 2x a SERP call. A probe is for finding out whether
     a topic has any conversation at all; it should not pay to read pages."""
     assert BANDS["probe"].page_fetches_per_cluster == 0
 
@@ -766,8 +766,9 @@ class SpendBand:
     queries_per_cluster: int
     serp_results_per_query: int
     discover_results_per_cluster: int
-    #: Web Unlocker page fetches. A fetch is $0.03 against a SERP call's
-    #: $0.0015 — twenty times more — so this is the knob that decides the bill.
+    #: Web Unlocker page fetches. A fetch is $0.003 against a SERP call's $0.0015
+    #: — 2x, not the 20x once assumed — so this is not the widest line in a sweep.
+    #: ``discover_results_per_cluster`` is, at the same $0.003 per result.
     page_fetches_per_cluster: int
 
 
@@ -1958,13 +1959,20 @@ git commit -m "Vendor the model client, and give it one call instead of two"
 import pytest
 
 from vsm.errors import BudgetExceeded
-from vsm.guards.cost import SERP_USD, UNLOCKER_USD, CostCap, estimate_run_usd
+from vsm.guards.cost import CostCap, estimate_run_usd
+from vsm.mining.budget import (
+    DISCOVER_COST_PER_RESULT_USD,
+    SERP_COST_PER_REQUEST_USD,
+    UNLOCKER_COST_PER_SUCCESS_USD,
+)
 from vsm.topics.model import band_for
 
 
-def test_unlocker_is_twenty_times_a_serp_call():
-    """The whole argument for querying the gold list first."""
-    assert UNLOCKER_USD == pytest.approx(SERP_USD * 20)
+def test_the_estimate_is_priced_from_the_one_set_of_bright_data_prices():
+    """The interstitial and the ledger must quote the same run. See the shipped
+    version in `tests/test_cost.py` — it also asserts the estimator's arithmetic
+    reads these constants rather than re-declaring them."""
+    assert UNLOCKER_COST_PER_SUCCESS_USD == pytest.approx(SERP_COST_PER_REQUEST_USD * 2)
 
 
 def test_probe_costs_less_than_standard_costs_less_than_deep():
@@ -2013,13 +2021,20 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'vsm.guards'`
 
 - [ ] **Step 3: Write `vsm/guards/cost.py`**
 
+> **Correction, 2026-09-06.** This document was written against a $0.03 Web Unlocker price (an owner quote of $30/1,000). PRD §13.1's verified figure is **~$3/1,000 → $0.003**, so the Unlocker:SERP ratio is **2x, not 20x**, and page fetches are not the widest line in a sweep — Discover results are, at the same $0.003 each. Figures below are corrected; the reasoning they once supported is not restated.
+
 ```python
 """G3 — the estimate, and the cap that binds before anything is bought.
 
-Prices are the parent engine's verified figures. A SERP request is $0.0015 and
-a successful Web Unlocker page fetch is $0.03 — twenty times more. That ratio is
-the entire cost argument for querying a curated venue list before the open web,
-and it is why ``page_fetches_per_cluster`` is the knob that decides the bill.
+Prices come from :mod:`vsm.mining.budget`, the module that actually bills the
+calls, so the estimate an operator confirms and the ledger a run writes cannot
+disagree. A SERP request is $0.0015 and a successful Web Unlocker page fetch is
+$0.003 (PRD §13.1) — 2x, not the 20x this file once carried.
+
+At 2x, ``page_fetches_per_cluster`` is *not* the knob that decides the bill:
+a Discover result costs the same $0.003 and a band buys far more of them, so
+``discover_results_per_cluster`` is the widest mining line, and model spend
+(``MODEL_USD_PER_CLUSTER``, per cluster) is larger than all three combined.
 
 The Bright Data account is shared with other Vi projects, so the cap is tight on
 purpose. Raise it per run, knowingly; never by editing the default upward.
@@ -2031,21 +2046,20 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from vsm.errors import BudgetExceeded
+from vsm.mining.budget import (
+    DISCOVER_COST_PER_RESULT_USD,
+    SERP_COST_PER_REQUEST_USD,
+    UNLOCKER_COST_PER_SUCCESS_USD,
+)
 from vsm.topics.model import SpendBand
 
 __all__ = [
-    "SERP_USD",
-    "DISCOVER_USD",
-    "UNLOCKER_USD",
     "MODEL_USD_PER_CLUSTER",
     "CostEstimate",
     "CostCap",
     "estimate_run_usd",
 ]
 
-SERP_USD = 0.0015
-DISCOVER_USD = 0.0015
-UNLOCKER_USD = 0.03
 #: Rough, and labelled as rough. A parent campaign ran ~$1 of model across far
 #: more generation than a MINE lexicon call; this is deliberately generous so
 #: the estimate shown to an operator is never an underestimate.
@@ -2068,9 +2082,9 @@ class CostEstimate:
 
 
 def estimate_run_usd(band: SpendBand, *, cluster_count: int) -> CostEstimate:
-    serp = band.queries_per_cluster * cluster_count * SERP_USD
-    discover = band.discover_results_per_cluster * cluster_count * DISCOVER_USD
-    unlocker = band.page_fetches_per_cluster * cluster_count * UNLOCKER_USD
+    serp = band.queries_per_cluster * cluster_count * SERP_COST_PER_REQUEST_USD
+    discover = band.discover_results_per_cluster * cluster_count * DISCOVER_COST_PER_RESULT_USD
+    unlocker = band.page_fetches_per_cluster * cluster_count * UNLOCKER_COST_PER_SUCCESS_USD
     model = cluster_count * MODEL_USD_PER_CLUSTER
     return CostEstimate(
         serp_usd=round(serp, 4),

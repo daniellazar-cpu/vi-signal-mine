@@ -19,7 +19,7 @@ def test_the_three_bands_exist_and_escalate():
 
 
 def test_probe_buys_no_page_fetches():
-    """An Unlocker fetch is 20x a SERP call. A probe is for finding out whether
+    """An Unlocker fetch is 2x a SERP call. A probe is for finding out whether
     a topic has any conversation at all; it should not pay to read pages."""
     assert BANDS["probe"].page_fetches_per_cluster == 0
 

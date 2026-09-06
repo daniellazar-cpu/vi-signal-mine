@@ -27,10 +27,11 @@ Order of operations, and why each step is where it is:
    whose venue entry permits a body fetch, and whose robots.txt allows the path. An
    unclassified host contributes public search-result metadata and nothing else.
    A SERP request is ``SERP_COST_PER_REQUEST_USD`` ($0.0015) and a successful page
-   fetch is ``UNLOCKER_COST_PER_SUCCESS_USD`` — 2× at the PRD §13.1 verified price
-   of $3/1,000, and 20× at the $30/1,000 the owner quoted. The ratio is disputed;
-   the direction is not, and the direction is the whole cost argument for having a
-   gold list. Both constants live in :mod:`vsm.mining.budget`.
+   fetch is ``UNLOCKER_COST_PER_SUCCESS_USD`` ($0.003) — 2× at the PRD §13.1
+   verified price of $3/1,000. An owner quote of $30/1,000 once put it at 20×; the
+   PRD figure governs until a real invoice settles it (PENDING B3). At 2× the gold
+   list is a screening rule first and a saving second. Every price lives in
+   :mod:`vsm.mining.budget`, which :mod:`vsm.guards.cost` estimates from.
 8. **Recency by venue kind, never as a blanket filter**
    (:mod:`vsm.mining.recency`). Discussion and community venues carry an exact
    90-day-plus window on the SERP URL; evidence, guideline, regulatory and
@@ -469,7 +470,7 @@ class LiveSignalMining:
                 cfg.fetch_pages
                 and self.unlocker is not None
                 and state["fetched"] < cfg.page_fetches_per_cluster
-                # the twentyfold rule: only a curated host is worth $0.03
+                # only a curated host is worth a $0.003 page fetch
                 and gold_page_fetch_allowed(hit.url)
                 and page_fetch_allowed(hit.url, catalogue=self.catalogue)
                 and not hit.content
