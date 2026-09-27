@@ -1,49 +1,38 @@
-# Pending — to productionize Bright Data and make the site fully functional
+# Pending - to productionize Bright Data and make the site fully functional
 
-Status as of `61042bc`. The engine is complete and
-production-grade; the gap is that **the live Bright Data path has never run
-against the real API** — every test to date uses a mocked transport. Everything
-below is ordered by what blocks a first live run.
-
----
-
-## A. Yours — keys and environment (nothing ships until these are set)
-
-The one-command path is `bash scripts/setup-live.sh`, which does all of this in
-the right order. By hand, every command needs `--scope vi-labs-projects` or the CLI
-resolves to your personal account and reports "Deployment not found". In this order,
-because the order matters:
-
-1. `VSM_ACCESS_KEY` — **first.** With live keys behind no gate, the production
-   guard deliberately refuses to serve.
-2. `ANTHROPIC_API_KEY` — needed by INSIGHT (stance, clusters) and REPORT
-   (drafting), and it improves MINE (query expansion; without it MINE falls back
-   to a single deterministic cluster).
-3. `BRIGHTDATA_API_KEY`.
-4. `BRIGHTDATA_SERP_ZONE` (default `dataweb_serp_api1`) and
-   `BRIGHTDATA_UNLOCKER_ZONE` (default `dataweb`) — **confirm these are the real
-   Vi zones your key can reach** (A1 below).
-5. `VSM_OFFLINE=0` — the master switch; until then the app is inert and cannot
-   spend.
-6. Redeploy.
-
-I will not handle the secret values. I can stage the exact `vercel env` commands
-for you to run.
-
-**A1. Confirm zone access.** The defaults are `dataweb_serp_api1` / `dataweb`.
-The first live call fails cleanly if the key cannot reach them. Worth confirming
-against the Bright Data dashboard before the test.
-
-**A2. Confirm the model id.** Default is `claude-opus-5` (`VSM_LLM_MODEL`).
-Confirm the account has access, or set it to one it does.
+Status as of 28 September 2026. **Production collects live.** A probe sweep on
+the deployment ran against the real Bright Data API in 8 seconds and returned 15
+real rows from 6 sites; INSIGHT and REPORT ran on it. What is still open is below.
 
 ---
 
-## B. The unproven surface — the first live run is the real test
+## A. Keys and environment
 
-The request/response parsers for SERP, Discover and Web Unlocker are tested only
-against `httpx.MockTransport` with **assumed** Bright Data response shapes. The
-first live run is where those shapes get verified.
+Set on production (`vi-labs-projects`), all Sensitive:
+
+| Variable | State |
+|---|---|
+| `VSM_ACCESS_KEY` | Set. HTTP Basic, any username. The value is in the macOS Keychain as "Vi Signal Mine access key" (`security find-generic-password -s "Vi Signal Mine access key" -w`) |
+| `BRIGHTDATA_API_KEY` | Set. Bright Data account `hl_62bb110b`, the Attending Health account |
+| `BRIGHTDATA_SERP_ZONE` / `BRIGHTDATA_UNLOCKER_ZONE` | `serp_api1` / `web_unlocker1`, the zones that account actually has |
+| `VSM_MINER` / `VSM_DRAFTER` | `auto` |
+| `VSM_OFFLINE` | `0` |
+| `ANTHROPIC_API_KEY` | **Still blank.** Without it MINE uses one deterministic cluster, INSIGHT gives one theme per row and reads no tone, and REPORT has nothing to state at 2+ sources |
+
+`bash scripts/setup-live.sh` sets the same variables interactively.
+
+**A1. Zones.** The code defaults `dataweb_serp_api1` / `dataweb` do not exist on
+account `hl_62bb110b` (live answer: `400 zone "dataweb_serp_api1" not found`).
+They may belong to a different Vi Bright Data account; switching accounts means a
+new key plus both zone variables.
+
+**A2. Model id.** `claude-opus-5` is a current model and accepts the forced
+`tool_choice` the client sends. Opus 5.5 and Fable 5.1 reject forced tool use,
+so moving `VSM_LLM_MODEL` to either needs a client change.
+
+---
+
+## B. The live surface
 
 **B1. Done** — and this entry was stale from the day it was written: the
 pre-flight landed in the very next commit. `/healthz/brightdata`
@@ -54,10 +43,13 @@ trigger-then-poll, so the cheapest honest probe costs a job plus a poll; a green
 page does not vouch for a sweep's Discover leg. Still unrun against a live key,
 which is B2's problem, not this one's.
 
-**B2. Response-shape validation.** If Bright Data's live JSON differs from the
-mocked fixtures (field names, nesting, empty-result encoding), the parsers in
-`vsm/mining/{serp,discover,unlocker}.py` need adjusting. Cannot be known until a
-real call is made.
+**B2. Response shapes - verified live on 27 September 2026.** SERP (`brd_json=1`)
+parses; the payload now also carries `ai_overview` and `images`, which the parser
+ignores. Web Unlocker answers. **Discover returns `410 {"error":"Discover API is
+no longer available"}`** on this account, although Bright Data's docs and its CLI
+0.3.7 still call the same endpoint. The miner records the failure in
+`coverage.json` notes and continues on SERP, so a sweep completes; the Discover
+leg adds nothing until Bright Data restores it or the leg is removed.
 
 **B3. Cost reconciliation — internal half done, invoice half still open.**
 
@@ -90,8 +82,9 @@ not invoiced.
 Hobby account the project started on. VI Labs is on Pro with Fluid compute, where
 the maximum is 800s, so `vercel.json` now sets 800. `assert_band_allowed` still
 refuses `standard`/`deep` on Vercel. Probe (2 queries × 10 results, 5 discover, 0
-page fetches per cluster) fits with a wide margin. **Time the first real probe
-sweep** anyway; live calls are slower than mocks.
+page fetches per cluster) fits with a wide margin: the first live probe sweep on
+the deployment took 8.1s, INSIGHT 0.9s and REPORT 0.8s, all without an Anthropic
+key. Model calls will add to INSIGHT and REPORT once the key is set.
 
 **C2. Standard/deep on the deployment.** With 800s available (1800s in Vercel's
 extended-duration beta for Python 3.14), a `standard` sweep may fit on the request
@@ -136,10 +129,10 @@ feature (the social-handle → NPI join), not a launch blocker.
 - BE: mutations work end to end.
 - DB: **Postgres is live and durable** — verified by a write→read-in-a-separate-
   request→delete cycle on production.
-- Deploy: `origin/deploy` and `origin/build/vi-signal-mine-v1` are both at
-  `61042bc`. (The *local* `deploy` checkout can lag — `git fetch && git branch -f
-  deploy origin/deploy`. Nothing builds from it: `setup-live.sh` uploads the working
-  tree.)
+- Deploy: production serves the local `build/vi-signal-mine-v1` tree, which is
+  ahead of `origin`. Nothing builds from `origin/deploy`: `vercel --prod` and
+  `setup-live.sh` upload the working tree.
 - "New report" is always available (header action + `/reports/new` hub).
-- 722 tests pass, 5 skipped; the whole live path is exercised against a mocked
-  transport.
+- 730 tests pass, 5 skipped. The live path is exercised against a mocked
+  transport in the suite and was run against the real Bright Data API on
+  27 September 2026, locally and on production.

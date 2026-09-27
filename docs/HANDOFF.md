@@ -10,9 +10,9 @@ that misstates the tree is the one document where that costs a whole session.
 | | |
 |---|---|
 | Repo | `daniellazar-cpu/vi-signal-mine`, private. Branches `build/vi-signal-mine-v1` (work) and `deploy` |
-| Live | https://vi-signal-mine-pink.vercel.app — production, serving, **read-write** |
-| Tests | **722 passed, 5 skipped** hermetically. The storage-contract suite collects 42 cases once a database URL is configured (23 without); it last ran green against the live Neon. The skips need live Blob / database credentials |
-| Working tree | `61042bc`, matching `origin/build/vi-signal-mine-v1` and `origin/deploy` |
+| Live | https://vi-signal-mine-pink.vercel.app - production, **collecting live** since 27 September 2026, behind `VSM_ACCESS_KEY`. Current key and zone state: `docs/PENDING.md` section A |
+| Tests | **730 passed, 5 skipped** hermetically. The storage-contract suite collects 42 cases once a database URL is configured (23 without); it last ran green against the live Neon. The skips need live Blob / database credentials |
+| Working tree | local `build/vi-signal-mine-v1`, ahead of `origin`; production was deployed from it |
 
 ## What works right now
 
@@ -96,9 +96,10 @@ vercel env rm VSM_OFFLINE production --scope vi-labs-projects
 
 `VSM_ACCESS_KEY` is listed first deliberately — see below.
 
-Both key variables currently exist as **blank placeholders**. Blank is read as
-absent throughout (`vsm/config.py`'s `_raw`), so they are harmless as they
-stand; setting them is what arms live collection.
+`BRIGHTDATA_API_KEY` is set on production; `ANTHROPIC_API_KEY` is still a
+**blank placeholder**. Blank is read as absent throughout (`vsm/config.py`'s
+`_raw`), so it is harmless as it stands; setting it is what turns on clustering,
+tone and drafting.
 
 Until `VSM_OFFLINE=0`, the deployment is hermetic: every screen works, no
 outbound call is possible, nothing can be spent. That is a safe resting state,
