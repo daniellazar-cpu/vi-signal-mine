@@ -12,7 +12,7 @@ that misstates the tree is the one document where that costs a whole session.
 | Repo | `daniellazar-cpu/vi-signal-mine`, private. Branches `build/vi-signal-mine-v1` (work) and `deploy` |
 | Live | https://vi-signal-mine-pink.vercel.app - production, **collecting live** since 27 September 2026, behind `VSM_ACCESS_KEY`. Current key and zone state: `docs/PENDING.md` section A |
 | Tests | **730 passed, 5 skipped** hermetically. The storage-contract suite collects 42 cases once a database URL is configured (23 without); it last ran green against the live Neon. The skips need live Blob / database credentials |
-| Working tree | local `build/vi-signal-mine-v1`, ahead of `origin`; production was deployed from it |
+| Working tree | `build/vi-signal-mine-v1` and `deploy` in sync on `origin`. A push to `build/vi-signal-mine-v1` builds production |
 
 ## What works right now
 

@@ -129,9 +129,12 @@ feature (the social-handle → NPI join), not a launch blocker.
 - BE: mutations work end to end.
 - DB: **Postgres is live and durable** — verified by a write→read-in-a-separate-
   request→delete cycle on production.
-- Deploy: production serves the local `build/vi-signal-mine-v1` tree, which is
-  ahead of `origin`. Nothing builds from `origin/deploy`: `vercel --prod` and
-  `setup-live.sh` upload the working tree.
+- Deploy: Vercel's Git integration builds **production from every push to
+  `build/vi-signal-mine-v1`** and a preview from every other branch, including
+  `deploy`. `vercel --prod` and `setup-live.sh` upload the working tree instead.
+  Previews share the production database and carry the same `VSM_ACCESS_KEY` as
+  production since 28 September 2026; builds made before that serve without a
+  password.
 - "New report" is always available (header action + `/reports/new` hub).
 - 730 tests pass, 5 skipped. The live path is exercised against a mocked
   transport in the suite and was run against the real Bright Data API on
