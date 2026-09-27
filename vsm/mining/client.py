@@ -11,8 +11,10 @@ skill (``bright-data-best-practices``, ``discover-api``), July 2026:
 
 Documented error codes handled below: ``400`` bad body, ``401`` bad key, ``403``
 product not enabled on the account, ``404`` expired ``task_id``, ``429`` rate or
-concurrency limit, ``5xx`` service. ``429``/``5xx`` retry with linear backoff;
-everything else raises immediately, because retrying a ``401`` just burns time.
+concurrency limit, ``5xx`` service. ``429``/``5xx`` retry with linear backoff, and
+so does a ``200`` with an empty body, which SERP returns intermittently (seen live,
+September 2026); everything else raises immediately, because retrying a ``401``
+just burns time.
 
 Offline posture matches the parent's analogous ``engine.measurement.oec.HttpClaimsOutcomeSource``:
 a client refuses to build a real transport while ``VSM_OFFLINE=1``, but an
@@ -177,8 +179,14 @@ class BrightDataClient:
                 continue
 
             status = response.status_code
-            if status < 400:
+            if status < 400 and response.content:
                 return response
+            if status < 400:
+                last_error = BrightDataError(
+                    f"{method} {path} → {status} with an empty body", status=status
+                )
+                self._backoff(attempt)
+                continue
             if status in (401, 403):
                 raise BrightDataAuthError(
                     f"{method} {path} → {status}. Check BRIGHTDATA_API_KEY and that the product "

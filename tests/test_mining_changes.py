@@ -5,7 +5,7 @@ import pytest
 
 from vsm.config import Settings
 from vsm.mining.budget import Budget
-from vsm.mining.client import BrightDataClient
+from vsm.mining.client import BrightDataClient, BrightDataError
 from vsm.mining.discover import DiscoverClient
 from vsm.mining.miner import LiveSignalMining, MiningConfig, MiningOutcome
 from vsm.mining.robots import RobotsCache
@@ -463,3 +463,42 @@ def test_theme_strips_a_site_tail_but_never_splits_a_hyphenated_word(title, them
         captured_at=datetime(2026, 9, 27, tzinfo=timezone.utc),
     )
     assert row["theme"] == theme
+
+
+def _serp_with_bodies(bodies: list[str]) -> tuple[SerpClient, list[int]]:
+    """A SerpClient whose transport answers 200 with each body in turn."""
+    calls: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        body = bodies[min(len(calls), len(bodies)) - 1]
+        return httpx.Response(200, text=body)
+
+    settings = Settings.from_env({"VSM_OFFLINE": "1", "BRIGHTDATA_API_KEY": "bd-fake"})
+    bd_client = BrightDataClient(settings, transport=httpx.MockTransport(handler), sleep=lambda _s: None)
+    return SerpClient(bd_client, zone="serp_api1"), calls
+
+
+def test_an_empty_200_is_retried_not_parsed():
+    """Seen live: Bright Data's SERP answers 200 with an empty body on some calls.
+    That is a transient failure, so it is retried like a 5xx."""
+    organic = '{"organic": [{"rank": 1, "title": "t", "link": "https://example.org/a"}]}'
+    serp, calls = _serp_with_bodies(["", organic])
+    results = serp.search("tirzepatide")
+    assert [r.link for r in results] == ["https://example.org/a"]
+    assert len(calls) == 2
+
+
+def test_an_empty_200_that_persists_says_so():
+    serp, calls = _serp_with_bodies([""])
+    with pytest.raises(BrightDataError, match="empty body"):
+        serp.search("tirzepatide")
+    assert len(calls) == 3
+
+
+def test_a_non_json_serp_body_is_quoted_in_the_error():
+    """The old message blamed a missing brd_json=1 even when the URL carried it,
+    and dropped the body that would have said what went wrong."""
+    serp, _calls = _serp_with_bodies(["upstream timeout, retry later"])
+    with pytest.raises(BrightDataError, match="upstream timeout, retry later"):
+        serp.search("tirzepatide")

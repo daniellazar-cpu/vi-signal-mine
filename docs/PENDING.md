@@ -51,6 +51,24 @@ no longer available"}`** on this account, although Bright Data's docs and its CL
 `coverage.json` notes and continues on SERP, so a sweep completes; the Discover
 leg adds nothing until Bright Data restores it or the leg is removed.
 
+**B4. SERP is unstable, seen live on 28 September 2026.** Two defects, both on
+Bright Data's side:
+
+* Some calls answer `200` with an **empty body**. Both gold queries of one
+  production sweep hit it, so the sweep fell back to open-web queries and
+  collected telehealth storefronts and a real-estate site. The client now
+  retries an empty `200` like a `5xx`, and a non-JSON body is quoted in the
+  sweep notes instead of being blamed on `brd_json=1`.
+* The **same query returns different result counts** on back-to-back calls
+  (0, 10, 1 and 10 in one run of four). A sweep-to-sweep change can therefore be
+  the API, not the web. Momentum's 10% floor absorbs some of it; one-mention
+  themes are exposed to it.
+
+**B5. Deployment protection.** Vercel Standard Protection is on
+(`all_except_custom_domains`): every generated build URL needs a VI Labs Vercel
+login, and `vi-signal-mine-pink.vercel.app` stays on `VSM_ACCESS_KEY`. Before
+this, 30 older builds served the production database with no password.
+
 **B3. Cost reconciliation — internal half done, invoice half still open.**
 
 **Done, 2026-09-06.** The two modules that priced a run disagreed. `guards/cost.py`

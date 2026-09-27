@@ -154,11 +154,11 @@ class SerpClient:
     def _payload(response: Any) -> dict[str, Any]:
         try:
             return BrightDataClient.json_of(response)
-        except BrightDataError:
-            # ``format: raw`` without ``brd_json`` yields HTML; that is a wiring
-            # bug, not a transient one — say so instead of parsing HTML.
+        except BrightDataError as exc:
+            # ``format: raw`` without ``brd_json`` yields HTML, but so can a
+            # degraded upstream answer; quote the body rather than guess which.
             raise BrightDataError(
-                "SERP response was not parsed JSON — the request URL must carry brd_json=1",
+                f"SERP response was not parsed JSON ({exc}); check the request URL carries brd_json=1",
                 status=getattr(response, "status_code", None),
             ) from None
 
