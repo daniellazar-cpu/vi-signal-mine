@@ -54,7 +54,7 @@ PATIENT_AUTHOR_RATIONALE = (
 )
 
 _WHITESPACE = re.compile(r"\s+")
-_TITLE_TAIL = re.compile(r"\s*[|–—-]\s*[^|–—-]{1,40}$")
+_TITLE_TAIL = re.compile(r"(?:\s*\|\s*|\s+[–—-]\s+)(?:(?!\s[–—-]\s)[^|]){1,40}$")
 
 
 @dataclass

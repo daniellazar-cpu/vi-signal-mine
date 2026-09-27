@@ -29,6 +29,7 @@ Makefile
 README.md
 PRODUCT.md
 .env.example
+.env
 
 # NOT ignored, and each for a reason a future edit should not undo:
 #   vsm/             the application — including vsm/ui/templates (read by

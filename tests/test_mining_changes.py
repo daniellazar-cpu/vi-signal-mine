@@ -437,3 +437,29 @@ def test_tier_c_refused_is_populated_when_enforced(monkeypatch):
     assert outcome.rows == []
     assert outcome.provenance["tier_c_refused"] == ["restricted-by-catalogue.org"]
     assert "restricted-by-catalogue.org" in outcome.provenance["tier_c_hosts"]
+
+
+@pytest.mark.parametrize(
+    ("title", "theme"),
+    [
+        ("Medicare covers GLP-1s for obesity starting 2026", "medicare covers glp-1s for obesity starting 2026"),
+        ("Study compares GLP-1 agonists in OSA", "study compares glp-1 agonists in osa"),
+        ("Itchy welt from Zepbound. What to do? - GLP-1 Connect", "itchy welt from zepbound. what to do?"),
+        ("Outcomes 2020–2024 in adults", "outcomes 2020–2024 in adults"),
+        ("Zepbound for weight loss: what to know - Mayo Clinic", "zepbound for weight loss: what to know"),
+        ("Tirzepatide dosing | Healio", "tirzepatide dosing"),
+        ("Tirzepatide dosing|Healio", "tirzepatide dosing"),
+        ("Part one - part two — Site", "part one - part two"),
+    ],
+)
+def test_theme_strips_a_site_tail_but_never_splits_a_hyphenated_word(title, theme):
+    """Found on the first live sweep: "GLP-1s" read as a "Title - Site" separator,
+    so a theme came out as "medicare covers glp". A dash separates a site name
+    only with spaces around it."""
+    row = build_row(
+        campaign_id="camp1",
+        cluster=CLUSTER,
+        hit=Hit(url=ALLOWED_URL, title=title),
+        captured_at=datetime(2026, 9, 27, tzinfo=timezone.utc),
+    )
+    assert row["theme"] == theme

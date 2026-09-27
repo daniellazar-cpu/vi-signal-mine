@@ -74,8 +74,8 @@ the write returned success and the container holding it was destroyed.
 ## What the deployment will and will not run
 
 - **`probe` band only** — enforced by `assert_band_allowed` in `vsm/platform.py`.
-  `standard` and `deep` refuse with a message naming local execution. A sweep that dies at the 60-second function
-  timeout leaves a half-written snapshot that the next momentum run treats as a real
+  `standard` and `deep` refuse with a message naming local execution. A sweep that dies at the function
+  timeout (800s, the Pro plan maximum with Fluid compute) leaves a half-written snapshot that the next momentum run treats as a real
   baseline — worse than a refusal.
 - **INSIGHT is resumable.** It is the mode most likely to hit the ceiling on a large
   snapshot; each pass writes its artifact as it finishes and a re-request skips what

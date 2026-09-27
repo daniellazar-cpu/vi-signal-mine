@@ -623,7 +623,7 @@ For the build, so none of the above quietly requires a script:
   narrow widths and becomes a print margin note. No JS in either state.
 - Print: `@page` margins, running head carrying topic + sweep date + DEMO when
   applicable, `break-inside: avoid` on every figure block.
-- Everything renders inside the 60-second serverless ceiling because it is read
+- Everything renders inside the serverless request ceiling because it is read
   from stored artifacts, not recomputed.
 
 ---

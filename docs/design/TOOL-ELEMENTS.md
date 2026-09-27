@@ -112,7 +112,7 @@ deliverables catalogue · how-it-works · delete confirmation · error pages.
 - Renders offline
 - Must print — the report is handed over, sometimes on paper
 - Accessible: WCAG 2.2 AA, keyboard-navigable, screen-reader-navigable
-- Deployed on serverless with a 60-second request ceiling
+- Deployed on serverless with an 800-second request ceiling
 
 ## 10. Known failures of the current interface
 
