@@ -99,12 +99,12 @@ async is in scope.
 
 ## D. Launch-state decisions
 
-**D1. The synthetic demo topic on production.** A fabricated "Tirzepatide"
-example is sitting there. It is **leftover data, not an ongoing seed** — the
-seeder is a no-op now that a database is configured (`vsm/demo.py:165`), so
-deleting it is permanent and nothing recreates it. Decide: keep it as an
-onboarding example, or clear it before the first real client-facing run. Real runs
-are non-synthetic and the demo banner correctly disappears for them.
+**D1. Done, 28 September 2026.** The fabricated "Tirzepatide for obesity - worked
+example" topic (4 runs, 21 artifacts, all flagged synthetic) was deleted from
+production through the app's own delete action. A full row-level backup is in
+`var/backups/demo-topic-top-eaa2b67b3b-2026-09-28.json` (local, gitignored). The
+seeder is a no-op while a database is configured (`vsm/demo.py:165`), so nothing
+recreates it on production; local runs without a database still seed it.
 
 **D2. Spend cap.** `VSM_RUN_COST_CAP_USD` defaults to $5.00 per run. Confirm
 that ceiling is right for a shared production account.
