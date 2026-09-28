@@ -502,3 +502,91 @@ def test_a_non_json_serp_body_is_quoted_in_the_error():
     serp, _calls = _serp_with_bodies(["upstream timeout, retry later"])
     with pytest.raises(BrightDataError, match="upstream timeout, retry later"):
         serp.search("tirzepatide")
+
+
+# --------------------------------------------------------------------------- #
+# Found on the first client sweeps (28 Sep 2026): brand terms never reached the
+# live miner, off-topic hits were filed as mentions, and a SERP "try again in 15
+# seconds" answer was not retried.
+# --------------------------------------------------------------------------- #
+
+FILSPARI_CLUSTER = {"cluster_id": "c1", "label": "filspari", "terms": ["Filspari", "sparsentan"]}
+ON_TOPIC = {"rank": 1, "title": "Filspari in IgAN: early experience",
+            "link": "https://www.healio.com/news/nephrology/filspari", "description": "sparsentan data"}
+OFF_TOPIC = {"rank": 2, "title": "Cancer: what physicians say, in their own words",
+             "link": "https://kevinmd.com/topic/cancer", "description": "physician essays"}
+
+
+def _mining_with_organic(items: list[dict]) -> LiveSignalMining:
+    serp = _serp(lambda request: httpx.Response(200, json={"organic": items}))
+    config = MiningConfig(fetch_pages=False, discover_results_per_cluster=0)
+    return LiveSignalMining(serp=serp, discover=None, unlocker=None, robots=None, config=config)
+
+
+def test_a_hit_naming_none_of_the_topic_terms_is_dropped_and_the_drop_is_named():
+    """KevinMD index pages came back for a site-restricted query and were filed as
+    mentions of the drug: matched_terms fell back to the query's first word."""
+    mining = _mining_with_organic([ON_TOPIC, OFF_TOPIC])
+    outcome = mining.run(campaign_id="camp1", clusters=[FILSPARI_CLUSTER], queries_per_cluster=1)
+    assert {r["venue"] for r in outcome.rows} == {"healio.com"}
+    assert "kevinmd.com" not in outcome.venues_collected
+    assert any("none of its terms" in n for n in outcome.notes), outcome.notes
+
+
+def test_a_cluster_with_no_terms_is_not_filtered():
+    mining = _mining_with_organic([OFF_TOPIC])
+    cluster = {"cluster_id": "c1", "label": "documentation friction", "terms": []}
+    outcome = mining.run(campaign_id="camp1", clusters=[cluster], queries_per_cluster=1)
+    assert {r["venue"] for r in outcome.rows} == {"kevinmd.com"}
+
+
+def test_the_live_miner_gets_the_topics_brand_terms():
+    from vsm.mining import get_miner
+    from vsm.topics.model import BANDS, Topic
+
+    settings = Settings.from_env({"VSM_OFFLINE": "0", "VSM_MINER": "live", "BRIGHTDATA_API_KEY": "bd-fake"})
+    topic = Topic(topic_id="t1", name="Filspari", therapeutic_area="IgA nephropathy", spend_band="probe",
+                  created_at="2026-09-28", brand="Filspari", molecule="sparsentan", competitors=("Tarpeyo",))
+    miner = get_miner(settings, band=BANDS["probe"], topic=topic)
+    assert miner.brand_terms == {"filspari": "ours", "sparsentan": "ours", "tarpeyo": "competitor"}
+
+
+def test_the_mine_route_hands_the_topic_to_get_miner(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    import vsm.ui.app as ui_app
+    from vsm.mining.fake import DeterministicMiner
+    from vsm.runs.store import RunStore
+    from vsm.topics.store import TopicStore
+
+    seen = {}
+
+    def spy(settings=None, **kwargs):
+        seen.update(kwargs)
+        return DeterministicMiner(queries_per_cluster=2)
+
+    monkeypatch.setattr(ui_app, "get_miner", spy)
+    ts = TopicStore(tmp_path / "db")
+    rs = RunStore(tmp_path / "db", tmp_path / "var")
+    topic = ts.create(name="Filspari", therapeutic_area="nephrology", spend_band="probe", brand="Filspari")
+    client = TestClient(ui_app.create_app(topic_store=ts, run_store=rs))
+    assert client.post(f"/topics/{topic.topic_id}/mine", data={}, follow_redirects=False).status_code == 303
+    assert seen.get("topic") is not None and seen["topic"].topic_id == topic.topic_id
+
+
+def test_a_serp_recently_failed_answer_is_retried_after_the_wait_it_names():
+    busy = ("This query recently failed and cannot be attempted at this time. Please try again later, "
+            "after a minimum of 15 seconds. https://docs.brightdata.com/scraping-automation/serp-api/debugging")
+    organic = '{"organic": [{"rank": 1, "title": "t", "link": "https://example.org/a"}]}'
+    bodies, calls, waits = [busy, organic], [], []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return httpx.Response(200, text=bodies[min(len(calls), len(bodies)) - 1])
+
+    settings = Settings.from_env({"VSM_OFFLINE": "1", "BRIGHTDATA_API_KEY": "bd-fake"})
+    serp = SerpClient(BrightDataClient(settings, transport=httpx.MockTransport(handler), sleep=waits.append),
+                      zone="serp_api1")
+    assert [r.link for r in serp.search("filspari")] == ["https://example.org/a"]
+    assert len(calls) == 2
+    assert waits and waits[0] >= 15, waits

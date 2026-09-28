@@ -1464,7 +1464,7 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
         settings = get_settings()
         try:
             client = get_client(settings)
-            miner = get_miner(settings, band=topic.band())
+            miner = get_miner(settings, band=topic.band(), topic=topic)
             run = run_mine(
                 topic, run_store, client=client, miner=miner, cap_usd=settings.run_cost_cap_usd
             )

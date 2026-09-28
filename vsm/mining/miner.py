@@ -172,6 +172,11 @@ class MiningOutcome:
     coverage: list[dict[str, Any]] = field(default_factory=list)
 
 
+
+def _hit_text(hit: Any) -> str:
+    """What a hit says about itself before any page is fetched, lower-cased."""
+    return " ".join(str(x or "") for x in (hit.title, hit.description, (hit.content or "")[:4000])).lower()
+
 class LiveSignalMining:
     """Runs the sweep. Holds no credentials of its own — the clients do."""
 
@@ -439,11 +444,16 @@ class LiveSignalMining:
         cfg = self.config
         enforce = os.environ.get("VSM_ENFORCE_TIER_C", "0") == "1"
         rows: list[dict[str, Any]] = []
+        terms = [str(t).lower() for t in (cluster.get("terms") or []) if t]
+        off_topic = 0
         for hit in hits:
             domain = hit.domain
             if not domain:
                 continue
             attempted.add(domain)
+            if terms and not any(t in _hit_text(hit) for t in terms):
+                off_topic += 1
+                continue
             if is_tier_c(hit.url, catalogue=self.catalogue):
                 # D5: still recorded as restricted — coverage names the host as
                 # Tier C either way — but no longer drops the hit before it
@@ -503,6 +513,11 @@ class LiveSignalMining:
                     captured_at=self.clock(),
                     brand_terms=self.brand_terms,
                 )
+            )
+        if off_topic:
+            outcome.notes.append(
+                f"{off_topic} result(s) for cluster {cluster.get('cluster_id')} dropped: none of its "
+                f"terms ({', '.join(str(t) for t in cluster.get('terms') or [])}) appear in the title or snippet"
             )
         return rows
 

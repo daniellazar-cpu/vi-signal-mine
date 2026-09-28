@@ -193,7 +193,7 @@ def _robots_fetch(url: str) -> str | None:
     return response.text if response.status_code == 200 else None
 
 
-def get_miner(settings: Settings | None = None, *, band: Any = None) -> Any:
+def get_miner(settings: Settings | None = None, *, band: Any = None, topic: Any = None) -> Any:
     """The deterministic fake offline, a configured :class:`LiveSignalMining` live.
 
     ``band`` (a :class:`vsm.topics.model.SpendBand`) decides the query volume
@@ -202,7 +202,9 @@ def get_miner(settings: Settings | None = None, *, band: Any = None) -> Any:
     so a demonstration run at the deep band rehearses a deep-band live sweep,
     never a probe-band one wearing a deep label. Falls back to the cheapest
     band (``probe``) if none is given, so a bare ``get_miner(settings)`` still
-    returns something usable.
+    returns something usable. ``topic`` supplies the brand and competitor terms
+    (``vsm.analysis.resolve.build_lexicon``) that label ``brand_mentioned`` and keep
+    the brands' own sites out of the sweep.
 
     **Live with no Bright Data key raises, never falls back.** A run that
     quietly stopped collecting looks identical, from the outside, to one that
@@ -216,6 +218,7 @@ def get_miner(settings: Settings | None = None, *, band: Any = None) -> Any:
     # vsm.mining.miner.MiningConfig), so importing them at module scope here
     # risks a needless import-time cycle for no benefit — this function is
     # the only caller.
+    from vsm.analysis.resolve import build_lexicon
     from vsm.modes.mine import config_for
     from vsm.topics.model import BANDS
 
@@ -241,4 +244,5 @@ def get_miner(settings: Settings | None = None, *, band: Any = None) -> Any:
         robots=RobotsCache(fetch=_robots_fetch),
         catalogue=catalogue_entries(),
         config=config_for(chosen_band),
+        brand_terms={a: e.role for e in build_lexicon(topic) for a in e.aliases} if topic else None,
     )

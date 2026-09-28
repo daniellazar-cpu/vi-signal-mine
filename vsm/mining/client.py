@@ -12,8 +12,9 @@ skill (``bright-data-best-practices``, ``discover-api``), July 2026:
 Documented error codes handled below: ``400`` bad body, ``401`` bad key, ``403``
 product not enabled on the account, ``404`` expired ``task_id``, ``429`` rate or
 concurrency limit, ``5xx`` service. ``429``/``5xx`` retry with linear backoff, and
-so does a ``200`` with an empty body, which SERP returns intermittently (seen live,
-September 2026); everything else raises immediately, because retrying a ``401``
+so does a ``200`` with an empty body or a "recently failed, try again after N
+seconds" text body, both of which SERP returns intermittently (seen live, September
+2026), the latter after the N seconds it names; everything else raises immediately, because retrying a ``401``
 just burns time.
 
 Offline posture matches the parent's analogous ``engine.measurement.oec.HttpClaimsOutcomeSource``:
@@ -24,6 +25,7 @@ the package is tested with zero network.
 
 from __future__ import annotations
 
+import re
 import time
 from typing import Any, Callable, Mapping
 
@@ -65,6 +67,14 @@ class BrightDataRateLimited(BrightDataError):
 
     default_message = "Bright Data rate limit (429) survived the retry budget"
 
+
+_RETRY_AFTER = re.compile(rb"recently failed.{0,200}?minimum of (\d+) seconds", re.S)
+
+
+def _retry_after_from_body(response: Any) -> float | None:
+    """Seconds a 2xx "this query recently failed" body asks us to wait, else None."""
+    m = _RETRY_AFTER.search(response.content[:400])
+    return float(m.group(1)) if m else None
 
 class BrightDataClient:
     """Thin auth + retry wrapper. One instance is shared by the three products.
@@ -180,7 +190,14 @@ class BrightDataClient:
 
             status = response.status_code
             if status < 400 and response.content:
-                return response
+                wait = _retry_after_from_body(response)
+                if wait is None:
+                    return response
+                last_error = BrightDataRateLimited(
+                    f"{method} {path} → {status}: {response.text[:160]}", status=status
+                )
+                self._backoff(attempt, at_least=wait)
+                continue
             if status < 400:
                 last_error = BrightDataError(
                     f"{method} {path} → {status} with an empty body", status=status
@@ -206,9 +223,9 @@ class BrightDataClient:
             )
         raise last_error or BrightDataError(f"{method} {path} exhausted retries")
 
-    def _backoff(self, attempt: int) -> None:
+    def _backoff(self, attempt: int, at_least: float = 0.0) -> None:
         if attempt < self.max_retries:
-            self._sleep(self.backoff_seconds * (attempt + 1))
+            self._sleep(max(at_least, self.backoff_seconds * (attempt + 1)))
 
     @staticmethod
     def json_of(response: Any) -> dict[str, Any]:
