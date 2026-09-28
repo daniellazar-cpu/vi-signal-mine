@@ -204,7 +204,7 @@ class LiveSignalMining:
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.query_for = query_for
         self.brand_terms = dict(brand_terms or {})
-        #: brand/competitor product domains, derived from the never-say list
+        #: brand/competitor product domains, derived from the topic's brand terms
         self.brand_slugs = brand_domain_slugs(self.brand_terms)
 
     # ------------------------------------------------------------------- entry

@@ -590,3 +590,27 @@ def test_a_serp_recently_failed_answer_is_retried_after_the_wait_it_names():
     assert [r.link for r in serp.search("filspari")] == ["https://example.org/a"]
     assert len(calls) == 2
     assert waits and waits[0] >= 15, waits
+
+
+@pytest.mark.parametrize(
+    ("host", "verdict"),
+    [
+        ("briumvi.com", "brand_site"),
+        ("briumvihcp.com", "brand_site"),
+        ("mybriumvi.com", "brand_site"),
+        ("www.ocrevus.com", "brand_site"),
+        ("tgtherapeutics.com", "pharma_corporate"),
+        ("ir.tgtherapeutics.com", "pharma_corporate"),
+        ("travere.com", "pharma_corporate"),
+        ("nationalmssociety.org", None),
+        ("healio.com", None),
+    ],
+)
+def test_the_sponsors_own_sites_are_denied_but_a_curated_venue_never_is(host, verdict):
+    """Seen live: briumvihcp.com and two TG Therapeutics pages became Briumvi mentions,
+    because the brand rule needed a host label to equal the brand exactly."""
+    from vsm.mining.denylist import brand_domain_slugs, deny_reason
+
+    slugs = brand_domain_slugs({"briumvi": "ours", "ublituximab": "ours", "ocrevus": "competitor", "healio": "ours"})
+    got = deny_reason(host, brand_slugs=slugs)
+    assert (got[0] if got else None) == verdict

@@ -7,9 +7,9 @@ finding a human must see, a denylist drop is a saved $0.003.
 
 Four rules, in the order they fire:
 
-1. **The sponsor's and competitors' own product sites.** Derived from the brief's
-   ``term_policy`` never-list, because those terms are exactly the brand names the
-   output may never repeat (CLAUDE.md hard rule 1). Reading the brand's own site to
+1. **The sponsor's and competitors' own product sites.** Derived from the topic's
+   brand, molecule and competitors, and matched anywhere inside a host label, so
+   ``briumvihcp.com`` and ``mybriumvi.com`` fall with ``briumvi.com``. Reading the brand's own site to
    learn what clinicians find difficult is circular; it is also the single easiest
    way to contaminate an unbranded draft with promotional phrasing.
 2. **Pharma corporate marketing sites.** Same problem, one level up.
@@ -68,7 +68,7 @@ PHARMA_CORPORATE: frozenset[str] = frozenset(
         "supernus.com", "alkermes.com", "jazzpharma.com", "ucb.com", "servier.com", "ipsen.com",
         "astellas.com", "daiichisankyo.com", "eisai.com", "sunpharma.com", "drreddys.com",
         "zoetis.com", "csl.com", "grifols.com", "sobi.com", "alnylam.com", "bluebirdbio.com",
-        "sarepta.com", "praxismedicines.com", "dyne-tx.com",
+        "sarepta.com", "praxismedicines.com", "dyne-tx.com", "tgtherapeutics.com", "travere.com",
     }
 )
 
@@ -190,7 +190,7 @@ def deny_reason(
     suffixes = {".".join(labels[i:]) for i in range(len(labels))}
 
     for slug in brand_slugs:
-        if slug and slug in labels:
+        if slug and any(slug in label for label in labels):
             return (
                 "brand_site",
                 f"a sponsor or competitor product site ({host}) — its brand name is on the "
