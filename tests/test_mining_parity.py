@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-PARENT = Path.home() / "Documents" / "forum-engine"
+PARENT = Path.home() / "Documents" / "repos" / "forum-engine"
 
 pytestmark = pytest.mark.skipif(
     not (PARENT / "engine" / "mining" / "queries.py").exists(),

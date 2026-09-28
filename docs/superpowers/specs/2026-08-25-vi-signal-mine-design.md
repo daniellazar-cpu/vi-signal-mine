@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-25 · **Revision 2** · **Status:** approved for planning
 **Owner:** Daniel Lazar
-**Parent:** `daniellazar-cpu/attending-health-engine` (local: `~/Documents/forum-engine`)
+**Parent:** `daniellazar-cpu/attending-health-engine` (local: `~/Documents/repos/forum-engine`)
 **Research behind it:** `docs/research/2026-08-25-social-intelligence-landscape.md`
 
 > **Revision 2 replaced revision 1's purpose, not just its details.** Revision 1
