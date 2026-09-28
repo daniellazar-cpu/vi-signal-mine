@@ -1,7 +1,13 @@
 import pytest
 
 from vsm.config import Settings
-from vsm.llm.client import AnthropicClient, get_client, prefix_is_cacheable
+from vsm.llm.client import (
+    AnthropicClient,
+    LlmSpend,
+    get_client,
+    prefix_is_cacheable,
+    worst_case_usd,
+)
 
 SCHEMA = {
     "type": "object",
@@ -357,3 +363,49 @@ def test_every_schema_forbids_extra_properties():
     assert schemas
     for schema in schemas:
         assert schema.get("additionalProperties") is False
+
+
+def test_spend_is_priced_at_the_models_own_rates():
+    """Sonnet 5 is $2 / $10 per million, $0.20 a cache read, $2.50 a cache write.
+    Priced at Opus 5's rates it read 2.5x the real bill, so the $5 run cap
+    stopped a Sonnet run at about $2 of real spend."""
+    spend = LlmSpend(
+        model="claude-sonnet-5",
+        input_tokens=1_000_000, output_tokens=1_000_000,
+        cache_read_tokens=1_000_000, cache_write_tokens=1_000_000,
+    )
+    assert spend.usd == pytest.approx(2.00 + 10.00 + 0.20 + 2.50)
+
+
+def test_an_unlisted_model_is_priced_at_opus_5_rates():
+    spend = LlmSpend(model="claude-unlisted", input_tokens=1_000_000, output_tokens=1_000_000)
+    assert spend.usd == pytest.approx(5.00 + 25.00)
+
+
+def test_worst_case_is_priced_at_the_named_model():
+    opus = worst_case_usd(prompt_chars=30_000, max_output_tokens=8_000, model="claude-opus-5")
+    sonnet = worst_case_usd(prompt_chars=30_000, max_output_tokens=8_000, model="claude-sonnet-5")
+    assert sonnet == pytest.approx(opus * 0.4)
+
+
+def test_the_client_prices_its_ledger_at_its_own_model():
+    calls = []
+    client = AnthropicClient(
+        sdk=_FakeAnthropic({"themes": []}, calls), model="claude-sonnet-5", cap_usd=5.0
+    )
+    client.complete_structured(system="SYS", user="USR", schema=SCHEMA, max_output_tokens=64)
+    assert client.spend.usd == pytest.approx(1000 / 1e6 * 2.00 + 200 / 1e6 * 10.00)
+
+
+def test_the_client_reserves_at_its_own_model():
+    """100k output tokens reserve $2.50 at Opus rates and $1.00 at Sonnet's, so a
+    $2 cap admits the call only when the reserve is priced at the real model."""
+    calls = []
+    client = AnthropicClient(
+        sdk=_FakeAnthropic({"themes": []}, calls), model="claude-sonnet-5", cap_usd=2.0
+    )
+    out = client.complete_structured(
+        system="SYS", user="USR", schema=SCHEMA, max_output_tokens=100_000
+    )
+    assert out.ok is True
+    assert len(calls) == 1

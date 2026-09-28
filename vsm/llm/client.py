@@ -51,15 +51,21 @@ __all__ = [
     "worst_case_usd",
 ]
 
-#: Per-million-token rates for the model, used to record spend. These are the
-#: published Claude Opus 5 rates. They are a *record*, not a bill — the
-#: authoritative number is Anthropic's own usage reporting, and this exists so
-#: a run can be stopped before it overspends and so a run can show what it
-#: cost.
-_RATE_IN_PER_M = 5.00
-_RATE_OUT_PER_M = 25.00
-_RATE_CACHE_READ_PER_M = 0.50   # ~0.1x input
-_RATE_CACHE_WRITE_PER_M = 6.25  # ~1.25x input
+#: Published per-million-token rates per model: input, output, cache read
+#: (~0.1x input), cache write (~1.25x input). They are a *record*, not a bill —
+#: the authoritative number is Anthropic's own usage reporting, and this exists
+#: so a run can be stopped before it overspends and so a run can show what it
+#: cost. ``VSM_LLM_MODEL`` is env-settable, so a model missing here is priced
+#: at Opus 5 rates, which under-counts Fable-tier models ($10 / $50): add the
+#: row before pointing the variable at one.
+_RATES_PER_M: dict[str, tuple[float, float, float, float]] = {
+    "claude-opus-5": (5.00, 25.00, 0.50, 6.25),
+    "claude-sonnet-5": (2.00, 10.00, 0.20, 2.50),
+}
+
+
+def _rates_for(model: str) -> tuple[float, float, float, float]:
+    return _RATES_PER_M.get((model or "").strip().lower(), _RATES_PER_M["claude-opus-5"])
 
 #: Chars per token when *estimating* an unmetered bill. English prose runs
 #: about 3.7-4.0; 3.0 deliberately over-counts. Every use of this number is a
@@ -141,14 +147,16 @@ class LlmSpend:
     calls: int = 0
     estimated_calls: int = 0
     estimated_usd: float = 0.0
+    model: str = ""
 
     @property
     def usd(self) -> float:
+        rate_in, rate_out, rate_read, rate_write = _rates_for(self.model)
         return round(
-            self.input_tokens / 1_000_000 * _RATE_IN_PER_M
-            + self.output_tokens / 1_000_000 * _RATE_OUT_PER_M
-            + self.cache_read_tokens / 1_000_000 * _RATE_CACHE_READ_PER_M
-            + self.cache_write_tokens / 1_000_000 * _RATE_CACHE_WRITE_PER_M,
+            self.input_tokens / 1_000_000 * rate_in
+            + self.output_tokens / 1_000_000 * rate_out
+            + self.cache_read_tokens / 1_000_000 * rate_read
+            + self.cache_write_tokens / 1_000_000 * rate_write,
             6,
         )
 
@@ -236,8 +244,8 @@ class StructuredOutcome:
 # --------------------------------------------------------------------------- #
 
 
-def worst_case_usd(*, prompt_chars: int, max_output_tokens: int) -> float:
-    """The most one call can possibly cost, given the published rates.
+def worst_case_usd(*, prompt_chars: int, max_output_tokens: int, model: str = "") -> float:
+    """The most one call to ``model`` can possibly cost, given its published rates.
 
     Input is priced at the cache-*write* rate, which is the expensive case
     (the first call of a run writes the prefix it later reads), and output at
@@ -245,10 +253,11 @@ def worst_case_usd(*, prompt_chars: int, max_output_tokens: int) -> float:
     what makes the cap a ceiling instead of a tripwire — see
     ``AnthropicClient._check_budget``.
     """
+    _, rate_out, _, rate_write = _rates_for(model)
     tokens_in = math.ceil(max(0, prompt_chars) / _EST_CHARS_PER_TOKEN)
     return round(
-        tokens_in / 1_000_000 * _RATE_CACHE_WRITE_PER_M
-        + max(0, max_output_tokens) / 1_000_000 * _RATE_OUT_PER_M,
+        tokens_in / 1_000_000 * rate_write
+        + max(0, max_output_tokens) / 1_000_000 * rate_out,
         6,
     )
 
@@ -491,7 +500,7 @@ class AnthropicClient:
         self._sdk = _without_sdk_retries(sdk)
         self._model = model
         self._cap_usd_setting = cap_usd
-        self._spend = LlmSpend()
+        self._spend = LlmSpend(model=model)
         # Base delay for our own retries. Zero is for tests; production waits.
         self._retry_backoff_s = max(0.0, float(retry_backoff_s))
         self._max_attempts = _MAX_ATTEMPTS
@@ -566,7 +575,7 @@ class AnthropicClient:
         and one call could overshoot by its own full cost. Reserving instead
         makes the recorded total unable to pass the cap at all, with one
         caveat worth stating plainly: the guarantee is only as good as the
-        rate constants at the top of this file. If Anthropic's published
+        rate table at the top of this file. If Anthropic's published
         rates change and these do not, the reserve is wrong by the same
         factor.
 
@@ -665,7 +674,9 @@ class AnthropicClient:
         stopped rather than raising out from under whatever called it.
         """
         prompt_chars = len(system) + len(user)
-        reserve = worst_case_usd(prompt_chars=prompt_chars, max_output_tokens=max_output_tokens)
+        reserve = worst_case_usd(
+            prompt_chars=prompt_chars, max_output_tokens=max_output_tokens, model=self._model
+        )
 
         last_reason = ""
         for attempt in range(1, self._max_attempts + 1):
