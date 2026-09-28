@@ -148,8 +148,9 @@ feature (the social-handle → NPI join), not a launch blocker.
 - DB: **Postgres is live and durable** — verified by a write→read-in-a-separate-
   request→delete cycle on production.
 - Deploy: Vercel's Git integration builds **production from every push to
-  `build/vi-signal-mine-v1`** and a preview from every other branch, including
-  `deploy`. `vercel --prod` and `setup-live.sh` upload the working tree instead.
+  `main`** (since 28 September 2026; before, `build/vi-signal-mine-v1`) and a preview
+  from every other branch, including `deploy`.
+  `vercel --prod` and `setup-live.sh` upload the working tree instead.
   Previews share the production database and carry the same `VSM_ACCESS_KEY` as
   production since 28 September 2026; builds made before that serve without a
   password.
