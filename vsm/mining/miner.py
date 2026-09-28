@@ -451,9 +451,6 @@ class LiveSignalMining:
             if not domain:
                 continue
             attempted.add(domain)
-            if terms and not any(t in _hit_text(hit) for t in terms):
-                off_topic += 1
-                continue
             if is_tier_c(hit.url, catalogue=self.catalogue):
                 # D5: still recorded as restricted — coverage names the host as
                 # Tier C either way — but no longer drops the hit before it
@@ -462,6 +459,9 @@ class LiveSignalMining:
                 restricted.add(domain)
                 if enforce:
                     continue
+            if terms and not any(t in _hit_text(hit) for t in terms):
+                off_topic += 1
+                continue
             # the budget rule, applied after the compliance rule and before any spend
             kept, dropped = partition([hit], url_of=lambda h: h.url, brand_slugs=self.brand_slugs)
             if dropped:
