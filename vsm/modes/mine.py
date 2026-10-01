@@ -27,11 +27,14 @@ from vsm.llm.prompts import LEXICON_SYSTEM
 from vsm.llm.schema import LEXICON_SCHEMA
 from vsm.mining.miner import MiningConfig
 from vsm.mining.signals import any_synthetic
+from vsm.platform import is_vercel
 from vsm.runs.model import Run
 from vsm.runs.store import RunStore
 from vsm.topics.model import SpendBand, Topic
 
-__all__ = ["run_mine", "build_clusters", "config_for"]
+__all__ = ["run_mine", "build_clusters", "config_for", "VERCEL_SWEEP_SECONDS"]
+
+VERCEL_SWEEP_SECONDS = 540.0
 
 
 def config_for(band: SpendBand) -> MiningConfig:
@@ -40,6 +43,10 @@ def config_for(band: SpendBand) -> MiningConfig:
     Handed to ``LiveSignalMining(config=...)`` at construction. It is not a
     ``run()`` argument — the parent's ``run()`` takes only ``campaign_id``,
     ``clusters`` and an optional per-cluster query override.
+
+    On Vercel the sweep gets :data:`VERCEL_SWEEP_SECONDS` of the function's 800,
+    leaving room for the lexicon call before it, a call still in flight at the
+    limit, and the artifact writes after it.
     """
     return MiningConfig(
         queries_per_cluster=band.queries_per_cluster,
@@ -47,6 +54,7 @@ def config_for(band: SpendBand) -> MiningConfig:
         discover_results_per_cluster=band.discover_results_per_cluster,
         page_fetches_per_cluster=band.page_fetches_per_cluster,
         fetch_pages=band.page_fetches_per_cluster > 0,
+        time_limit_s=VERCEL_SWEEP_SECONDS if is_vercel() else None,
     )
 
 

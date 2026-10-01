@@ -1,58 +1,64 @@
-"""One cheap live call to SERP and Web Unlocker, to prove the wiring before a sweep.
+"""A rehearsal of a sweep's Bright Data calls, to prove a sweep will work before it spends.
 
-**Two of the three products the miner uses.** Discover
-(:mod:`vsm.mining.discover`) is deliberately not probed: its API is a
-trigger-then-poll job rather than a single request, so the cheapest honest probe
-costs a job plus at least one poll and takes an order of magnitude longer than the
-other two combined. The wording here says SERP and Web Unlocker rather than "every
-product" so nobody reads a green page as proof that a sweep's Discover leg will
-work.
+**It sends what a sweep sends.** Three real ``site:``-scoped gold queries from the
+sweep's own planner (:func:`vsm.mining.queries.plan_queries`), with the sweep's
+recency window, sent together the way :class:`~vsm.mining.miner.LiveSignalMining`
+now sends them, through the same :class:`~vsm.mining.serp.SerpClient`. Then one Web
+Unlocker fetch of the first result a sweep would page-fetch. Bright Data's own test
+URL is only the fallback when no such result came back, and the detail says so.
 
-**Why this exists.** The whole live path was tested only against a mocked
-transport until the first real key arrived, and a full sweep is an expensive,
-slow way to discover that a zone name is wrong or a product is not enabled on the
-account. This makes the smallest possible real call to each of the two — one SERP
-request, one Web Unlocker request against Bright Data's own test URL, neither
-retried — and reports pass or fail for each, so a mis-wired key surfaces in a few
-cents and a few seconds rather than mid-sweep.
+A trivial query against a test page proved the key and nothing else: it passed in a
+second while real ``site:`` queries took 20-70s each and a Wide sweep died at the
+function timeout. The latencies measured here feed :func:`wide_sweep_fit`, which
+says how many search groups a Wide sweep can cover in full inside the Vercel limit.
 
-It validates the **app's own wiring**, not just raw connectivity: it uses the
-same `Settings`, the same zones, and the same `BrightDataClient` the miner uses,
-so it catches "the key works but `VSM_OFFLINE` is still 1", a zone typo in the
-env, or a product the account has not enabled — none of which a standalone curl
-would catch.
+**Each call is made once** (``max_retries=0``): a throttled or cooling-down zone is
+reported as the failure it is, not hidden behind retries, and the page's quoted cost
+(three searches and one fetch, about one cent) is the cost.
 
-The key is never returned or logged. Each result carries a status, a latency and
-a short, safe detail string (an error message, or a snippet of Bright Data's
-public test-page response), and nothing else.
+Discover is not probed: it is a trigger-then-poll job rather than one request, so a
+green result here does not vouch for a sweep's Discover leg.
+
+The key is never returned or logged. Each result carries a status, a latency and a
+short, safe detail string, and nothing else.
 """
 
 from __future__ import annotations
 
+import math
 import time
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from typing import Any
 
 from vsm.config import Settings, get_settings
-from vsm.mining.client import (
-    BrightDataAuthError,
-    BrightDataClient,
-    BrightDataError,
-)
+from vsm.mining.client import BrightDataClient, BrightDataError
+from vsm.mining.miner import MiningConfig
+from vsm.mining.queries import plan_queries
+from vsm.mining.recency import window_for
+from vsm.mining.serp import SerpClient
+from vsm.mining.tiers import page_fetch_allowed
+from vsm.mining.venues import areas_for_cluster, catalogue_entries, gold_page_fetch_allowed
 
-__all__ = ["CheckResult", "check_brightdata", "UNLOCKER_TEST_URL", "SERP_TEST_QUERY"]
+__all__ = [
+    "CheckResult",
+    "check_brightdata",
+    "wide_sweep_fit",
+    "PROBE_CLUSTER",
+    "UNLOCKER_TEST_URL",
+]
 
-#: Bright Data's own connectivity URL. Cheap, stable, and returns a tiny known
-#: body — the canonical "is the Unlocker reachable" target from their docs.
+#: A topic every gold venue list covers, so the probe queries are the shape a sweep sends.
+PROBE_CLUSTER: dict[str, Any] = {"cluster_id": "probe", "label": "semaglutide", "terms": ["semaglutide"]}
+PROBE_SEARCHES = 3
+
+#: Fallback Unlocker target when no search result is one a sweep would fetch.
 UNLOCKER_TEST_URL = "https://geo.brdtest.com/welcome.txt?product=unlocker&method=api"
-
-#: A trivial SERP query. The result content does not matter — only that Bright
-#: Data returns parsed JSON, which proves the SERP product and zone are live.
-SERP_TEST_QUERY = "test"
 
 
 class CheckResult(dict):
-    """A single product's result. A plain dict so a template and a JSON caller
-    read it the same way; a class only so the shape is documented in one place.
+    """A single call's result. A plain dict so a template and a JSON caller read it
+    the same way; a class only so the shape is documented in one place.
 
     Keys: ``product`` (str), ``zone`` (str), ``ok`` (bool), ``detail`` (str, safe
     to display — never contains the key), ``latency_ms`` (int | None).
@@ -65,95 +71,107 @@ class CheckResult(dict):
 def _timed(fn: Any) -> tuple[bool, str, int | None]:
     """Run one probe, translating every outcome into (ok, detail, latency_ms).
 
-    Bright Data's own error classes carry the message a person needs — a 401/403
-    means the key or product is wrong, a rate-limit means the zone is throttled
-    right now (the probe does not retry past it) —
-    so they are surfaced verbatim rather than flattened to "failed". A truly
-    unexpected exception is caught too: a health check that raises is worse than
-    one that reports the raw error, because the former looks like the app is
-    broken when it is the connection that is.
+    Bright Data's own errors carry the message a person needs — a 401/403 means the
+    key or product is wrong, a 429 or a cooldown means the zone is throttled right
+    now — so they are surfaced verbatim. An unexpected exception is caught too: a
+    health check that raises looks like the app is broken when it is the connection.
     """
     start = time.monotonic()
     try:
         detail = fn()
-        ms = int((time.monotonic() - start) * 1000)
-        return True, detail, ms
-    except BrightDataAuthError as exc:
-        return False, str(exc), int((time.monotonic() - start) * 1000)
+        return True, detail, int((time.monotonic() - start) * 1000)
     except BrightDataError as exc:
         return False, str(exc), int((time.monotonic() - start) * 1000)
     except Exception as exc:  # noqa: BLE001 — a health check must never itself 500
         return False, f"unexpected error: {type(exc).__name__}: {exc}", int((time.monotonic() - start) * 1000)
 
 
+def probe_queries(now: datetime) -> list[tuple[str, str]]:
+    """The first gold queries a sweep would send for :data:`PROBE_CLUSTER`, with its tbs."""
+    cfg = MiningConfig()
+    window = window_for(now, cfg.recency_days)
+    plan = plan_queries(
+        PROBE_CLUSTER, PROBE_SEARCHES, areas=areas_for_cluster(PROBE_CLUSTER),
+        sites_per_query=cfg.gold_sites_per_query, open_queries_max=0,
+    )
+    return [(p.text, window.tbs if p.date_restricted else "") for p in plan if p.kind == "gold"][:PROBE_SEARCHES]
+
+
+def _fetchable(url: str) -> bool:
+    return gold_page_fetch_allowed(url) and page_fetch_allowed(url, catalogue=catalogue_entries())
+
+
 def check_brightdata(
     settings: Settings | None = None, *, transport: Any = None
 ) -> list[CheckResult]:
-    """One SERP and one Unlocker probe, using the app's real config. No retries.
+    """Three sweep-shaped searches in parallel, then one sweep-shaped page fetch.
 
-    ``transport`` is the ``httpx`` transport seam the client already exposes for
-    tests — production passes nothing and the client builds its own. Returns a
-    result for each even when the key is missing, so the caller can show the
-    same table whether the instance is configured or not.
+    ``transport`` is the ``httpx`` seam the client exposes for tests — production
+    passes nothing. Returns a row per product even when the key is missing, so the
+    caller shows the same table whether the instance is configured or not.
     """
     s = settings or get_settings(refresh=True)
-    results: list[CheckResult] = []
-
     if not s.brightdata_api_key:
-        for product, zone in (("SERP", s.brightdata_serp_zone), ("Web Unlocker", s.brightdata_unlocker_zone)):
-            results.append(CheckResult(
-                product, zone, False,
-                "BRIGHTDATA_API_KEY is not set on this deployment.", None,
-            ))
-        return results
+        return [
+            CheckResult(product, zone, False, "BRIGHTDATA_API_KEY is not set on this deployment.", None)
+            for product, zone in (("SERP", s.brightdata_serp_zone), ("Web Unlocker", s.brightdata_unlocker_zone))
+        ]
 
-    # ``max_retries=0``: this is the pre-flight, and the docstring above promises
-    # "the smallest possible real call". The client's default of 2 retries turns one
-    # probe into up to three billed calls plus its backoff sleeps on a 429 or a 5xx —
-    # so a flaky zone cost three times what the page said it would and took several
-    # seconds longer. A pre-flight that hides a rate limit by retrying past it is
-    # also reporting the wrong thing: "your zone is throttled" is exactly what a
-    # person running this needs to see.
     client = BrightDataClient(s, transport=transport, max_retries=0)
+    serp = SerpClient(client, zone=s.brightdata_serp_zone)
+    links: list[str] = []
+
+    def search(query_tbs: tuple[str, str]) -> CheckResult:
+        query, tbs = query_tbs
+
+        def probe() -> str:
+            found = serp.search(query, limit=MiningConfig().serp_results_per_query, tbs=tbs)
+            links.extend(r.link for r in found)
+            window = "last 90 days" if tbs else "any date"
+            return f"{len(found)} results, {window}: {query[:70]}…"
+
+        return CheckResult("SERP", s.brightdata_serp_zone, *_timed(probe))
+
     try:
-        # SERP: a trivial query with brd_json=1, so a pass proves parsed JSON
-        # comes back — exactly what the miner relies on.
-        def serp_probe() -> str:
-            from urllib.parse import urlencode
-            url = "https://www.google.com/search?" + urlencode(
-                {"q": SERP_TEST_QUERY, "brd_json": 1, "gl": "us", "hl": "en"}
-            )
+        queries = probe_queries(datetime.now(timezone.utc))
+        with ThreadPoolExecutor(max_workers=len(queries)) as pool:
+            results = list(pool.map(search, queries))
+        target = next((u for u in links if _fetchable(u)), None)
+
+        def unlock() -> str:
             resp = client.request(
                 "POST", "/request",
-                json_body={"zone": s.brightdata_serp_zone, "url": url, "format": "raw"},
+                json_body={"zone": s.brightdata_unlocker_zone, "url": target or UNLOCKER_TEST_URL, "format": "raw"},
             )
-            # Parse it, do not measure it. Reporting ``len(body)`` bytes "of parsed
-            # SERP JSON" from the status code and a length alone meant a zone
-            # answering with an HTML block page or a login redirect was reported
-            # **Reachable** — the precise wiring failure this probe exists to catch,
-            # and the one ``serp.py`` guards against downstream. ``json_of`` raises a
-            # BrightDataError carrying the first 200 characters of whatever came
-            # back, which ``_timed`` surfaces verbatim.
-            payload = BrightDataClient.json_of(resp)
-            keys = ", ".join(sorted(payload)[:4]) or "no top-level keys"
-            return f"HTTP {resp.status_code}, parsed SERP JSON ({keys})"
+            source = target or "Bright Data's test page (no search result was one a sweep would fetch)"
+            return f"HTTP {resp.status_code}, {len((resp.text or '').strip()):,} characters from {source}"
 
-        ok, detail, ms = _timed(serp_probe)
-        results.append(CheckResult("SERP", s.brightdata_serp_zone, ok, detail, ms))
-
-        # Web Unlocker: Bright Data's own test URL, a few cents, known body.
-        def unlocker_probe() -> str:
-            resp = client.request(
-                "POST", "/request",
-                json_body={"zone": s.brightdata_unlocker_zone, "url": UNLOCKER_TEST_URL, "format": "raw"},
-            )
-            body = (resp.text or "").strip()
-            snippet = body[:60].replace("\n", " ")
-            return f"HTTP {resp.status_code}: {snippet!r}"
-
-        ok, detail, ms = _timed(unlocker_probe)
-        results.append(CheckResult("Web Unlocker", s.brightdata_unlocker_zone, ok, detail, ms))
+        results.append(CheckResult("Web Unlocker", s.brightdata_unlocker_zone, *_timed(unlock)))
     finally:
         client.close()
-
     return results
+
+
+def wide_sweep_fit(results: list[CheckResult], *, limit_s: float) -> dict[str, int] | None:
+    """How much of a Wide sweep the measured speeds fit inside ``limit_s``.
+
+    Per search group a Wide sweep sends its searches in parallel batches, then makes
+    its page fetches one at a time; the slowest measured call of each kind sets the
+    pace. ``None`` when a search or the page fetch failed, since there is no speed to
+    project from.
+    """
+    from vsm.topics.model import BANDS
+
+    searches = [r["latency_ms"] for r in results if r["product"] == "SERP" and r["ok"]]
+    pages = [r["latency_ms"] for r in results if r["product"] == "Web Unlocker" and r["ok"]]
+    if not searches or not pages or len(searches) < sum(r["product"] == "SERP" for r in results):
+        return None
+    wide = BANDS["deep"]
+    search_s = max(searches) / 1000 * math.ceil(wide.queries_per_cluster / MiningConfig().parallel_searches)
+    fetch_s = max(pages) / 1000 * wide.page_fetches_per_cluster
+    return {
+        "search_s": math.ceil(search_s),
+        "fetch_s": math.ceil(fetch_s),
+        "full_groups": int(limit_s // (search_s + fetch_s)),
+        "limit_s": int(limit_s),
+    }

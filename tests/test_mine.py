@@ -3,8 +3,9 @@ from types import SimpleNamespace
 import pytest
 
 from vsm.guards.cost import estimate_run_usd
-from vsm.modes.mine import build_clusters, run_mine
+from vsm.modes.mine import VERCEL_SWEEP_SECONDS, build_clusters, config_for, run_mine
 from vsm.runs.store import RunStore
+from vsm.topics.model import BANDS
 from vsm.topics.store import TopicStore
 
 
@@ -214,6 +215,17 @@ def test_every_sweep_size_runs_on_vercel(stores, monkeypatch, band):
     topic = _topic(ts, band=band)
     run = run_mine(topic, rs, miner=_FakeMiner(), cluster_count=1)
     assert run.status == "complete"
+
+
+def test_on_vercel_the_sweep_has_a_time_limit(monkeypatch):
+    monkeypatch.setenv("VERCEL", "1")
+    assert config_for(BANDS["deep"]).time_limit_s == VERCEL_SWEEP_SECONDS
+
+
+def test_locally_the_sweep_has_no_time_limit(monkeypatch):
+    monkeypatch.delenv("VERCEL", raising=False)
+    monkeypatch.delenv("VERCEL_ENV", raising=False)
+    assert config_for(BANDS["deep"]).time_limit_s is None
 
 
 # --- Only the topic name is required (content.FIELD_GUIDE) ------------------

@@ -3,9 +3,10 @@
 {% block title %}Bright Data connection — Vi Signal Mine{% endblock %}
 {% block content %}
 {#
-  The pre-flight check. It exists so a mis-wired key or a wrong zone surfaces in
-  one cheap call before a full sweep spends real money and minutes. The GET
-  spends nothing; only the POST below makes billed calls.
+  The pre-flight check: a rehearsal of a sweep's Bright Data calls, so a wrong
+  key, a throttled zone or a speed that cannot fit the time limit shows up for a
+  cent before a sweep spends real money and minutes. The GET spends nothing; only
+  the POST below makes billed calls.
 #}
 <div class="page">
 
@@ -40,14 +41,14 @@
 {% else %}
 
 {% if results is none %}
-<p class="t-support">Runs one SERP request and one Web Unlocker request against Bright Data's test URL — a few cents, a few seconds. It proves the key and both zones are live before a real sweep depends on them. Discover is a trigger-and-poll job rather than one request, so it is not probed — a green result here does not vouch for it.</p>
+<p class="t-support">Runs what a sweep runs: three real site-scoped searches sent together, then one page fetch from their results. About one cent, up to a minute or two. It shows whether the key and both zones work and how fast they answer right now, and from that how much of a Wide sweep fits the time limit. Discover is a trigger-and-poll job rather than one request, so it is not probed — a green result here does not vouch for it.</p>
 <form method="post" action="/healthz/brightdata">
   <button class="btn btn-primary" type="submit">Run connection test</button>
 </form>
 {% else %}
 <div class="table-scroll" tabindex="0" role="region" aria-label="Bright Data connection test results">
 <table class="data-table">
-  <caption class="visually-hidden">One probe per Bright Data product, with pass or fail and latency.</caption>
+  <caption class="visually-hidden">Each rehearsal call, with pass or fail and latency.</caption>
   <thead><tr>
     <th scope="col">Product</th>
     <th scope="col">Zone</th>
@@ -71,6 +72,9 @@
 {% set all_ok = results | selectattr("ok") | list | length == results | length %}
 {% if all_ok %}
 <p class="t-support"><strong>SERP and Web Unlocker reachable.</strong> The key and both zones are wired correctly, and a live sweep will spend against the same ones. <strong>Discover was not tested</strong> — its API is a trigger-and-poll job rather than one request, so a green result here does not vouch for a sweep&rsquo;s Discover leg.</p>
+{% if fit %}
+<p class="t-support"><strong>At these speeds a Wide sweep covers {{ fit.full_groups }} search group{{ "" if fit.full_groups == 1 else "s" }} in full inside its {{ fit.limit_s }}-second limit.</strong> Each group takes about {{ fit.search_s }} s of searching and {{ fit.fetch_s }} s of page fetches. Past that, searches still land and page fetches are skipped; the sweep says so in its notes.</p>
+{% endif %}
 {% else %}
 <p class="t-support">One or more products failed. The detail column carries Bright Data's own message — a 401/403 means the key or product is not enabled; a wrong zone name fails here too.</p>
 {% endif %}
