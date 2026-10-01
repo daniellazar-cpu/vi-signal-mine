@@ -467,6 +467,7 @@ def _tool_for(schema: dict[str, Any]) -> dict[str, Any]:
         "name": "emit",
         "description": "Emit the result. This is the only permitted output.",
         "input_schema": schema,
+        "strict": True,
     }
 
 
