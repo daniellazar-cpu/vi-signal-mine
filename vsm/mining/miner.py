@@ -482,7 +482,11 @@ class LiveSignalMining:
         cfg = self.config
         enforce = os.environ.get("VSM_ENFORCE_TIER_C", "0") == "1"
         rows: list[dict[str, Any]] = []
+        # a cluster's terms are often phrases no headline repeats; the topic's own
+        # brand, molecule and competitor names are what an on-topic hit names
         terms = [str(t).lower() for t in (cluster.get("terms") or []) if t]
+        if terms:
+            terms += [str(a).lower() for a in self.brand_terms]
         off_topic = 0
         for hit in hits:
             domain = hit.domain
@@ -556,7 +560,8 @@ class LiveSignalMining:
         if off_topic:
             outcome.notes.append(
                 f"{off_topic} result(s) for cluster {cluster.get('cluster_id')} dropped: none of its "
-                f"terms ({', '.join(str(t) for t in cluster.get('terms') or [])}) appear in the title or snippet"
+                f"terms ({', '.join(str(t) for t in cluster.get('terms') or [])}) or the topic's names "
+                f"({', '.join(sorted(self.brand_terms)) or 'none'}) appear in the title or snippet"
             )
         return rows
 

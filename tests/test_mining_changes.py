@@ -533,6 +533,26 @@ def test_a_hit_naming_none_of_the_topic_terms_is_dropped_and_the_drop_is_named()
     assert any("none of its terms" in n for n in outcome.notes), outcome.notes
 
 
+def test_a_hit_naming_the_topic_is_kept_when_the_cluster_terms_are_phrases():
+    """The live lexicon writes terms as phrases ("Isembyld approval"); a Wide sweep
+    on 1 Oct 2026 kept 0 of ~700 results because no headline repeats a phrase."""
+    serp = _serp(lambda request: httpx.Response(200, json={"organic": [
+        {"rank": 1, "title": "FDA clears Isembyld for SMA", "link": "https://www.healio.com/news/1",
+         "description": "first muscle-targeted therapy"},
+        {"rank": 2, "title": "Switching from Spinraza: what families report", "link": "https://www.healio.com/news/2",
+         "description": "caregivers on intrathecal dosing"},
+        OFF_TOPIC,
+    ]}))
+    mining = LiveSignalMining(
+        serp=serp, config=MiningConfig(fetch_pages=False, discover_results_per_cluster=0),
+        brand_terms={"isembyld": "ours", "apitegromab": "ours", "spinraza": "competitor"},
+    )
+    cluster = {"cluster_id": "approval", "label": "approval", "terms": ["Isembyld approval", "FDA approval apitegromab"]}
+    outcome = mining.run(campaign_id="camp1", clusters=[cluster], queries_per_cluster=1)
+    assert sorted(r["url"] for r in outcome.rows) == ["https://www.healio.com/news/1", "https://www.healio.com/news/2"]
+    assert "kevinmd.com" not in outcome.venues_collected
+
+
 def test_a_cluster_with_no_terms_is_not_filtered():
     mining = _mining_with_organic([OFF_TOPIC])
     cluster = {"cluster_id": "c1", "label": "documentation friction", "terms": []}
