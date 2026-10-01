@@ -133,12 +133,14 @@ def short_excerpt(hit: Hit) -> str | None:
     return text or None
 
 
-def matched_terms_for(hit: Hit, cluster: Mapping[str, Any]) -> list[str]:
-    """Which lexicon terms actually hit. Falls back to the query's leading token."""
+def matched_terms_for(hit: Hit, cluster: Mapping[str, Any], names: Sequence[str] = ()) -> list[str]:
+    """Which lexicon terms, then which topic ``names``, actually hit. Falls back to the
+    query's leading token."""
     haystack = " ".join(
         filter(None, (_clean(hit.title), _clean(hit.description), _clean(hit.content)[:2000]))
     ).lower()
     hits = [t for t in (cluster.get("terms") or []) if t and str(t).lower() in haystack]
+    hits = hits or [n for n in names if n and str(n).lower() in haystack]
     if hits:
         return [str(t) for t in hits]
     head = _clean(hit.query).split()
@@ -189,7 +191,7 @@ def build_row(
         "author_type": "patient" if patient else "unknown",
         "author_type_confidence": None,
         "author_type_rationale": PATIENT_AUTHOR_RATIONALE if patient else AUTHOR_RATIONALE,
-        "matched_terms": matched_terms_for(hit, cluster),
+        "matched_terms": matched_terms_for(hit, cluster, names=list(brand_terms or ())),
         "excerpt": excerpt,
         "theme": theme,
         # no sentiment classifier ran on the live path — a number here would be invented

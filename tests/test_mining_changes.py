@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 
 import httpx
@@ -612,6 +613,54 @@ def test_a_serp_recently_failed_answer_is_retried_after_the_wait_it_names():
     assert waits and waits[0] >= 15, waits
 
 
+THROTTLED = ("The request was auto-throttled due to low success rate. "
+             "Please decrease your request rate to 10/min.")
+ORGANIC = '{"organic": [{"rank": 1, "title": "t", "link": "https://example.org/a"}]}'
+
+
+def _throttling_serp(bodies_for: dict[str, list[str]], waits: list[float]) -> tuple[SerpClient, list[str]]:
+    sent: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        sent.append(body["zone"])
+        queue = bodies_for[body["zone"]]
+        return httpx.Response(200, text=queue.pop(0) if len(queue) > 1 else queue[0])
+
+    settings = Settings.from_env({"VSM_OFFLINE": "1", "BRIGHTDATA_API_KEY": "bd-fake"})
+    client = BrightDataClient(settings, transport=httpx.MockTransport(handler), sleep=waits.append)
+    return SerpClient(client, zone="serp_api1"), sent
+
+
+def test_an_auto_throttled_answer_is_retried_at_the_rate_it_names():
+    """Live on 1 Oct 2026: 68 of 81 Wide-sweep searches got this 200 and failed in
+    under a second each, because nothing recognised it."""
+    waits: list[float] = []
+    serp, sent = _throttling_serp({"serp_api1": [THROTTLED, ORGANIC]}, waits)
+    assert [r.link for r in serp.search("isembyld")] == ["https://example.org/a"]
+    assert len(sent) == 2
+    assert waits and min(waits) > 5.9, waits
+
+
+def test_after_a_throttle_every_later_call_to_that_zone_is_paced():
+    waits: list[float] = []
+    serp, sent = _throttling_serp({"serp_api1": [THROTTLED, ORGANIC]}, waits)
+    serp.search("first")
+    waits.clear()
+    serp.search("second")
+    serp.search("third")
+    assert len(waits) == 2 and all(w > 0 for w in waits), waits
+
+
+def test_a_throttle_on_one_zone_does_not_pace_another():
+    waits: list[float] = []
+    serp, sent = _throttling_serp({"serp_api1": [THROTTLED, ORGANIC], "web_unlocker1": ["page"]}, waits)
+    serp.search("first")
+    waits.clear()
+    serp.client.request("POST", "/request", json_body={"zone": "web_unlocker1", "url": "https://x.org", "format": "raw"})
+    assert waits == []
+
+
 @pytest.mark.parametrize(
     ("host", "verdict"),
     [
@@ -634,3 +683,26 @@ def test_the_sponsors_own_sites_are_denied_but_a_curated_venue_never_is(host, ve
     slugs = brand_domain_slugs({"briumvi": "ours", "ublituximab": "ours", "ocrevus": "competitor", "healio": "ours"})
     got = deny_reason(host, brand_slugs=slugs)
     assert (got[0] if got else None) == verdict
+
+
+def test_a_hit_admitted_by_a_topic_name_records_that_name_as_matched():
+    serp = _serp(lambda request: httpx.Response(200, json={"organic": [
+        {"rank": 1, "title": "FDA clears Isembyld for SMA", "link": "https://www.healio.com/news/1",
+         "description": "first muscle-targeted therapy"}]}))
+    mining = LiveSignalMining(
+        serp=serp, config=MiningConfig(fetch_pages=False, discover_results_per_cluster=0),
+        brand_terms={"isembyld": "ours", "": "ours"},
+    )
+    cluster = {"cluster_id": "approval", "label": "approval", "terms": ["Isembyld approval"]}
+    outcome = mining.run(campaign_id="camp1", clusters=[cluster], queries_per_cluster=1)
+    assert [r["matched_terms"] for r in outcome.rows] == [["isembyld"]]
+
+
+def test_an_empty_topic_name_does_not_switch_the_filter_off():
+    serp = _serp(lambda request: httpx.Response(200, json={"organic": [OFF_TOPIC]}))
+    mining = LiveSignalMining(
+        serp=serp, config=MiningConfig(fetch_pages=False, discover_results_per_cluster=0),
+        brand_terms={"": "ours", "isembyld": "ours"},
+    )
+    cluster = {"cluster_id": "approval", "label": "approval", "terms": ["Isembyld approval"]}
+    assert mining.run(campaign_id="camp1", clusters=[cluster], queries_per_cluster=1).rows == []

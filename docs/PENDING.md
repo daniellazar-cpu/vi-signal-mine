@@ -60,6 +60,11 @@ Bright Data's side:
   collected telehealth storefronts and a real-estate site. The client now
   retries an empty `200` like a `5xx`, and a non-JSON body is quoted in the
   sweep notes instead of being blamed on `brd_json=1`.
+* Under a low success rate SERP answers `200` with **"The request was auto-throttled
+  due to low success rate. Please decrease your request rate to 10/min."** (seen live
+  on 1 October 2026, 68 of 81 searches of one sweep). The client now paces that zone
+  to the named rate and retries; at 10/min a Wide sweep's searches alone take ~7
+  minutes, so the 540s limit skips some of its work and the run's notes name what.
 * The **same query returns different result counts** on back-to-back calls
   (0, 10, 1 and 10 in one run of four). A sweep-to-sweep change can therefore be
   the API, not the web. Momentum's 10% floor absorbs some of it; one-mention
