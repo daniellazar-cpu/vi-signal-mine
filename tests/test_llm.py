@@ -97,6 +97,17 @@ def test_the_system_prompt_is_sent_as_a_cacheable_prefix():
     assert system[0]["cache_control"] == {"type": "ephemeral"}
 
 
+def test_the_emit_tool_is_strict():
+    """Without strict the model may return an array as a JSON-encoded string;
+    a lexicon pass once came back as 4,648 one-character clusters."""
+    calls = []
+    client = AnthropicClient(
+        sdk=_FakeAnthropic({"themes": []}, calls), model="claude-sonnet-5", cap_usd=5.0
+    )
+    client.complete_structured(system="SYS", user="USR", schema=SCHEMA, max_output_tokens=64)
+    assert calls[0]["tools"][0]["strict"] is True
+
+
 def test_cap_blocks_before_the_call_is_made():
     from vsm.errors import BudgetExceeded
 
