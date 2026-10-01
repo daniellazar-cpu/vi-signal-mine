@@ -48,7 +48,7 @@ from __future__ import annotations
 
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping, Sequence
@@ -214,7 +214,7 @@ class LiveSignalMining:
         self.brand_terms = dict(brand_terms or {})
         #: brand/competitor product domains, derived from the topic's brand terms
         self.brand_slugs = brand_domain_slugs(self.brand_terms)
-        self._serp_cache: dict[tuple[str, str], tuple[datetime, Any]] = {}
+        self._serp_cache: dict[tuple[str, str], Future] = {}
         self._deadline: float | None = None
         self._skipped_for_time = False
 
@@ -262,9 +262,11 @@ class LiveSignalMining:
                 sites_per_query=cfg.gold_sites_per_query,
                 open_queries_max=cfg.open_queries_max,
             )))
-        self._prefetch_gold(
+        pool = ThreadPoolExecutor(max_workers=max(1, cfg.parallel_searches))
+        self._submit_gold(
             [(p.text, self._tbs_for(p, window)) for _, _, plan in plans for p in plan if p.kind == "gold"],
             budget=budget,
+            pool=pool,
         )
 
         try:
@@ -286,6 +288,8 @@ class LiveSignalMining:
                 state = {"fetched": 0, "probes": 0}
                 gold_rows = 0
                 for planned in gold:
+                    if self._not_sent_for_time(planned, window, outcome):
+                        continue
                     outcome.queries_run.append(planned.text)
                     ran["gold"] += 1
                     batch = self._planned_hits(
@@ -354,6 +358,8 @@ class LiveSignalMining:
                         "any page fetch"
                     )
                     for planned in tail:
+                        if self._not_sent_for_time(planned, window, outcome):
+                            continue
                         outcome.queries_run.append(planned.text)
                         ran["open"] += 1
                         batch = self._planned_hits(
@@ -391,6 +397,8 @@ class LiveSignalMining:
                 }
             )
             outcome.notes.append(f"sweep stopped early: {stop.reason}")
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
         self._serp_cache.clear()
         if self._skipped_for_time:
             outcome.notes.append(
@@ -576,12 +584,14 @@ class LiveSignalMining:
         self._skipped_for_time = True
         return True
 
-    def _prefetch_gold(self, queries: list[tuple[str, str]], *, budget: Budget) -> None:
-        """Send every gold SERP query at once; :meth:`_serp_hits` reads them back in order.
+    def _submit_gold(self, queries: list[tuple[str, str]], *, budget: Budget, pool: ThreadPoolExecutor) -> None:
+        """Queue every gold SERP query on ``pool``; :meth:`_serp_hits` waits on each in order.
 
-        SERP answers in 20-70s per call, so a Wide sweep's gold queries alone outlast
-        a Vercel function when sent one by one. Skipped when the whole set would not
-        fit the result cap, so the sequential pass still stops at the cap as before.
+        SERP answers in 20-70s per call and a throttled zone is paced to a few a minute,
+        so a Wide sweep's gold queries outlast a Vercel function when sent one by one.
+        The sequential pass starts at once and reads each cluster's results as they land,
+        so its page fetches (another zone) overlap the searches still queued. Skipped when
+        the whole set would not fit the result cap, so the pass still stops at the cap.
         """
         unique = list(dict.fromkeys(queries))
         if self.serp is None or not unique:
@@ -601,9 +611,19 @@ class LiveSignalMining:
             except BrightDataError as exc:
                 return at, exc
 
-        with ThreadPoolExecutor(max_workers=max(1, self.config.parallel_searches)) as pool:
-            found = list(pool.map(search, unique))
-        self._serp_cache.update((k, v) for k, v in zip(unique, found) if v is not None)
+        self._serp_cache.update((key, pool.submit(search, key)) for key in unique)
+
+    def _not_sent_for_time(self, planned: PlannedQuery, window: RecencyWindow, outcome: MiningOutcome) -> bool:
+        """True, with a note, for a query the time limit stopped before it was sent."""
+        key = (planned.text, self._tbs_for(planned, window))
+        future = self._serp_cache.get(key)
+        if future is not None and future.result() is not None:
+            return False
+        if not self._past_deadline():
+            return False
+        self._serp_cache.pop(key, None)
+        outcome.notes.append(f"time limit reached — SERP query {planned.text!r} was not sent")
+        return True
 
     def _planned_hits(
         self,
@@ -679,7 +699,8 @@ class LiveSignalMining:
             return []
         limit = self.config.serp_results_per_query
         budget.check(limit, what=f"SERP query {query!r}")
-        prefetched = self._serp_cache.pop((query, tbs), None)
+        future = self._serp_cache.pop((query, tbs), None)
+        prefetched = future.result() if future is not None else None
         if prefetched is None and self._past_deadline():
             raise BudgetStop(f"time limit of {self.config.time_limit_s:.0f}s reached before SERP query {query!r}")
         at, result = prefetched or (self.clock(), None)

@@ -118,3 +118,43 @@ def test_a_sweep_that_skipped_nothing_does_not_claim_the_limit():
 
     assert not any("time limit" in n for n in outcome.notes)
     assert not any("time limit" in d["reason"] for d in outcome.deferrals)
+
+
+def test_pages_are_fetched_while_later_searches_are_still_running():
+    """A throttled SERP zone paced a Wide sweep's searches across the whole limit; page
+    fetches that waited for every search to land never ran."""
+    search_ends: list[float] = []
+    page_starts: list[float] = []
+
+    def serp(request: httpx.Request) -> httpx.Response:
+        response = _slow_serp(request)
+        search_ends.append(time.monotonic())
+        return response
+
+    def page(request: httpx.Request) -> httpx.Response:
+        page_starts.append(time.monotonic())
+        return httpx.Response(200, text="Real page content about OIC, long enough to be usable.")
+
+    settings = Settings.from_env({"VSM_OFFLINE": "1"})
+    config = MiningConfig(queries_per_cluster=3, discover_results_per_cluster=0, page_fetches_per_cluster=1,
+                          parallel_searches=1, probe_outside_window=False)
+    LiveSignalMining(
+        serp=SerpClient(_bd(serp), zone=settings.brightdata_serp_zone),
+        unlocker=UnlockerClient(_bd(page), zone=settings.brightdata_unlocker_zone),
+        catalogue=[{"domain": "gi.org", "collection_tier": "A"}],
+        config=config,
+    ).run(campaign_id="camp", clusters=CLUSTERS)
+
+    assert page_starts and min(page_starts) < max(search_ends)
+
+
+def test_a_search_the_limit_stops_is_noted_not_counted_and_does_not_end_the_sweep():
+    config = MiningConfig(queries_per_cluster=3, discover_results_per_cluster=0, fetch_pages=False,
+                          parallel_searches=1, probe_outside_window=False, time_limit_s=SERP_LATENCY_S * 2.5)
+    outcome = _mining(config, []).run(campaign_id="camp", clusters=CLUSTERS)
+
+    targeting = outcome.provenance["targeting"]
+    sent = [c for c in outcome.calls if c["kind"] == "serp"]
+    assert targeting["gold_queries_run"] == len(sent) < targeting["gold_queries_planned"]
+    assert any("was not sent" in n for n in outcome.notes)
+    assert not any("sweep stopped early" in n for n in outcome.notes)

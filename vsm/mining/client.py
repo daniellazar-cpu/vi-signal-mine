@@ -26,6 +26,7 @@ the package is tested with zero network.
 from __future__ import annotations
 
 import re
+import threading
 import time
 from typing import Any, Callable, Mapping
 
@@ -76,6 +77,15 @@ def _retry_after_from_body(response: Any) -> float | None:
     m = _RETRY_AFTER.search(response.content[:400])
     return float(m.group(1)) if m else None
 
+
+_THROTTLED = re.compile(rb"auto-throttled.{0,200}?request rate to (\d+)\s*/\s*min", re.S)
+
+
+def _throttle_rate_from_body(response: Any) -> int | None:
+    """Requests per minute a 2xx "auto-throttled" body asks for, else None."""
+    m = _THROTTLED.search(response.content[:400])
+    return int(m.group(1)) or None if m else None
+
 class BrightDataClient:
     """Thin auth + retry wrapper. One instance is shared by the three products.
 
@@ -110,6 +120,10 @@ class BrightDataClient:
         self.backoff_seconds = float(backoff_seconds)
         self._sleep = sleep
         self._client: Any = None
+        #: seconds between sends, per zone, once Bright Data has throttled that zone
+        self._pace: dict[str | None, float] = {}
+        self._next_send: dict[str | None, float] = {}
+        self._pace_lock = threading.Lock()
 
     # ------------------------------------------------------------------ wiring
     @property
@@ -176,8 +190,10 @@ class BrightDataClient:
         import httpx
 
         client = self._ensure_client()
+        zone = (json_body or {}).get("zone")
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
+            self._wait_turn(zone)
             try:
                 response = client.request(
                     method, path, json=dict(json_body) if json_body is not None else None,
@@ -189,6 +205,17 @@ class BrightDataClient:
                 continue
 
             status = response.status_code
+            rate = _throttle_rate_from_body(response) if status < 400 and response.content else None
+            if rate:
+                with self._pace_lock:
+                    self._pace[zone] = max(self._pace.get(zone, 0.0), 60.0 / rate)
+                    self._next_send[zone] = max(
+                        self._next_send.get(zone, 0.0), time.monotonic() + self._pace[zone]
+                    )
+                last_error = BrightDataRateLimited(
+                    f"{method} {path} → {status}: auto-throttled to {rate}/min", status=status
+                )
+                continue
             if status < 400 and response.content:
                 wait = _retry_after_from_body(response)
                 if wait is None:
@@ -222,6 +249,18 @@ class BrightDataClient:
                 f"{method} {path} → {status}: {response.text[:300]}", status=status
             )
         raise last_error or BrightDataError(f"{method} {path} exhausted retries")
+
+    def _wait_turn(self, zone: str | None) -> None:
+        """Hold this send until the zone's throttled rate allows it, across threads."""
+        with self._pace_lock:
+            interval = self._pace.get(zone)
+            if not interval:
+                return
+            now = time.monotonic()
+            send_at = max(now, self._next_send.get(zone, now))
+            self._next_send[zone] = send_at + interval
+        if send_at > now:
+            self._sleep(send_at - now)
 
     def _backoff(self, attempt: int, at_least: float = 0.0) -> None:
         if attempt < self.max_retries:
