@@ -47,6 +47,8 @@ Order of operations, and why each step is where it is:
 from __future__ import annotations
 
 import os
+import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping, Sequence
@@ -136,6 +138,12 @@ class MiningConfig:
     #: empty". Costs one extra SERP call ($0.0015), capped per cluster.
     probe_outside_window: bool = True
     probes_per_cluster: int = 2
+    # ------------------------------------------------------------ wall clock
+    #: gold SERP queries sent at once before the sweep reads them back in order
+    parallel_searches: int = 8
+    #: seconds the sweep may run; past it, page fetches, recency probes and the
+    #: open-web tail are skipped and every row already found is kept
+    time_limit_s: float | None = None
 
 
 @dataclass
@@ -206,6 +214,9 @@ class LiveSignalMining:
         self.brand_terms = dict(brand_terms or {})
         #: brand/competitor product domains, derived from the topic's brand terms
         self.brand_slugs = brand_domain_slugs(self.brand_terms)
+        self._serp_cache: dict[tuple[str, str], tuple[datetime, Any]] = {}
+        self._deadline: float | None = None
+        self._skipped_for_time = False
 
     # ------------------------------------------------------------------- entry
     def run(
@@ -238,18 +249,26 @@ class LiveSignalMining:
         superseded: list[dict[str, str]] = []
         metadata_only: set[str] = set()
         ran = {"gold": 0, "open": 0}
+        self._deadline = None if cfg.time_limit_s is None else time.monotonic() + cfg.time_limit_s
+        self._skipped_for_time = False
+        plans = []
+        for cluster in clusters:
+            areas = areas_for_cluster(cluster)
+            plans.append((cluster, areas, plan_queries(
+                cluster,
+                per_cluster,
+                query_for=self.query_for,
+                areas=areas,
+                sites_per_query=cfg.gold_sites_per_query,
+                open_queries_max=cfg.open_queries_max,
+            )))
+        self._prefetch_gold(
+            [(p.text, self._tbs_for(p, window)) for _, _, plan in plans for p in plan if p.kind == "gold"],
+            budget=budget,
+        )
 
         try:
-            for cluster in clusters:
-                areas = areas_for_cluster(cluster)
-                plan = plan_queries(
-                    cluster,
-                    per_cluster,
-                    query_for=self.query_for,
-                    areas=areas,
-                    sites_per_query=cfg.gold_sites_per_query,
-                    open_queries_max=cfg.open_queries_max,
-                )
+            for cluster, areas, plan in plans:
                 outcome.plan.extend(p.as_dict() for p in plan)
                 gold = [p for p in plan if p.kind == "gold"]
                 tail = [p for p in plan if p.kind == "open"]
@@ -321,6 +340,12 @@ class LiveSignalMining:
                         f"{'y' if len(tail) == 1 else 'ies'} in the plan were not run "
                         f"(${SERP_COST_PER_REQUEST_USD * len(tail):.4f} unspent)"
                     )
+                elif self._past_deadline():
+                    outcome.notes.append(
+                        f"time limit reached — the {len(tail)} open-web quer"
+                        f"{'y' if len(tail) == 1 else 'ies'} for cluster {cluster.get('cluster_id')} "
+                        "were not run"
+                    )
                 else:
                     outcome.notes.append(
                         f"gold list under-delivered ({gold_rows} rows < {cfg.min_gold_rows}) for "
@@ -366,6 +391,19 @@ class LiveSignalMining:
                 }
             )
             outcome.notes.append(f"sweep stopped early: {stop.reason}")
+        self._serp_cache.clear()
+        if self._skipped_for_time:
+            outcome.notes.append(
+                f"time limit of {cfg.time_limit_s:.0f}s reached — page fetches, recency probes and "
+                "open-web queries after it were skipped; every row found before it is kept"
+            )
+            outcome.deferrals.append(
+                {
+                    "needs": "page fetches, recency probes and open-web queries after the time limit",
+                    "reason": f"the sweep's {cfg.time_limit_s:.0f}s time limit on this host",
+                    "substitute": "search-result metadata for every row already found",
+                }
+            )
 
         outcome.rows = dedupe_rows(rows)
         collected = sorted({str(r["venue"]) for r in outcome.rows if r.get("venue")})
@@ -484,6 +522,7 @@ class LiveSignalMining:
                 and gold_page_fetch_allowed(hit.url)
                 and page_fetch_allowed(hit.url, catalogue=self.catalogue)
                 and not hit.content
+                and not self._past_deadline()
             ):
                 page, robots_summary = self._fetch_page(hit, budget=budget, outcome=outcome)
                 if page is not None:
@@ -521,6 +560,46 @@ class LiveSignalMining:
             )
         return rows
 
+    def _tbs_for(self, planned: PlannedQuery, window: RecencyWindow) -> str:
+        return window.tbs if planned.date_restricted and self.config.apply_recency else ""
+
+    def _past_deadline(self) -> bool:
+        """Is the time limit up? Called only where work would otherwise start, so a
+        True here is work skipped, and the run's notes say so."""
+        if self._deadline is None or time.monotonic() < self._deadline:
+            return False
+        self._skipped_for_time = True
+        return True
+
+    def _prefetch_gold(self, queries: list[tuple[str, str]], *, budget: Budget) -> None:
+        """Send every gold SERP query at once; :meth:`_serp_hits` reads them back in order.
+
+        SERP answers in 20-70s per call, so a Wide sweep's gold queries alone outlast
+        a Vercel function when sent one by one. Skipped when the whole set would not
+        fit the result cap, so the sequential pass still stops at the cap as before.
+        """
+        unique = list(dict.fromkeys(queries))
+        if self.serp is None or not unique:
+            return
+        limit = self.config.serp_results_per_query
+        try:
+            budget.check(limit * len(unique), what=f"{len(unique)} parallel gold SERP queries")
+        except BudgetStop:
+            return
+
+        def search(key: tuple[str, str]) -> tuple[datetime, Any] | None:
+            if self._past_deadline():
+                return None
+            at = self.clock()
+            try:
+                return at, self.serp.search(key[0], limit=limit, tbs=key[1])
+            except BrightDataError as exc:
+                return at, exc
+
+        with ThreadPoolExecutor(max_workers=max(1, self.config.parallel_searches)) as pool:
+            found = list(pool.map(search, unique))
+        self._serp_cache.update((k, v) for k, v in zip(unique, found) if v is not None)
+
     def _planned_hits(
         self,
         planned: PlannedQuery,
@@ -535,7 +614,7 @@ class LiveSignalMining:
         """One planned SERP query, with the recency window where it belongs."""
         cfg = self.config
         restrict = bool(planned.date_restricted and cfg.apply_recency)
-        hits = self._serp_hits(planned.text, budget=budget, outcome=outcome, tbs=window.tbs if restrict else "")
+        hits = self._serp_hits(planned.text, budget=budget, outcome=outcome, tbs=self._tbs_for(planned, window))
         recency_queries.append(
             {
                 "query": planned.text,
@@ -557,6 +636,7 @@ class LiveSignalMining:
             and not hits
             and cfg.probe_outside_window
             and state["probes"] < cfg.probes_per_cluster
+            and not self._past_deadline()
         ):
             state["probes"] += 1
             outside = self._serp_hits(planned.text, budget=budget, outcome=outcome, tbs="", probe=True)
@@ -594,10 +674,17 @@ class LiveSignalMining:
             return []
         limit = self.config.serp_results_per_query
         budget.check(limit, what=f"SERP query {query!r}")
-        at = self.clock()
+        prefetched = self._serp_cache.pop((query, tbs), None)
+        if prefetched is None and self._past_deadline():
+            raise BudgetStop(f"time limit of {self.config.time_limit_s:.0f}s reached before SERP query {query!r}")
+        at, result = prefetched or (self.clock(), None)
         url = self.serp.search_url(query, tbs=tbs)
         try:
-            results: list[SerpResult] = self.serp.search(query, limit=limit, tbs=tbs)
+            if isinstance(result, BrightDataError):
+                raise result
+            results: list[SerpResult] = (
+                result if result is not None else self.serp.search(query, limit=limit, tbs=tbs)
+            )
         except BrightDataError as exc:
             budget.record(
                 FetchCall(kind="serp", target=query, url=url, at=at, status="error", results=0,

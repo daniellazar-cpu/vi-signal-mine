@@ -1,10 +1,10 @@
 """The Bright Data pre-flight check.
 
-The live path was mock-tested until the first real key arrived, and a full sweep
-is an expensive, slow way to discover a wrong zone or a disabled product. This
-endpoint makes one cheap real call each to SERP and Web Unlocker and reports
-pass/fail — so the whole point of the tests below is that it behaves correctly
-*without* a real key or network, using the client's injected-transport seam.
+A full sweep is an expensive, slow way to discover a wrong zone, a throttled
+product or a speed that cannot fit the time limit. This endpoint rehearses a
+sweep's calls — three sweep-shaped searches together, one sweep-shaped page fetch
+— and reports pass/fail and latency. The tests below pin that shape without a real
+key or network, using the client's injected-transport seam.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from vsm.config import Settings
-from vsm.mining.healthcheck import check_brightdata
+from vsm.mining.healthcheck import CheckResult, check_brightdata, wide_sweep_fit
 from vsm.runs.store import RunStore
 from vsm.topics.store import TopicStore
 from vsm.ui.app import create_app
@@ -31,7 +31,7 @@ def test_both_products_pass_when_bright_data_answers(tmp_path):
         return httpx.Response(200, text='{"organic":[]}')
     results = check_brightdata(_live_settings(tmp_path),
                                transport=httpx.MockTransport(handler))
-    assert [r["product"] for r in results] == ["SERP", "Web Unlocker"]
+    assert [r["product"] for r in results] == ["SERP", "SERP", "SERP", "Web Unlocker"]
     assert all(r["ok"] for r in results)
     assert all(r["latency_ms"] is not None for r in results)
 
@@ -126,8 +126,8 @@ def test_a_serp_zone_answering_html_is_reported_failed_not_reachable(tmp_path):
     assert unlocker["ok"] is True
 
 
-def test_the_preflight_makes_exactly_one_call_per_product_even_when_throttled(tmp_path):
-    """"One cheap call" has to be true of the failure path too.
+def test_the_preflight_makes_exactly_one_call_per_probe_even_when_throttled(tmp_path):
+    """"One call per probe" has to be true of the failure path too.
 
     ``BrightDataClient`` defaults to ``max_retries=2``, so a 429 turned each probe
     into three billed calls plus its backoff sleeps — three times the cost the page
@@ -144,7 +144,7 @@ def test_the_preflight_makes_exactly_one_call_per_product_even_when_throttled(tm
     results = check_brightdata(_live_settings(tmp_path), transport=httpx.MockTransport(handler))
 
     assert all(not r["ok"] for r in results)
-    assert len(calls) == 2, f"expected one call per product, made {len(calls)}"
+    assert len(calls) == 4, f"expected one call per probe, made {len(calls)}"
 
 
 def test_a_json_array_is_not_accepted_as_a_serp_payload(tmp_path):
@@ -160,3 +160,64 @@ def test_a_json_array_is_not_accepted_as_a_serp_payload(tmp_path):
     serp = next(r for r in results if r["product"] == "SERP")
     assert serp["ok"] is False
     assert "JSON object" in serp["detail"]
+
+
+# --------------------------------------------------------------------------- #
+# it rehearses a sweep, not a test page                                        #
+# --------------------------------------------------------------------------- #
+
+
+def test_the_searches_are_the_site_scoped_queries_a_sweep_sends(tmp_path):
+    bodies: list[str] = []
+
+    def handler(request):
+        bodies.append(request.read().decode())
+        return httpx.Response(200, json={"organic": []})
+
+    check_brightdata(_live_settings(tmp_path), transport=httpx.MockTransport(handler))
+    searches = [b for b in bodies if "google.com/search" in b]
+    assert len(searches) == 3
+    assert all("site%3A" in b for b in searches)
+
+
+def test_the_page_fetch_targets_a_result_a_sweep_would_fetch(tmp_path):
+    page = "https://www.medpagetoday.com/endocrinology/diabetes/1"
+    targets: list[str] = []
+
+    def handler(request):
+        body = request.read().decode()
+        if "google.com/search" in body:
+            return httpx.Response(200, json={"organic": [
+                {"rank": 1, "title": "t", "description": "d", "link": "https://www.reddit.com/r/medicine/1"},
+                {"rank": 2, "title": "t", "description": "d", "link": page},
+            ]})
+        targets.append(body)
+        return httpx.Response(200, text="page body")
+
+    results = check_brightdata(_live_settings(tmp_path), transport=httpx.MockTransport(handler))
+    unlocker = results[-1]
+    assert unlocker["ok"] is True
+    assert page in unlocker["detail"]
+    assert len(targets) == 1 and "medpagetoday.com" in targets[0]
+
+
+def test_with_no_fetchable_result_the_fetch_falls_back_and_says_so(tmp_path):
+    def handler(request):
+        return httpx.Response(200, json={"organic": []})
+
+    results = check_brightdata(_live_settings(tmp_path), transport=httpx.MockTransport(handler))
+    assert "test page" in results[-1]["detail"]
+
+
+def _rows(search_ms, page_ms, *, ok=True):
+    return [CheckResult("SERP", "z", ok, "", ms) for ms in search_ms] + [CheckResult("Web Unlocker", "z", True, "", page_ms)]
+
+
+def test_the_fit_is_paced_by_the_slowest_calls():
+    fit = wide_sweep_fit(_rows([20_000, 60_000, 40_000], 10_000), limit_s=540)
+    assert fit == {"search_s": 60, "fetch_s": 60, "full_groups": 4, "limit_s": 540}
+
+
+def test_no_fit_is_claimed_when_a_search_failed():
+    assert wide_sweep_fit(_rows([20_000, 30_000], 10_000) + [CheckResult("SERP", "z", False, "429", 5)],
+                          limit_s=540) is None

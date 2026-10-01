@@ -46,7 +46,8 @@ from vsm.modes.mine import run_mine
 from vsm.modes.report import run_report
 from vsm.platform import assert_serveable, storage_is_durable
 from vsm.topics.model import BANDS
-from vsm.mining.healthcheck import check_brightdata
+from vsm.mining.healthcheck import check_brightdata, wide_sweep_fit
+from vsm.modes.mine import VERCEL_SWEEP_SECONDS
 from vsm.ui.overview import artifacts_to_warm, build_overview
 from vsm.ui.content import (
     DEFINITIONS,
@@ -1093,8 +1094,8 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
 
     @app.get("/healthz/brightdata", response_class=HTMLResponse)
     def brightdata_health(request: Request) -> HTMLResponse:
-        """Config status and — when live-capable — a button to run one real
-        probe per Bright Data product.
+        """Config status and — when live-capable — a button to rehearse a
+        sweep's Bright Data calls.
 
         The GET spends nothing: it only reports whether the instance is offline,
         whether a key is present, and which zones are configured. The actual
@@ -1108,12 +1109,12 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
             has_key=bool(s.brightdata_api_key),
             serp_zone=s.brightdata_serp_zone,
             unlocker_zone=s.brightdata_unlocker_zone,
-            results=None, active_nav="",
+            results=None, fit=None, active_nav="",
         )
 
     @app.post("/healthz/brightdata", response_class=HTMLResponse)
     def brightdata_health_run(request: Request) -> HTMLResponse:
-        """Run one SERP and one Unlocker probe. A few cents, a few seconds.
+        """Three sweep-shaped searches and one page fetch. About one cent.
 
         Refuses when offline — there is nothing to reach and no key to spend, so
         a probe would only produce a confusing failure. The result is rendered
@@ -1125,14 +1126,15 @@ def create_app(topic_store: Any | None = None, run_store: Any | None = None) -> 
                 request, "healthz.html", offline=True,
                 has_key=bool(s.brightdata_api_key),
                 serp_zone=s.brightdata_serp_zone, unlocker_zone=s.brightdata_unlocker_zone,
-                results=None, active_nav="",
+                results=None, fit=None, active_nav="",
             )
         results = check_brightdata(s)
         return render(
             request, "healthz.html", offline=False,
             has_key=bool(s.brightdata_api_key),
             serp_zone=s.brightdata_serp_zone, unlocker_zone=s.brightdata_unlocker_zone,
-            results=results, active_nav="",
+            results=results, fit=wide_sweep_fit(results, limit_s=VERCEL_SWEEP_SECONDS),
+            active_nav="",
         )
 
     @app.get("/reports/new", response_class=HTMLResponse)

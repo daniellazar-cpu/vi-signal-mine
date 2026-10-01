@@ -49,8 +49,10 @@ it for collection-only) and the Bright Data key, flips `VSM_OFFLINE` to 0, and
 redeploys. Keys are read with `read -s`: never echoed, never written to a file,
 never in your shell history. Then open
 [`/healthz/brightdata`](https://vi-signal-mine-pink.vercel.app/healthz/brightdata)
-and press **Run connection test** — one real call each to SERP and Web Unlocker, so
-a wrong key or zone costs a few cents instead of surfacing mid-sweep.
+and press **Run connection test**. It rehearses a sweep: three real site-scoped
+searches sent together, one page fetch from their results, each made once. About
+one cent. It reports each call's latency and how many search groups a Wide sweep
+covers in full inside its time limit at those speeds.
 
 **Do not put `VSM_OFFLINE` in `vercel.json`.** It was pinned there once, and
 `vercel.json`'s `env` overrides the dashboard variable — so a live launch would have
@@ -73,10 +75,11 @@ the write returned success and the container holding it was destroyed.
 
 ## What the deployment will and will not run
 
-- **Every sweep size runs**, since 1 October 2026. A sweep that dies at the function
-  timeout (800s, the Pro plan maximum with Fluid compute) leaves a half-written
-  snapshot that the next momentum run treats as a real baseline. A Wide sweep fetches
-  sequentially, so watch its wall-clock.
+- **Every sweep size runs**, since 1 October 2026. SERP answers in 20-70s per call,
+  so the sweep sends its gold queries 8 at a time and stops starting new paid work
+  540s in (`VERCEL_SWEEP_SECONDS` in `vsm/modes/mine.py`), inside the 800s function
+  limit. Past that, page fetches, recency probes and open-web queries are skipped,
+  every row already found is kept, and the run's notes and deferrals say so.
 - **INSIGHT is resumable.** It is the mode most likely to hit the ceiling on a large
   snapshot; each pass writes its artifact as it finishes and a re-request skips what
   is already done.

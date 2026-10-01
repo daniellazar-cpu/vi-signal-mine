@@ -120,7 +120,8 @@ preview deployments only, so a production URL is reachable by anyone holding it,
 and live keys behind an open URL can spend real money. Gate first, then add keys.
 
 **Every sweep size runs on the deployment** since 1 October 2026 (D14 lifted).
-A sweep that outlives the 800s function limit leaves a half-written snapshot.
+Searches go out 8 at a time, and the sweep stops starting paid work 540s in, so it
+finishes inside the 800s function limit with its skipped work recorded.
 
 **Two consequences of running offline**, both honest rather than defects: the
 clinician–patient gap reads `NE` on most themes because no stance classifier

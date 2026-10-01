@@ -36,9 +36,10 @@ so moving `VSM_LLM_MODEL` to either needs a client change.
 
 **B1. Done** — and this entry was stale from the day it was written: the
 pre-flight landed in the very next commit. `/healthz/brightdata`
-(the route in `vsm/ui/app.py`, the probes in `vsm/mining/healthcheck.py`) makes one un-retried real call
-each to SERP and Web Unlocker and reports pass/fail per product with the zone, the
-latency and Bright Data's verbatim error. Discover is **not** probed — its API is
+(the route in `vsm/ui/app.py`, the probes in `vsm/mining/healthcheck.py`) rehearses a sweep since 1 October 2026: three real site-scoped searches from the sweep's planner,
+sent together, then one page fetch from their results, each call made once. It reports pass/fail
+per call with the zone, the latency and Bright Data's verbatim error, and how many search groups a
+Wide sweep covers in full inside its time limit at those speeds. Discover is **not** probed — its API is
 trigger-then-poll, so the cheapest honest probe costs a job plus a poll; a green
 page does not vouch for a sweep's Discover leg. Still unrun against a live key,
 which is B2's problem, not this one's.
@@ -105,9 +106,10 @@ the deployment took 8.1s, INSIGHT 0.9s and REPORT 0.8s, all without an Anthropic
 key. Model calls will add to INSIGHT and REPORT once the key is set.
 
 **C2. Standard/deep on the deployment. Lifted 1 October 2026.** D14 is gone:
-every sweep size runs on Vercel. If a Wide sweep outlives 800s (1800s in Vercel's
-extended-duration beta for Python 3.14), it needs work off the request path: a
-queue/worker or a separate long-running host.
+every sweep size runs on Vercel, with parallel gold searches and a 540s limit on
+starting paid work. A Wide sweep with more search groups than fit that limit runs
+its searches first and page-fetches only until the limit; full fidelity for those
+needs work off the request path (a queue/worker or a long-running host).
 
 ---
 
