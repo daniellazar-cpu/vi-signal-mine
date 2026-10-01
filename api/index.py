@@ -7,14 +7,10 @@ never looks at it — so without a module here to invoke, the first deploy
 would return ``FUNCTION_INVOCATION_FAILED``. ``vercel.json`` rewrites every
 path to this one function, so this module is the whole surface (spec §11).
 
-**What this deployment can and cannot do.** Read the spec's §11 before
-assuming this is a general-purpose deployment of the tool. Only a ``probe``
-MINE, a (resumable) INSIGHT and a REPORT fit inside a serverless function's
-timeout — ``standard``/``deep`` sweeps do not, and ``vsm/platform.py``'s
-``assert_band_allowed`` refuses them in code rather than leaving it to
-whoever fills in the form. That guard, and ``assert_serveable`` (spec D15),
-both run inside ``vsm/ui/app.py`` and ``vsm/modes/mine.py`` respectively —
-nothing needs repeating here.
+**What this deployment can and cannot do.** Every sweep size runs here,
+against the 800s function limit ``vercel.json`` sets. INSIGHT is resumable in
+case it hits that limit. ``assert_serveable`` (spec D15) runs inside
+``vsm/ui/app.py`` — nothing needs repeating here.
 
 ``assert_serveable`` no longer "refuses every route on a production Vercel
 deployment", which is what this comment used to claim. The first version of the

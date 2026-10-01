@@ -1,6 +1,6 @@
-"""Where the app is running, and what that forbids (spec §11, D14, D15).
+"""Where the app is running, and what that forbids (spec §11, D15).
 
-Both guards key off Vercel's own environment variables rather than a setting
+The guards key off Vercel's own environment variables rather than a setting
 this app invents, because whether a process is actually running on Vercel is
 a question only the platform itself can answer honestly:
 
@@ -9,14 +9,10 @@ a question only the platform itself can answer honestly:
 - ``VERCEL_ENV`` distinguishes which: ``"production"``, ``"preview"``, or
   ``"development"``.
 
-Both guards are meant to run where nothing can route around them.
 ``assert_serveable`` is wired as ASGI middleware in ``vsm/ui/app.py`` rather
 than a per-route dependency, because a per-route guard is a guard with an
 exempt route by construction the moment someone adds a new one and forgets
-it. ``assert_band_allowed`` runs inside ``run_mine`` itself, before the
-estimate — not in the UI layer that calls it — because ``run_mine`` is the
-one chokepoint every caller (the web form today, a script tomorrow) already
-goes through.
+it.
 """
 
 from __future__ import annotations
@@ -34,7 +30,6 @@ __all__ = [
     "production_is_safe",
     "vercel_env",
     "assert_serveable",
-    "assert_band_allowed",
     "storage_is_durable",
     "StripFunctionPrefix",
     "RequireAccessKey",
@@ -132,26 +127,6 @@ def assert_serveable() -> None:
         "inert and unable to spend anything.",
         rule="D15",
     )
-
-
-def assert_band_allowed(band: str) -> None:
-    """Spec D14. Only the ``probe`` band may run on Vercel.
-
-    ``standard`` and ``deep`` add page fetches and a wider sweep that does
-    not reliably fit inside a serverless function's timeout. A sweep that
-    dies partway through is not merely a failed run: it leaves a
-    half-written snapshot on disk that a later momentum pass has no way to
-    tell apart from a genuine, complete baseline — worse than refusing to
-    start. Run a ``standard`` or ``deep`` sweep locally instead, where there
-    is no timeout to race.
-    """
-    if is_vercel() and band != "probe":
-        raise GuardViolation(
-            f"the {band!r} spend band does not fit inside a Vercel "
-            "function's timeout — only 'probe' runs here. Run this topic's "
-            f"{band!r} sweep locally instead, where there is no timeout to race.",
-            rule="D14",
-        )
 
 
 def storage_is_durable(env: Mapping[str, str] | None = None) -> bool:
