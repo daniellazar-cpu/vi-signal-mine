@@ -158,3 +158,118 @@ def test_a_search_the_limit_stops_is_noted_not_counted_and_does_not_end_the_swee
     assert targeting["gold_queries_run"] == len(sent) < targeting["gold_queries_planned"]
     assert any("was not sent" in n for n in outcome.notes)
     assert not any("sweep stopped early" in n for n in outcome.notes)
+
+
+# --------------------------------------------------------------------------- #
+# review findings, 1 Oct 2026                                                  #
+# --------------------------------------------------------------------------- #
+
+
+class _RecordingDiscover:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def discover(self, query, **_):
+        self.calls.append(query)
+        return []
+
+
+def test_discover_is_skipped_past_the_time_limit():
+    discover = _RecordingDiscover()
+    config = MiningConfig(queries_per_cluster=3, discover_results_per_cluster=5, fetch_pages=False,
+                          probe_outside_window=False, time_limit_s=0.0)
+    mining = _mining(config, [])
+    mining.discover = discover
+    outcome = mining.run(campaign_id="camp", clusters=CLUSTERS)
+    assert discover.calls == []
+    assert any("intent discovery" in n for n in outcome.notes)
+
+
+def test_no_retry_starts_after_the_clients_stop_time():
+    calls: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return httpx.Response(502, text="bad gateway")
+
+    client = _bd(handler)
+    client._sleep = lambda s: None
+    client.stop_at = time.monotonic() - 1
+    try:
+        client.request("POST", "/request", json_body={"zone": "z", "url": "u", "format": "raw"})
+    except Exception:
+        pass
+    assert calls == [1]
+
+
+def test_a_wait_is_cut_at_the_clients_stop_time():
+    waits: list[float] = []
+    client = _bd(lambda request: httpx.Response(502, text="bad gateway"))
+    client._sleep = waits.append
+    client.stop_at = time.monotonic() + 0.5
+    client._backoff(0, at_least=300.0)
+    assert waits and waits[0] <= 0.5
+
+
+def test_an_unexpected_error_in_a_search_is_recorded_not_raised():
+    settings = Settings.from_env({"VSM_OFFLINE": "1"})
+    real = SerpClient(_bd(_slow_serp), zone=settings.brightdata_serp_zone)
+
+    class _Flaky:
+        client = real.client
+
+        def search_url(self, query, **kw):
+            return real.search_url(query, **kw)
+
+        def search(self, query, **kw):
+            if query.startswith("naloxegol"):
+                raise ValueError("malformed rank")
+            return real.search(query, **kw)
+
+    config = MiningConfig(queries_per_cluster=3, discover_results_per_cluster=0, fetch_pages=False,
+                          probe_outside_window=False)
+    outcome = LiveSignalMining(serp=_Flaky(), config=config).run(campaign_id="camp", clusters=CLUSTERS)
+    failed = [c for c in outcome.calls if c["kind"] == "serp" and c["status"] == "error"]
+    assert failed and all("ValueError" in (c.get("error") or "") for c in failed)
+    assert outcome.rows
+
+
+def test_the_time_limit_note_names_only_what_was_skipped():
+    """The ninth search lands after the limit, so only its page fetch is skipped."""
+    config = MiningConfig(queries_per_cluster=3, discover_results_per_cluster=0, page_fetches_per_cluster=3,
+                          probe_outside_window=False, time_limit_s=SERP_LATENCY_S * 1.5)
+    outcome = _mining(config, []).run(campaign_id="camp", clusters=CLUSTERS)
+    note = next(n for n in outcome.notes if n.startswith("time limit of"))
+    assert "page fetches" in note
+    assert "open-web" not in note and "probes" not in note
+
+
+class _RefusingLedger:
+    """Allows the up-front check and the first three searches, then refuses."""
+
+    def __init__(self) -> None:
+        self.checks = 0
+
+    def fetches(self, campaign_id):
+        return 0
+
+    def authorize_fetch(self, *, campaign_id, units, account, dry_run):
+        self.checks += 1
+        if self.checks > 4:
+            raise RuntimeError("monthly quota reached")
+
+    def record_fetch(self, **_):
+        pass
+
+
+def test_searches_sent_but_not_read_are_still_recorded():
+    config = MiningConfig(queries_per_cluster=3, discover_results_per_cluster=0, fetch_pages=False,
+                          probe_outside_window=False)
+    mining = _mining(config, [])
+    mining.quota = _RefusingLedger()
+    outcome = mining.run(campaign_id="camp", clusters=CLUSTERS)
+    serp_calls = [c for c in outcome.calls if c["kind"] == "serp"]
+    in_flight = next((int(n.split()[0]) for n in outcome.notes if "still in flight" in n), 0)
+    assert any("sweep stopped early" in n for n in outcome.notes)
+    assert len(serp_calls) + in_flight == 9
+    assert sum("not read" in (c.get("detail") or "") for c in serp_calls) + in_flight == 6

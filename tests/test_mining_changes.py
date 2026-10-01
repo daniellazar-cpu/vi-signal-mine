@@ -683,3 +683,26 @@ def test_the_sponsors_own_sites_are_denied_but_a_curated_venue_never_is(host, ve
     slugs = brand_domain_slugs({"briumvi": "ours", "ublituximab": "ours", "ocrevus": "competitor", "healio": "ours"})
     got = deny_reason(host, brand_slugs=slugs)
     assert (got[0] if got else None) == verdict
+
+
+def test_a_hit_admitted_by_a_topic_name_records_that_name_as_matched():
+    serp = _serp(lambda request: httpx.Response(200, json={"organic": [
+        {"rank": 1, "title": "FDA clears Isembyld for SMA", "link": "https://www.healio.com/news/1",
+         "description": "first muscle-targeted therapy"}]}))
+    mining = LiveSignalMining(
+        serp=serp, config=MiningConfig(fetch_pages=False, discover_results_per_cluster=0),
+        brand_terms={"isembyld": "ours", "": "ours"},
+    )
+    cluster = {"cluster_id": "approval", "label": "approval", "terms": ["Isembyld approval"]}
+    outcome = mining.run(campaign_id="camp1", clusters=[cluster], queries_per_cluster=1)
+    assert [r["matched_terms"] for r in outcome.rows] == [["isembyld"]]
+
+
+def test_an_empty_topic_name_does_not_switch_the_filter_off():
+    serp = _serp(lambda request: httpx.Response(200, json={"organic": [OFF_TOPIC]}))
+    mining = LiveSignalMining(
+        serp=serp, config=MiningConfig(fetch_pages=False, discover_results_per_cluster=0),
+        brand_terms={"": "ours", "isembyld": "ours"},
+    )
+    cluster = {"cluster_id": "approval", "label": "approval", "terms": ["Isembyld approval"]}
+    assert mining.run(campaign_id="camp1", clusters=[cluster], queries_per_cluster=1).rows == []

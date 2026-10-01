@@ -124,6 +124,9 @@ class BrightDataClient:
         self._pace: dict[str | None, float] = {}
         self._next_send: dict[str | None, float] = {}
         self._pace_lock = threading.Lock()
+        self._client_lock = threading.Lock()
+        #: ``time.monotonic()`` after which no retry starts and no wait runs past
+        self.stop_at: float | None = None
 
     # ------------------------------------------------------------------ wiring
     @property
@@ -139,6 +142,10 @@ class BrightDataClient:
         return key
 
     def _ensure_client(self) -> Any:
+        with self._client_lock:
+            return self._build_client()
+
+    def _build_client(self) -> Any:
         if self._client is not None:
             return self._client
         import httpx  # local import keeps this module importable with no network
@@ -193,6 +200,8 @@ class BrightDataClient:
         zone = (json_body or {}).get("zone")
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
+            if attempt and self._time_left() == 0.0:
+                break
             self._wait_turn(zone)
             try:
                 response = client.request(
@@ -258,13 +267,24 @@ class BrightDataClient:
                 return
             now = time.monotonic()
             send_at = max(now, self._next_send.get(zone, now))
+            left = self._time_left()
+            if left is not None and send_at - now > left:
+                raise BrightDataRateLimited(
+                    f"zone {zone} is throttled and has no free slot before the sweep's time limit"
+                )
             self._next_send[zone] = send_at + interval
         if send_at > now:
             self._sleep(send_at - now)
 
+    def _time_left(self) -> float | None:
+        """Seconds until :attr:`stop_at`, never negative; ``None`` with no stop time."""
+        return None if self.stop_at is None else max(self.stop_at - time.monotonic(), 0.0)
+
     def _backoff(self, attempt: int, at_least: float = 0.0) -> None:
         if attempt < self.max_retries:
-            self._sleep(max(at_least, self.backoff_seconds * (attempt + 1)))
+            wait = max(at_least, self.backoff_seconds * (attempt + 1))
+            left = self._time_left()
+            self._sleep(wait if left is None else min(wait, left))
 
     @staticmethod
     def json_of(response: Any) -> dict[str, Any]:

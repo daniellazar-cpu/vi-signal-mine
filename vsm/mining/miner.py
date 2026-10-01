@@ -216,7 +216,7 @@ class LiveSignalMining:
         self.brand_slugs = brand_domain_slugs(self.brand_terms)
         self._serp_cache: dict[tuple[str, str], Future] = {}
         self._deadline: float | None = None
-        self._skipped_for_time = False
+        self._skipped_for_time: set[str] = set()
 
     # ------------------------------------------------------------------- entry
     def run(
@@ -250,7 +250,10 @@ class LiveSignalMining:
         metadata_only: set[str] = set()
         ran = {"gold": 0, "open": 0}
         self._deadline = None if cfg.time_limit_s is None else time.monotonic() + cfg.time_limit_s
-        self._skipped_for_time = False
+        self._skipped_for_time = set()
+        for product in (self.serp, self.unlocker, self.discover):
+            if getattr(product, "client", None) is not None:
+                product.client.stop_at = self._deadline
         plans = []
         for cluster in clusters:
             areas = areas_for_cluster(cluster)
@@ -263,13 +266,13 @@ class LiveSignalMining:
                 open_queries_max=cfg.open_queries_max,
             )))
         pool = ThreadPoolExecutor(max_workers=max(1, cfg.parallel_searches))
-        self._submit_gold(
-            [(p.text, self._tbs_for(p, window)) for _, _, plan in plans for p in plan if p.kind == "gold"],
-            budget=budget,
-            pool=pool,
-        )
-
         try:
+            self._submit_gold(
+                [(p.text, self._tbs_for(p, window)) for _, _, plan in plans for p in plan if p.kind == "gold"],
+                budget=budget,
+                pool=pool,
+                outcome=outcome,
+            )
             for cluster, areas, plan in plans:
                 outcome.plan.extend(p.as_dict() for p in plan)
                 gold = [p for p in plan if p.kind == "gold"]
@@ -344,7 +347,7 @@ class LiveSignalMining:
                         f"{'y' if len(tail) == 1 else 'ies'} in the plan were not run "
                         f"(${SERP_COST_PER_REQUEST_USD * len(tail):.4f} unspent)"
                     )
-                elif self._past_deadline():
+                elif self._past_deadline("open-web queries"):
                     outcome.notes.append(
                         f"time limit reached — the {len(tail)} open-web quer"
                         f"{'y' if len(tail) == 1 else 'ies'} for cluster {cluster.get('cluster_id')} "
@@ -398,18 +401,23 @@ class LiveSignalMining:
             )
             outcome.notes.append(f"sweep stopped early: {stop.reason}")
         finally:
+            self._record_unread(budget, outcome)
             pool.shutdown(wait=False, cancel_futures=True)
+            for product in (self.serp, self.unlocker, self.discover):
+                if getattr(product, "client", None) is not None:
+                    product.client.stop_at = None
         self._serp_cache.clear()
         if self._skipped_for_time:
+            skipped = ", ".join(sorted(self._skipped_for_time))
             outcome.notes.append(
-                f"time limit of {cfg.time_limit_s:.0f}s reached — page fetches, recency probes and "
-                "open-web queries after it were skipped; every row found before it is kept"
+                f"time limit of {cfg.time_limit_s:.0f}s reached — {skipped} after it were skipped; "
+                "every row found before it is kept"
             )
             outcome.deferrals.append(
                 {
-                    "needs": "page fetches, recency probes and open-web queries after the time limit",
+                    "needs": f"{skipped} after the time limit",
                     "reason": f"the sweep's {cfg.time_limit_s:.0f}s time limit on this host",
-                    "substitute": "search-result metadata for every row already found",
+                    "substitute": "every row already found, with search-result metadata where its page was not fetched",
                 }
             )
 
@@ -494,7 +502,7 @@ class LiveSignalMining:
         # brand, molecule and competitor names are what an on-topic hit names
         terms = [str(t).lower() for t in (cluster.get("terms") or []) if t]
         if terms:
-            terms += [str(a).lower() for a in self.brand_terms]
+            terms += [str(a).lower() for a in self.brand_terms if a]
         off_topic = 0
         for hit in hits:
             domain = hit.domain
@@ -534,7 +542,7 @@ class LiveSignalMining:
                 and gold_page_fetch_allowed(hit.url)
                 and page_fetch_allowed(hit.url, catalogue=self.catalogue)
                 and not hit.content
-                and not self._past_deadline()
+                and not self._past_deadline("page fetches")
             ):
                 page, robots_summary = self._fetch_page(hit, budget=budget, outcome=outcome)
                 if page is not None:
@@ -576,15 +584,17 @@ class LiveSignalMining:
     def _tbs_for(self, planned: PlannedQuery, window: RecencyWindow) -> str:
         return window.tbs if planned.date_restricted and self.config.apply_recency else ""
 
-    def _past_deadline(self) -> bool:
-        """Is the time limit up? Called only where work would otherwise start, so a
-        True here is work skipped, and the run's notes say so."""
+    def _past_deadline(self, skipping: str) -> bool:
+        """Is the time limit up? Called only where ``skipping`` would otherwise start,
+        so a True here is that work skipped, and the run's notes name it."""
         if self._deadline is None or time.monotonic() < self._deadline:
             return False
-        self._skipped_for_time = True
+        self._skipped_for_time.add(skipping)
         return True
 
-    def _submit_gold(self, queries: list[tuple[str, str]], *, budget: Budget, pool: ThreadPoolExecutor) -> None:
+    def _submit_gold(
+        self, queries: list[tuple[str, str]], *, budget: Budget, pool: ThreadPoolExecutor, outcome: MiningOutcome
+    ) -> None:
         """Queue every gold SERP query on ``pool``; :meth:`_serp_hits` waits on each in order.
 
         SERP answers in 20-70s per call and a throttled zone is paced to a few a minute,
@@ -599,19 +609,29 @@ class LiveSignalMining:
         limit = self.config.serp_results_per_query
         try:
             budget.check(limit * len(unique), what=f"{len(unique)} parallel gold SERP queries")
-        except BudgetStop:
+        except BudgetStop as stop:
+            outcome.notes.append(f"gold SERP queries sent one at a time, not in parallel: {stop.reason}")
             return
 
         def search(key: tuple[str, str]) -> tuple[datetime, Any] | None:
-            if self._past_deadline():
+            if self._past_deadline("searches"):
                 return None
             at = self.clock()
             try:
-                return at, self.serp.search(key[0], limit=limit, tbs=key[1])
+                return at, self._search(key[0], limit=limit, tbs=key[1])
             except BrightDataError as exc:
                 return at, exc
 
         self._serp_cache.update((key, pool.submit(search, key)) for key in unique)
+
+    def _search(self, query: str, *, limit: int, tbs: str) -> list[SerpResult]:
+        """One SERP call; a malformed answer is a failed query, never a lost sweep."""
+        try:
+            return self.serp.search(query, limit=limit, tbs=tbs)
+        except BrightDataError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — recorded by _serp_hits like any failed call
+            raise BrightDataError(f"{type(exc).__name__}: {exc}") from exc
 
     def _not_sent_for_time(self, planned: PlannedQuery, window: RecencyWindow, outcome: MiningOutcome) -> bool:
         """True, with a note, for a query the time limit stopped before it was sent."""
@@ -619,11 +639,35 @@ class LiveSignalMining:
         future = self._serp_cache.get(key)
         if future is not None and future.result() is not None:
             return False
-        if not self._past_deadline():
+        if not self._past_deadline("searches"):
             return False
         self._serp_cache.pop(key, None)
         outcome.notes.append(f"time limit reached — SERP query {planned.text!r} was not sent")
         return True
+
+    def _record_unread(self, budget: Budget, outcome: MiningOutcome) -> None:
+        """Book searches the pool sent that the sweep stopped before reading: Bright
+        Data bills them whether or not a row came of them."""
+        in_flight = 0
+        for (query, tbs), future in list(self._serp_cache.items()):
+            if not future.done():
+                in_flight += 1
+                continue
+            if future.cancelled() or future.result() is None:
+                continue
+            at, result = future.result()
+            if isinstance(result, Exception):
+                continue
+            budget.record(FetchCall(
+                kind="serp", target=query, url=self.serp.search_url(query, tbs=tbs), at=at, status="ok",
+                results=len(result), cost_usd=SERP_COST_PER_REQUEST_USD, billable=True,
+                detail="sent before the sweep stopped; results not read",
+            ))
+        if in_flight:
+            outcome.notes.append(
+                f"{in_flight} SERP quer{'y was' if in_flight == 1 else 'ies were'} still in flight when the "
+                "sweep stopped; Bright Data may bill them and they are not in this ledger"
+            )
 
     def _planned_hits(
         self,
@@ -661,7 +705,7 @@ class LiveSignalMining:
             and not hits
             and cfg.probe_outside_window
             and state["probes"] < cfg.probes_per_cluster
-            and not self._past_deadline()
+            and not self._past_deadline("recency probes")
         ):
             state["probes"] += 1
             outside = self._serp_hits(planned.text, budget=budget, outcome=outcome, tbs="", probe=True)
@@ -701,7 +745,7 @@ class LiveSignalMining:
         budget.check(limit, what=f"SERP query {query!r}")
         future = self._serp_cache.pop((query, tbs), None)
         prefetched = future.result() if future is not None else None
-        if prefetched is None and self._past_deadline():
+        if prefetched is None and self._past_deadline("searches"):
             raise BudgetStop(f"time limit of {self.config.time_limit_s:.0f}s reached before SERP query {query!r}")
         at, result = prefetched or (self.clock(), None)
         url = self.serp.search_url(query, tbs=tbs)
@@ -709,7 +753,7 @@ class LiveSignalMining:
             if isinstance(result, BrightDataError):
                 raise result
             results: list[SerpResult] = (
-                result if result is not None else self.serp.search(query, limit=limit, tbs=tbs)
+                result if result is not None else self._search(query, limit=limit, tbs=tbs)
             )
         except BrightDataError as exc:
             budget.record(
@@ -757,6 +801,9 @@ class LiveSignalMining:
         outcome: MiningOutcome,
     ) -> list[Hit]:
         if self.discover is None or not plan:
+            return []
+        if self._past_deadline("intent discovery"):
+            outcome.notes.append(f"time limit reached — Discover for cluster {cluster.get('cluster_id')} was not run")
             return []
         cfg = self.config
         query = str(cluster.get("label") or plan[0].base)
