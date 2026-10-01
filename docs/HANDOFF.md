@@ -119,10 +119,8 @@ the production guard refuses to serve — deliberately. On this plan Vercel gate
 preview deployments only, so a production URL is reachable by anyone holding it,
 and live keys behind an open URL can spend real money. Gate first, then add keys.
 
-**Only the `probe` band runs on the deployment** (D14). A `standard` or `deep`
-sweep does not fit inside a Vercel function's timeout, and the app says so on a
-clear error page rather than timing out halfway. Run those locally, where there
-is no timeout to race. This is by design, not a limitation to fix.
+**Every sweep size runs on the deployment** since 1 October 2026 (D14 lifted).
+A sweep that outlives the 800s function limit leaves a half-written snapshot.
 
 **Two consequences of running offline**, both honest rather than defects: the
 clinician–patient gap reads `NE` on most themes because no stance classifier

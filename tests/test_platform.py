@@ -5,7 +5,6 @@ import pytest
 from vsm.errors import GuardViolation
 from vsm.platform import (
     StripFunctionPrefix,
-    assert_band_allowed,
     assert_serveable,
     is_vercel,
     storage_is_durable,
@@ -106,35 +105,6 @@ def test_local_serves(monkeypatch):
     monkeypatch.delenv("VERCEL", raising=False)
     assert assert_serveable() is None
     assert is_vercel() is False
-
-
-@pytest.mark.parametrize("band", ["standard", "deep"])
-def test_only_probe_runs_on_vercel(monkeypatch, band):
-    """Spec D14. A standard or deep sweep does not fit in a function timeout,
-    and a sweep that dies halfway leaves a half-written snapshot that later
-    momentum silently treats as real."""
-    monkeypatch.setenv("VERCEL", "1")
-    with pytest.raises(GuardViolation, match="probe"):
-        assert_band_allowed(band)
-
-
-def test_probe_runs_on_vercel(monkeypatch):
-    monkeypatch.setenv("VERCEL", "1")
-    assert assert_band_allowed("probe") is None
-
-
-def test_every_band_runs_locally(monkeypatch):
-    monkeypatch.delenv("VERCEL", raising=False)
-    for band in ("probe", "standard", "deep"):
-        assert assert_band_allowed(band) is None
-
-
-def test_the_refusal_names_where_to_run_it_instead(monkeypatch):
-    """A guard that only says no teaches nothing."""
-    monkeypatch.setenv("VERCEL", "1")
-    with pytest.raises(GuardViolation) as exc:
-        assert_band_allowed("deep")
-    assert "local" in str(exc.value).lower()
 
 
 # --- storage_is_durable: the read-only-mode guard ------------------------

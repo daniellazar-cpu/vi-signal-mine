@@ -153,10 +153,7 @@ def test_is_a_noop_when_a_blob_token_is_configured(tmp_path):
 
 
 def test_the_seeded_topics_own_spend_band_is_probe(tmp_path):
-    """Only the probe band is allowed to run on Vercel
-    (vsm.platform.assert_band_allowed) — a seeded topic in a wider band
-    would refuse to run its own next sweep in production, which is a
-    strange first thing for a visitor to hit."""
+    """The seeded topic's next sweep is the cheapest one."""
     ts, rs = _stores(tmp_path)
     seed_demo_topic(ts, rs, env={})
     assert ts.list()[0].spend_band == "probe"

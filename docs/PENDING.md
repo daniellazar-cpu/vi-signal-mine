@@ -96,22 +96,18 @@ not invoiced.
 
 ## C. The serverless execution limit (architectural)
 
-**C1. Function timeout → probe band only on Vercel.** The 60s cap came from the
+**C1. Function timeout.** The 60s cap came from the
 Hobby account the project started on. VI Labs is on Pro with Fluid compute, where
-the maximum is 800s, so `vercel.json` now sets 800. `assert_band_allowed` still
-refuses `standard`/`deep` on Vercel. Probe (2 queries × 10 results, 5 discover, 0
+the maximum is 800s, so `vercel.json` now sets 800. Since 1 October 2026 every
+sweep size runs on Vercel. Probe (2 queries × 10 results, 5 discover, 0
 page fetches per cluster) fits with a wide margin: the first live probe sweep on
 the deployment took 8.1s, INSIGHT 0.9s and REPORT 0.8s, all without an Anthropic
 key. Model calls will add to INSIGHT and REPORT once the key is set.
 
-**C2. Standard/deep on the deployment.** With 800s available (1800s in Vercel's
-extended-duration beta for Python 3.14), a `standard` sweep may fit on the request
-path with no queue. Measure a live `standard` run locally first; if it finishes
-well inside 800s, relaxing D14 is a one-line change. Otherwise it needs work off
-the request path: a queue/worker or a separate long-running host.
-Today the bigger bands are local-only (which is the documented, honest state, not
-a bug). Decide whether hosted probe-only is acceptable for launch or whether
-async is in scope.
+**C2. Standard/deep on the deployment. Lifted 1 October 2026.** D14 is gone:
+every sweep size runs on Vercel. If a Wide sweep outlives 800s (1800s in Vercel's
+extended-duration beta for Python 3.14), it needs work off the request path: a
+queue/worker or a separate long-running host.
 
 ---
 

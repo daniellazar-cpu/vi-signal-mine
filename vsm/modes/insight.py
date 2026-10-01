@@ -5,9 +5,7 @@ leaves the earlier work on disk and re-running is cheap.
 
 **Resumable by default (spec D17).** INSIGHT is the mode most likely to hit a
 Vercel function's timeout — several model passes over every signal in a
-large snapshot, on a platform that (per D14) restricts a *live sweep* to the
-cheapest band but places no such limit on how big a snapshot INSIGHT is
-asked to analyse. ``resume=True`` means a re-request after a timeout costs
+large snapshot. ``resume=True`` means a re-request after a timeout costs
 exactly the passes that had not finished, not the ones that had: before each
 pass runs, this checks whether its artifact is already on this run, and if
 so reads it back rather than recomputing (and re-billing) it. A resumed run

@@ -182,10 +182,6 @@ def seed_demo_topic(
         created_at=_stable_ts(0),
         name=_TOPIC_NAME,
         therapeutic_area=_THERAPEUTIC_AREA,
-        # "probe" is the only band Vercel's own guard (vsm.platform.assert_band_allowed)
-        # lets a MINE run use in production — seeding a topic in a band that
-        # would refuse to run its own next sweep would be a strange first thing
-        # for a visitor to hit.
         spend_band="probe",
         brand=_BRAND,
         molecule=_MOLECULE,
