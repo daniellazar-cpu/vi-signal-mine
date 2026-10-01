@@ -138,12 +138,16 @@ def check_brightdata(
             results = list(pool.map(search, queries))
         target = next((u for u in links if _fetchable(u)), None)
 
+        source = target or "Bright Data's test page (no search result was one a sweep would fetch)"
+
         def unlock() -> str:
-            resp = client.request(
-                "POST", "/request",
-                json_body={"zone": s.brightdata_unlocker_zone, "url": target or UNLOCKER_TEST_URL, "format": "raw"},
-            )
-            source = target or "Bright Data's test page (no search result was one a sweep would fetch)"
+            try:
+                resp = client.request(
+                    "POST", "/request",
+                    json_body={"zone": s.brightdata_unlocker_zone, "url": target or UNLOCKER_TEST_URL, "format": "raw"},
+                )
+            except BrightDataError as exc:
+                raise BrightDataError(f"{exc}, fetching {source}", status=getattr(exc, "status", None)) from None
             return f"HTTP {resp.status_code}, {len((resp.text or '').strip()):,} characters from {source}"
 
         results.append(CheckResult("Web Unlocker", s.brightdata_unlocker_zone, *_timed(unlock)))
@@ -156,22 +160,27 @@ def wide_sweep_fit(results: list[CheckResult], *, limit_s: float) -> dict[str, i
     """How much of a Wide sweep the measured speeds fit inside ``limit_s``.
 
     Per search group a Wide sweep sends its searches in parallel batches, then makes
-    its page fetches one at a time; the slowest measured call of each kind sets the
-    pace. ``None`` when a search or the page fetch failed, since there is no speed to
-    project from.
+    its page fetches one at a time. The slowest call of each kind sets the pace,
+    failed or not: a failed call holds its slot for as long as it took, and the sweep
+    retries it. ``None`` only when a call never got far enough to be timed.
     """
     from vsm.topics.model import BANDS
 
-    searches = [r["latency_ms"] for r in results if r["product"] == "SERP" and r["ok"]]
-    pages = [r["latency_ms"] for r in results if r["product"] == "Web Unlocker" and r["ok"]]
-    if not searches or not pages or len(searches) < sum(r["product"] == "SERP" for r in results):
+    searches = [r for r in results if r["product"] == "SERP"]
+    pages = [r for r in results if r["product"] == "Web Unlocker"]
+    timed = [r["latency_ms"] for r in searches + pages]
+    if not searches or not pages or any(ms is None for ms in timed):
         return None
     wide = BANDS["deep"]
-    search_s = max(searches) / 1000 * math.ceil(wide.queries_per_cluster / MiningConfig().parallel_searches)
-    fetch_s = max(pages) / 1000 * wide.page_fetches_per_cluster
+    search_s = max(r["latency_ms"] for r in searches) / 1000 * math.ceil(
+        wide.queries_per_cluster / MiningConfig().parallel_searches
+    )
+    fetch_s = max(r["latency_ms"] for r in pages) / 1000 * wide.page_fetches_per_cluster
     return {
         "search_s": math.ceil(search_s),
         "fetch_s": math.ceil(fetch_s),
         "full_groups": int(limit_s // (search_s + fetch_s)),
         "limit_s": int(limit_s),
+        "failed_searches": sum(not r["ok"] for r in searches),
+        "searches": len(searches),
     }
