@@ -215,9 +215,31 @@ def _rows(search_ms, page_ms, *, ok=True):
 
 def test_the_fit_is_paced_by_the_slowest_calls():
     fit = wide_sweep_fit(_rows([20_000, 60_000, 40_000], 10_000), limit_s=540)
-    assert fit == {"search_s": 60, "fetch_s": 60, "full_groups": 4, "limit_s": 540}
+    assert fit == {"search_s": 60, "fetch_s": 60, "full_groups": 4, "limit_s": 540,
+                   "failed_searches": 0, "searches": 3}
 
 
-def test_no_fit_is_claimed_when_a_search_failed():
-    assert wide_sweep_fit(_rows([20_000, 30_000], 10_000) + [CheckResult("SERP", "z", False, "429", 5)],
-                          limit_s=540) is None
+def test_a_failed_search_still_paces_the_fit_and_is_counted():
+    rows = _rows([20_000, 30_000], 10_000) + [CheckResult("SERP", "z", False, "empty body", 52_000)]
+    fit = wide_sweep_fit(rows, limit_s=540)
+    assert fit["search_s"] == 52
+    assert (fit["failed_searches"], fit["searches"]) == (1, 3)
+
+
+def test_no_fit_without_timings():
+    assert wide_sweep_fit([CheckResult("SERP", "z", False, "not set", None),
+                           CheckResult("Web Unlocker", "z", False, "not set", None)], limit_s=540) is None
+
+
+def test_a_failed_page_fetch_names_the_page(tmp_path):
+    page = "https://www.medpagetoday.com/endocrinology/diabetes/1"
+
+    def handler(request):
+        if "google.com/search" in request.read().decode():
+            return httpx.Response(200, json={"organic": [
+                {"rank": 1, "title": "t", "description": "d", "link": page}]})
+        return httpx.Response(200, text="")
+
+    unlocker = check_brightdata(_live_settings(tmp_path), transport=httpx.MockTransport(handler))[-1]
+    assert unlocker["ok"] is False
+    assert page in unlocker["detail"]
